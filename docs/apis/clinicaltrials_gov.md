@@ -1,0 +1,143 @@
+# ClinicalTrials.gov API
+
+## Overview
+
+The [ClinicalTrials.gov](https://clinicaltrials.gov/) API provides programmatic
+access to clinical trial information. This document outlines the API
+implementation details for searching and retrieving clinical trial data.
+
+> **CLI Documentation**: For information on using these APIs through the BioMCP
+> command line interface, see the [Trials CLI Documentation](../cli/trials.md).
+
+## API Endpoints
+
+### Search API
+
+**Endpoint:** `https://clinicaltrials.gov/api/v2/studies`
+
+This endpoint allows searching for clinical trials using various parameters.
+
+#### Key Parameters
+
+| Parameter              | Description                         | Example Value                                   |
+| ---------------------- | ----------------------------------- | ----------------------------------------------- |
+| `query.cond`           | "Conditions or disease" query       | `lung cancer`                                   |
+| `query.term`           | "Other terms" query                 | `AREA[LastUpdatePostDate]RANGE[2023-01-15,MAX]` |
+| `query.intr`           | "Intervention/treatment" query      | `Vemurafenib`                                   |
+| `query.locn`           | "Location terms" query              | `New York`                                      |
+| `query.titles`         | "Title/acronym" query               | `BRAF Melanoma`                                 |
+| `query.outc`           | "Outcome measure" query             | `overall survival`                              |
+| `query.spons`          | "Sponsor/collaborator" query        | `National Cancer Institute`                     |
+| `query.lead`           | Searches in "LeadSponsorName" field | `MD Anderson`                                   |
+| `query.id`             | "Study IDs" query                   | `NCT04267848`                                   |
+| `filter.overallStatus` | Comma-separated list of statuses    | `NOT_YET_RECRUITING,RECRUITING`                 |
+| `filter.geo`           | Geo-location filter                 | `distance(39.0035707,-77.1013313,50mi)`         |
+| `filter.ids`           | Filter by NCT IDs                   | `NCT04852770,NCT01728545`                       |
+| `filter.advanced`      | Advanced filter query               | `AREA[StartDate]2022`                           |
+| `sort`                 | Sort order                          | `LastUpdatePostDate:desc`                       |
+| `fields`               | Fields to return                    | `NCTId,BriefTitle,OverallStatus,HasResults`     |
+| `pageSize`             | Maximum number of studies to return | `100`                                           |
+| `pageToken`            | Token for pagination                | Token string from previous response             |
+| `countTotal`           | Count total number of studies       | `true` or `false`                               |
+
+#### Example Request
+
+```bash
+curl -X GET "https://clinicaltrials.gov/api/v2/studies?query.cond=Melanoma&query.intr=BRAF&pageSize=10"
+```
+
+### Study Details API
+
+**Endpoint:** `https://clinicaltrials.gov/api/v2/studies/{NCT_ID}`
+
+This endpoint retrieves detailed information about a specific clinical trial.
+
+#### Example Request
+
+```bash
+curl -X GET "https://clinicaltrials.gov/api/v2/studies/NCT04267848"
+```
+
+#### Response Modules
+
+The API response contains various modules of information:
+
+- **protocolSection**: Basic study information, eligibility criteria, and
+  design
+- **resultsSection**: Study outcomes and results (when available)
+- **documentSection**: Related documents
+- **derivedSection**: Derived data elements
+- **annotationsSection**: Additional annotations
+
+## Implementation Details
+
+### Query Building
+
+When constructing API queries, parameters must be properly formatted according
+to the API documentation.
+
+Example query creation:
+
+```python
+def build_query_params(conditions=None, interventions=None, terms=None):
+    params = {}
+    if conditions:
+        params["query.cond"] = " ".join(conditions)
+    if interventions:
+        params["query.intr"] = " ".join(interventions)
+    if terms:
+        params["query.term"] = " ".join(terms)
+    return params
+```
+
+### Response Parsing
+
+The API returns data in JSON format (or CSV if specified). Key sections in the
+response include:
+
+- `protocolSection`: Contains study protocol details
+  - `identificationModule`: Basic identifiers including NCT ID and title
+  - `statusModule`: Current recruitment status and study dates
+  - `sponsorCollaboratorsModule`: Information about sponsors and
+    collaborators
+  - `designModule`: Study design information including interventions
+  - `eligibilityModule`: Inclusion/exclusion criteria and eligible population
+  - `contactsLocationsModule`: Study sites and contact information
+  - `referencesModule`: Related publications
+
+### Error Handling
+
+Comprehensive error handling is implemented for API responses:
+
+```python
+def handle_api_response(response):
+    if response.status_code == 200:
+        return response.json()
+    elif response.status_code == 404:
+        raise ValueError("Trial not found")
+    elif response.status_code == 429:
+        raise RateLimitExceeded("Rate limit exceeded, please try again later")
+    else:
+        raise APIError(f"API error: {response.status_code}")
+```
+
+## Authentication
+
+The ClinicalTrials.gov API is public and does not require authentication for
+basic usage. However, there are rate limits in place.
+
+## Rate Limits and Best Practices
+
+- **Rate Limit**: Approximately 50 requests per minute per IP address
+- **Caching**: Implement caching to minimize repeated requests
+- **Pagination**: For large result sets, use the pagination functionality with
+  pageToken
+- **Focused Queries**: Use specific search terms rather than broad queries to
+  get more relevant results
+- **Field Selection**: Use the fields parameter to request only the data you
+  need
+
+## More Information
+
+For complete API documentation, visit
+the [ClinicalTrials.gov API Documentation](https://clinicaltrials.gov/data-api/about-api)
