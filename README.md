@@ -24,13 +24,19 @@ To install the BioMCP package to use it as a Python package or Command Line
 Interface (CLI), run the following command:
 
 ```bash
-pip install biomcp
+pip install biomcp-python
 ```
 
 Or preferably:
 
 ```bash
-uv pip install biomcp
+uv pip install biomcp-python
+```
+
+Or just run it:
+
+```bash
+uvx --from biomcp-python biomcp trial search --condition "lung cancer" --intervention "pembro"
 ```
 
 To install it as a MCP Server to Claude Desktop or similar "MCP Clients", try
@@ -42,7 +48,7 @@ something like:
   "mcpServers": {
     "biomcp": {
       "command": "uv",
-      "args": ["run", "biomcp", "run"]
+      "args": ["run", "--from" "biomcp-python", "biomcp", "run"]
     }
   }
 }

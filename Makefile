@@ -40,7 +40,7 @@ clean-build: ## Clean build artifacts
 .PHONY: publish
 publish: build ## Publish a release to PyPI.
 	@echo "🚀 Publishing."
-	@uvx twine upload -r genomoncology dist/*
+	@uvx twine upload -r pypi dist/*
 
 .PHONY: docs-test
 docs-test: ## Test if documentation can be built without warnings or errors
