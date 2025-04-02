@@ -1,5 +1,7 @@
 # PubTator3 API
 
+This document describes the PubTator3 API used by BioMCP for searching biomedical literature and retrieving article details with annotations. Understanding this API provides context for how BioMCP's article commands function.
+
 ## Overview
 
 The PubTator3 API provides a way to search for and retrieve biomedical articles
@@ -78,7 +80,7 @@ identifiers and keywords.
 | Parameter | Description                     | Example                |
 | --------- | ------------------------------- | ---------------------- |
 | `text`    | Entity identifier or text query | `@CHEMICAL_remdesivir` |
-| `page`    | Page number for pagination      | `1`                    |
+
 
 #### Example Request and Response
 

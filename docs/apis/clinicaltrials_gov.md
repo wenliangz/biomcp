@@ -1,5 +1,7 @@
 # ClinicalTrials.gov API
 
+This document outlines the key aspects of the public ClinicalTrials.gov v2 API utilized by BioMCP. Understanding these details can be helpful for advanced users interpreting BioMCP results or for developers extending its capabilities. BioMCP's CLI commands often simplify or combine these parameters for ease of use; refer to the [Trials CLI Documentation](../cli/trials.md) for specific command options.
+
 ## Overview
 
 The [ClinicalTrials.gov](https://clinicaltrials.gov/) API provides programmatic
@@ -36,14 +38,13 @@ This endpoint allows searching for clinical trials using various parameters.
 | `filter.advanced`      | Advanced filter query               | `AREA[StartDate]2022`                           |
 | `sort`                 | Sort order                          | `LastUpdatePostDate:desc`                       |
 | `fields`               | Fields to return                    | `NCTId,BriefTitle,OverallStatus,HasResults`     |
-| `pageSize`             | Maximum number of studies to return | `100`                                           |
-| `pageToken`            | Token for pagination                | Token string from previous response             |
+
 | `countTotal`           | Count total number of studies       | `true` or `false`                               |
 
 #### Example Request
 
 ```bash
-curl -X GET "https://clinicaltrials.gov/api/v2/studies?query.cond=Melanoma&query.intr=BRAF&pageSize=10"
+curl -X GET "https://clinicaltrials.gov/api/v2/studies?query.cond=Melanoma&query.intr=BRAF"
 ```
 
 ### Study Details API
@@ -131,7 +132,7 @@ basic usage. However, there are rate limits in place.
 - **Rate Limit**: Approximately 50 requests per minute per IP address
 - **Caching**: Implement caching to minimize repeated requests
 - **Pagination**: For large result sets, use the pagination functionality with
-  pageToken
+
 - **Focused Queries**: Use specific search terms rather than broad queries to
   get more relevant results
 - **Field Selection**: Use the fields parameter to request only the data you

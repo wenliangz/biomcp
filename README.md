@@ -48,11 +48,16 @@ something like:
   "mcpServers": {
     "biomcp": {
       "command": "uv",
-      "args": ["run", "--from" "biomcp-python", "biomcp", "run"]
+      "args": ["run", "--from", "biomcp-python", "biomcp", "run"]
     }
   }
 }
 ```
+
+Note: If you get a `SPAWN ENOENT` warning, make sure your `uv` executable
+is in your PATH or provide a full path to it (e.g. /Users/name/.local/bin/uv).
+
+For comprehensive instructions on integrating BioMCP with Claude Desktop and other MCP clients, see the [MCP Integration Guide](docs/mcp_integration.md).
 
 To test the MCP Server, using the MCP Inspector, run the following command:
 
@@ -110,3 +115,17 @@ Find out more about GenomOncology and OncoMCP by visiting:
 ## License
 
 This project is licensed under the MIT License.
+
+
+## Sources
+
+Below are the sources leveraged in BioMCP and their individual Terms of
+Service. Please recognize that each of these services may aggregate 
+from multiple underlying sources that may have their own Terms of Service.
+
+
+- MyVariant.info
+    * [Terms of Service](https://myvariant.info/terms)
+    * [Annotation Source](https://docs.myvariant.info/en/latest/doc/data.html)
+
+

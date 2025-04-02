@@ -1,170 +1,126 @@
-# Variants CLI
+# Variants CLI Documentation
 
-## Overview
-
-The Variants CLI allows users to search for and retrieve genetic variant information using the MyVariant.info API. This CLI is useful for quickly finding variant details based on gene name, protein change, genomic location, or other parameters.
+The Variants CLI allows users to search for and retrieve genetic variant information using the MyVariant.info API.
 
 > **API Documentation**: For details about the underlying API, see the [MyVariant.info API Documentation](../apis/myvariant_info.md).
+>
+> **Tip**: Use the `--help` flag with any command (e.g., `biomcp variant search --help`) to see the most up-to-date options directly from the tool.
 
-## Usage
+## Search Command (`search`)
+
+Search for genetic variants using multiple parameters and filters. At least one search parameter (like gene, hgvsp, rsid, region) is required.
+
+### Usage
 
 ```bash
-biomcp variant [COMMAND] [OPTIONS]
+biomcp variant search [OPTIONS]
 ```
-
-### Commands
-
-- `search`: Search for variants based on various parameters
-- `get`: Retrieve detailed information about a specific variant
-
-## search
-
-Search for genetic variants using multiple parameters and filters.
-
-### Options
 
 #### Basic Search Parameters
 
-- `-g, --gene [GENE]`: Gene symbol to search for (e.g., BRAF, TP53)
-- `-p, --protein [PROTEIN]`: Protein change notation (e.g., p.V600E)
-- `-c, --cdna [CDNA]`: cDNA notation (e.g., c.1799T>A)
-- `-r, --rsid [RSID]`: dbSNP rsID (e.g., rs113488022)
-- `-l, --region [REGION]`: Genomic region in format chr:start-end (e.g., chr7:140453100-140453200)
+- `-g, --gene TEXT`: Gene symbol to search for (e.g., BRAF, TP53).
+- `--hgvsp TEXT`: Protein change notation using HGVS format (e.g., "p.Val600Glu", "p.V600E"). Often used with `--gene`.
+- `--hgvsc TEXT`: cDNA change notation using HGVS format (e.g., "c.1799T>A"). Often used with `--gene`.
+- `--rsid TEXT`: dbSNP rsID (e.g., "rs113488022").
+- `--region TEXT`: Genomic region in format chr:start-end (e.g., "chr7:140453100-140453200").
 
 #### Clinical and Functional Filters
 
-- `-s, --significance [SIGNIFICANCE]`: ClinVar clinical significance (e.g., Pathogenic, Likely_pathogenic)
-- `--max-frequency [MAX_FREQUENCY]`: Maximum population frequency threshold (e.g., 0.01)
-- `--min-frequency [MIN_FREQUENCY]`: Minimum population frequency threshold (e.g., 0.001)
-- `--cadd [CADD]`: Minimum CADD phred score (e.g., 15)
-- `--polyphen [POLYPHEN]`: PolyPhen-2 prediction (e.g., probably_damaging, possibly_damaging, benign)
-- `--sift [SIFT]`: SIFT prediction (e.g., deleterious, tolerated)
+- `-s, --significance [pathogenic|likely_pathogenic|uncertain_significance|likely_benign|benign]`: Filter by ClinVar clinical significance. Case-insensitive.
+- `--min-frequency FLOAT`: Minimum gnomAD exome allele frequency (0.0 to 1.0).
+- `--max-frequency FLOAT`: Maximum gnomAD exome allele frequency (0.0 to 1.0).
+- `--cadd FLOAT`: Minimum CADD phred score (e.g., 15, 20). Filters for variants with score >= value.
+- `--polyphen [D|P|B]`: Filter by PolyPhen-2 prediction (D: Probably damaging, P: Possibly damaging, B: Benign). Case-insensitive.
+- `--sift [D|T]`: Filter by SIFT prediction (D: Deleterious, T: Tolerated). Case-insensitive.
 
-#### Output Options
+#### Output and Source Options
 
-- `--fields [FIELDS]`: Comma-separated list of fields to return in results
-- `--sources [SOURCES]`: Include specific data sources in the results
-- `--size [SIZE]`: Number of results to return (default: 10)
-- `--from [FROM]`: Result offset for pagination (default: 0)
-- `--sort [SORT]`: Field to sort results by (e.g., cadd.phred:desc)
-- `--format [FORMAT]`: Output format (markdown, json, table)
+- `--sources TEXT`: Comma-separated list of specific data sources to include in the results (e.g., "clinvar,dbsnp,cosmic"). See MyVariant.info docs for source names. Adding sources can increase the detail in the output.
+- `--size INTEGER`: Maximum number of results to return [default: 40].
+- `--offset INTEGER`: Result offset for pagination [default: 0]. Use with `--size` for paging.
+- `--sort TEXT`: Field to sort results by, using MyVariant.info syntax (e.g., "cadd.phred:desc").
+- `-j, --json`: Render output in JSON format instead of Markdown.
+- `--help`: Show help message and exit.
 
-#### Integration Options
-
-- `--related-articles`: Search for related articles for each variant
-- `--related-trials`: Search for related clinical trials for each variant
-
-### Examples
+#### Examples
 
 Search for a variant by gene and protein change:
 
 ```bash
-biomcp variant search --gene BRAF --protein p.V600E
+biomcp variant search --gene BRAF --hgvsp p.V600E
 ```
 
-Search for pathogenic variants in a gene:
+Search for pathogenic variants in TP53:
 
 ```bash
-biomcp variant search --gene TP53 --significance Pathogenic
+biomcp variant search --gene TP53 --significance pathogenic
 ```
 
-Search with complex filtering:
+Search for rare (max freq 0.1%) BRAF variants with high CADD score:
 
 ```bash
-biomcp variant search --gene BRAF --max-frequency 0.01 --cadd 20 --related-articles
+biomcp variant search --gene BRAF --max-frequency 0.001 --cadd 20
 ```
 
 Search by genomic region:
 
 ```bash
-biomcp variant search --region chr7:140453100-140453200
+biomcp variant search --region chr7:140453130-140453140
 ```
 
-## get
+Search by rsID and request extra data from COSMIC:
 
-Retrieve detailed information about a specific variant by its identifier.
+```bash
+biomcp variant search --rsid rs113488022 --sources cosmic
+```
 
-### Options
+Get results as JSON:
 
-- `--id [ID]`: Variant ID in HGVS format (e.g., chr7:g.140453136A>T)
-- `--rsid [RSID]`: dbSNP rsID (alternative to ID, e.g., rs113488022)
-- `--fields [FIELDS]`: Comma-separated list of fields to return
-- `--sources [SOURCES]`: Include specific data sources in the results
-- `--format [FORMAT]`: Output format (markdown, json, table)
-- `--related-articles`: Include related articles in the output
-- `--related-trials`: Include related clinical trials in the output
+```bash
+biomcp variant search --gene BRAF --hgvsp p.V600E --json
+```
 
-### Examples
+## Get Command (`get`)
+
+Retrieve detailed information about a single specific variant by its identifier.
+
+### Usage
+
+```bash
+biomcp variant get [OPTIONS] VARIANT_ID
+```
+
+#### Arguments
+
+- `VARIANT_ID`: The variant identifier. This can be a MyVariant.info ID (HGVS format, e.g., "chr7:g.140453136A>T") or a dbSNP rsID (e.g., "rs113488022"). [required]
+
+#### Options
+
+- `-j, --json`: Render output in JSON format instead of Markdown.
+- `--help`: Show help message and exit.
+
+#### Examples
 
 Get a variant by HGVS ID:
 
 ```bash
-biomcp variant get --id chr7:g.140453136A>T
+biomcp variant get chr7:g.140453136A>T
 ```
 
-Get a variant by rsID with related articles:
+Get a variant by rsID:
 
 ```bash
-biomcp variant get --rsid rs113488022 --related-articles
+biomcp variant get rs113488022
 ```
 
-## Output
-
-By default, the CLI outputs variant information in Markdown format for easy reading. The default fields included are:
-
-- Variant ID (HGVS format)
-- dbSNP rsID
-- Gene name
-- Clinical significance
-- CADD phred score
-- gnomAD exome allele frequency
-- ExAC allele frequency
-
-Example output:
-
-```
-## Variant: chr7:g.140453136A>T (BRAF V600E)
-
-### Basic Information
-- **ID**: chr7:g.140453136A>T
-- **dbSNP**: rs113488022
-- **Gene**: BRAF
-- **cDNA Change**: c.1799T>A
-- **Protein Change**: p.V600E
-
-### Clinical Information
-- **ClinVar Significance**: Pathogenic
-- **CADD Phred**: 32.0
-- **PolyPhen-2**: Probably_damaging (0.998)
-- **SIFT**: Deleterious (0.01)
-
-### Population Frequency
-- **gnomAD Exome**: 0.00000397994
-- **ExAC**: 0.00001647
-```
-
-## Advanced Usage
-
-### Combining Multiple Parameters
-
-You can combine multiple search parameters to create complex queries:
+Get a variant by rsID as JSON:
 
 ```bash
-biomcp variant search --gene BRAF --protein p.V600E --cadd 20 --max-frequency 0.001
+biomcp variant get rs113488022 --json
 ```
 
-### Using Field Selection
+## Output Format
 
-Specify which fields to include in the output:
+By default, both search and get output variant information in Markdown format, designed for readability. This includes key annotations and automatically generated links to external databases like dbSNP, ClinVar, Ensembl, UCSC Genome Browser, etc., where applicable.
 
-```bash
-biomcp variant search --gene BRAF --fields "_id,dbsnp.rsid,dbnsfp.genename,clinvar.clinical_significance"
-```
-
-### Integration with Other Tools
-
-Find variants and related information in one command:
-
-```bash
-biomcp variant search --gene BRAF --significance Pathogenic --related-articles --related-trials
-```
+Use the `--json` flag to get the raw data (with injected URLs) as a JSON object, which is useful for scripting or integration with other tools. The specific fields returned by default in a search focus on common identifiers and annotations; use `--sources` to request more comprehensive data for specific databases. The get command retrieves all available default fields plus database links.

@@ -1,10 +1,12 @@
 # Articles CLI Documentation
 
-The Articles CLI module provides commands for searching and retrieving biomedical research articles from PubMed.
+The Articles CLI module provides commands for searching and retrieving biomedical research articles using the PubTator3 API.
 
 > **API Documentation**: For details about the underlying API, see the [PubTator3 API Documentation](../apis/pubtator3_api.md).
+>
+> **Tip**: Use the `--help` flag with any command (e.g., `biomcp article search --help`) to see the most up-to-date options directly from the tool.
 
-## Search Command
+## Search Command (`search`)
 
 Search for biomedical research articles based on various filters.
 
@@ -14,17 +16,17 @@ Search for biomedical research articles based on various filters.
 biomcp article search [OPTIONS]
 ```
 
-### Options
+#### Options
 
-- `-g, --gene [GENE]`: Gene name to search for (can specify multiple times)
-- `-v, --variant [VARIANT]`: Genetic variant to search for (can specify multiple times)
-- `-d, --disease [DISEASE]`: Disease to search for (can specify multiple times)
-- `-c, --chemical [CHEMICAL]`: Chemical or drug to search for (can specify multiple times)
-- `-k, --keyword [KEYWORD]`: Additional keyword to search for (can specify multiple times)
-- `-p, --page INTEGER`: Page number for pagination (starts at 1) [default: 1]
-- `--help`: Show help message and exit
+- `-g, --gene TEXT`: Gene name to search for (e.g., BRAF). Can be specified multiple times.
+- `-v, --variant TEXT`: Genetic variant to search for (e.g., "BRAF V600E"). Can be specified multiple times.
+- `-d, --disease TEXT`: Disease name to search for (e.g., Melanoma). Can be specified multiple times.
+- `-c, --chemical TEXT`: Chemical or drug name to search for (e.g., Vemurafenib). Can be specified multiple times.
+- `-k, --keyword TEXT`: Additional keyword to search for. Can be specified multiple times.
+- `-j, --json`: Render output in JSON format instead of Markdown.
+- `--help`: Show help message and exit.
 
-### Examples
+#### Examples
 
 Search for articles about the BRAF gene:
 
@@ -38,21 +40,23 @@ Search for articles about the BRAF V600E mutation in melanoma:
 biomcp article search --gene BRAF --variant "BRAF V600E" --disease Melanoma
 ```
 
-Search with multiple filters:
+Search with multiple gene filters:
 
 ```bash
 biomcp article search --gene BRAF --gene KRAS --disease Melanoma
 ```
 
-Go to page 2 of results:
+
+
+Get results as JSON:
 
 ```bash
-biomcp article search --gene BRAF --page 2
+biomcp article search --gene BRAF --json
 ```
 
-## Get Command
+## Get Command (`get`)
 
-Retrieve articles by their PubMed ID (PMID).
+Retrieve detailed information (abstract, metadata) for specific articles using their PubMed IDs (PMIDs).
 
 ### Usage
 
@@ -60,16 +64,17 @@ Retrieve articles by their PubMed ID (PMID).
 biomcp article get [OPTIONS] PMIDS...
 ```
 
-### Arguments
+#### Arguments
 
-- `PMIDS`: PubMed IDs of articles to retrieve (one or more required)
+- `PMIDS`: One or more PubMed IDs (integers) of the articles to retrieve. [required]
 
-### Options
+#### Options
 
-- `-f, --full`: Retrieve full text instead of just abstract
-- `--help`: Show help message and exit
+- `-f, --full`: Attempt to retrieve full text if available via the API (Abstract is always retrieved). [default: False]
+- `-j, --json`: Render output in JSON format instead of Markdown.
+- `--help`: Show help message and exit.
 
-### Examples
+#### Examples
 
 Get article abstract by PMID:
 
@@ -83,8 +88,13 @@ Get multiple articles:
 biomcp article get 21717063 22301848
 ```
 
-Get full text (when available):
+Get full text (if available):
 
 ```bash
 biomcp article get 21717063 --full
 ```
+
+Get results as JSON:
+
+```bash
+biomcp article get 21717063 --json

@@ -1,5 +1,7 @@
 # MyVariant.info API
 
+This document details the MyVariant.info API, which BioMCP uses for fetching genetic variant annotations. Understanding the underlying API fields and query syntax can aid advanced users and developers working with BioMCP.
+
 ## Overview
 
 MyVariant.info is a comprehensive API that provides variant annotation
@@ -263,13 +265,11 @@ genetic information with clinical trials and literature.
 
 ## Output Format
 
-For the API implementation, all data is returned in JSON format. The BioMCP CLI
-will render this data as Markdown using the render function. The default fields
-returned when no specific fields are requested are:
+For the API implementation, all data is typically returned in JSON format. BioMCP CLI commands render this data as Markdown by default (unless `--json` is specified).
 
-```
-_id,dbsnp.rsid,dbnsfp.genename,clinvar.clinical_significance,cadd.phred,gnomad_exome.af.af,exac.af,mutdb
-```
+When using the `biomcp variant search` command, a curated set of important fields (defined internally, plus those requested via `--sources`) is requested from the API to provide a concise summary.
+
+When using the `biomcp variant get` command to retrieve a specific variant, BioMCP requests `fields=all` from the MyVariant.info API to get the most comprehensive data available for that variant, and then injects relevant database links.
 
 ## More Information
 

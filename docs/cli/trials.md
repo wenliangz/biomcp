@@ -3,8 +3,10 @@
 The Trials CLI module provides commands for searching and retrieving clinical trial information from ClinicalTrials.gov.
 
 > **API Documentation**: For details about the underlying API, see the [ClinicalTrials.gov API Documentation](../apis/clinicaltrials_gov.md).
+>
+> **Tip**: Use the `--help` flag with any command (e.g., `biomcp trial search --help`) to see the most up-to-date options directly from the tool.
 
-## Search Command
+## Search Command (`search`)
 
 Search for clinical trials based on various filters and criteria.
 
@@ -14,98 +16,116 @@ Search for clinical trials based on various filters and criteria.
 biomcp trial search [OPTIONS]
 ```
 
-### Options
-
 #### Basic Search Filters
 
-- `-c, --condition [CONDITION]`: Medical condition to search for (can specify multiple times)
-- `-i, --intervention [INTERVENTION]`: Treatment or intervention to search for (can specify multiple times)
-- `-t, --term [TERM]`: General search terms (can specify multiple times)
-- `-n, --nct-id [NCT_ID]`: Clinical trial NCT ID to lookup (can specify multiple times)
+- `-c, --condition TEXT`: Medical condition to search for (e.g., "Lung Cancer"). Can specify multiple times.
+- `-i, --intervention TEXT`: Treatment or intervention to search for (e.g., "Pembrolizumab"). Can specify multiple times.
+- `-t, --term TEXT`: General search terms (e.g., "immunotherapy"). Can specify multiple times.
+- `-n, --nct-id TEXT`: Specific Clinical trial NCT ID(s) to look up (e.g., NCT04179552). Can specify multiple times.
 
-#### Study Characteristics
+#### Study Characteristics Filters
 
-- `-s, --status [STATUS]`: Recruiting status (Recruiting, Completed, Active, Enrolling, Terminated, Withdrawn, Unknown)
-- `--type [TYPE]`: Study type (Interventional, Observational, Expanded_Access)
-- `-p, --phase [PHASE]`: Trial phase (Early_Phase_1, Phase_1, Phase_2, Phase_3, Phase_4, Not_Applicable)
-- `--purpose`: Primary purpose (Treatment, Prevention, Diagnostic, Supportive_Care, Screening, Health_Services_Research, Basic_Science, Other)
-- `-a, --age-group [AGE_GROUP]`: Age group filter (Child, Adult, Older_Adult)
+- `-s, --status [OPEN|CLOSED|ANY]`: Filter by recruitment status. [default: OPEN]
+- `--type [INTERVENTIONAL|OBSERVATIONAL|EXPANDED_ACCESS|OTHER]`: Filter by study type.
+- `-p, --phase [EARLY_PHASE1|PHASE1|PHASE2|PHASE3|PHASE4|NOT_APPLICABLE]`: Filter by trial phase.
+- `--purpose [TREATMENT|PREVENTION|DIAGNOSTIC|SUPPORTIVE_CARE|SCREENING|HEALTH_SERVICES|BASIC_SCIENCE|DEVICE_FEASIBILITY|OTHER]`: Filter by primary purpose.
+- `-a, --age-group [CHILD|ADULT|SENIOR|ALL]`: Filter by participant age group. [default: ALL]
 
 #### Advanced Filters
 
-- `--min-date [MIN_DATE]`: Minimum date for filtering (YYYY-MM-DD format)
-- `--max-date [MAX_DATE]`: Maximum date for filtering (YYYY-MM-DD format)
-- `--date-field [DATE_FIELD]`: Date field to filter on (Start_Date, Completion_Date, Primary_Completion_Date, Results_First_Posted, Last_Update_Posted)
-- `--intervention-type [TYPE]`: Intervention type filter (Drug, Device, Biological, Procedure, Radiation, Behavioral, Dietary_Supplement, Genetic, Combination_Product, Diagnostic_Test, Other)
-- `--sponsor-type [TYPE]`: Sponsor type filter (Industry, NIH, U.S.\_Fed, Other_Gov, Network, Individual, Other)
-- `--study-design [DESIGN]`: Study design filter (Single_Group, Parallel, Crossover, Factorial, Sequential, Other)
+- `--min-date TEXT`: Minimum date for filtering (YYYY-MM-DD format). Requires `--date-field`.
+- `--max-date TEXT`: Maximum date for filtering (YYYY-MM-DD format). Requires `--date-field`.
+- `--date-field [LAST_UPDATE|STUDY_START|PRIMARY_COMPLETION|OUTCOME_POSTING|COMPLETION|FIRST_POSTING|SUBMITTED_DATE]`: Date field to use for filtering with `--min-date`/`--max-date`. [default: STUDY_START]
+- `--intervention-type [DRUG|DEVICE|BIOLOGICAL|PROCEDURE|RADIATION|BEHAVIORAL|GENETIC|DIETARY|DIAGNOSTIC_TEST|OTHER]`: Filter by the type of intervention.
+- `--sponsor-type [INDUSTRY|GOVERNMENT|ACADEMIC|OTHER]`: Filter by the type of sponsor.
+- `--study-design [RANDOMIZED|NON_RANDOMIZED|OBSERVATIONAL]`: Filter by study design.
 
 #### Location-based Search
 
-- `--lat [LATITUDE]`: Latitude for location-based search
-- `--lon [LONGITUDE]`: Longitude for location-based search
-- `-d, --distance [DISTANCE]`: Distance in miles for location-based search
+- `--lat FLOAT`: Latitude for location-based search (requires `--lon` and `--distance`).
+- `--lon FLOAT`: Longitude for location-based search (requires `--lat` and `--distance`).
+- `-d, --distance INTEGER`: Distance in miles for location-based search (requires `--lat` and `--lon`).
 
 #### Results Management
 
-- `--sort [SORT]`: Sort order for results (Relevance, Acronym, Brief_Title, Start_Date, Primary_Completion_Date, Last_Update_Posted)
-- `--next-page [HASH]`: Next page hash for pagination
-- `--help`: Show help message and exit
+- `--sort [RELEVANCE|LAST_UPDATE|ENROLLMENT|START_DATE|COMPLETION_DATE|SUBMITTED_DATE]`: Sort order for results. [default: RELEVANCE]
+- `-j, --json`: Render output in JSON format instead of Markdown.
+- `--help`: Show help message and exit.
 
-### Examples
+#### Examples
 
-Search for clinical trials about melanoma:
+Search for clinical trials about melanoma (default status is OPEN):
 
 ```bash
 biomcp trial search --condition "Melanoma"
 ```
 
-Search for clinical trials involving a specific drug:
+Search for completed trials involving Vemurafenib:
 
 ```bash
-biomcp trial search --intervention "Vemurafenib"
+biomcp trial search --intervention "Vemurafenib" --status CLOSED
 ```
 
-Search for recently started Phase 3 trials for cancer:
+Search for recently started Phase 3 trials for cancer, sorted by start date:
 
 ```bash
-biomcp trial search --condition "Cancer" --phase Phase_3 --sort Start_Date
+biomcp trial search --condition "Cancer" --phase PHASE3 --sort START_DATE
 ```
 
-Search for recruiting trials in a specific location:
+Search for recruiting trials near Boston, MA (approx. coordinates):
 
 ```bash
-biomcp trial search --condition "Diabetes" --status Recruiting --lat 40.7128 --lon -74.0060 --distance 50
+biomcp trial search --condition "Diabetes" --status OPEN --lat 42.36 --lon -71.05 --distance 50
 ```
 
-Search for trials with multiple filters:
+Search for Phase 2 Immunotherapy trials for Breast Cancer, recruiting:
 
 ```bash
-biomcp trial search --condition "Breast Cancer" --intervention "Immunotherapy" --phase Phase_2 --status Recruiting
+biomcp trial search --condition "Breast Cancer" --intervention "Immunotherapy" --phase PHASE2 --status OPEN
 ```
 
-## Get Command
+Get results as JSON:
 
-Retrieve detailed information about a specific clinical trial by its NCT ID.
+```bash
+biomcp trial search --condition "Melanoma" --json
+```
+
+## Get Command (`get`)
+
+Retrieve detailed information about a specific clinical trial by its NCT ID and optionally select a specific module of information.
 
 ### Usage
 
 ```bash
-biomcp trial get NCT_ID [MODULE]
+biomcp trial get [OPTIONS] NCT_ID [MODULE]
 ```
 
-### Arguments
+#### Arguments
 
-- `NCT_ID`: The NCT identifier for the clinical trial (required)
-- `MODULE`: Module to retrieve (optional, defaults to Protocol)
-  - Valid modules: Protocol, Locations, References, Outcomes
+- `NCT_ID`: The NCT identifier for the clinical trial (e.g., NCT04267848). [required]
+- `MODULE`: Optional module to retrieve. [default: Protocol]
+  - `Protocol`: Core study information (ID, status, design, eligibility, etc.)
+  - `Locations`: Contact and site location information.
+  - `References`: Associated publications and references.
+  - `Outcomes`: Outcome measures and results (if available).
 
-### Examples
+#### Options
+
+- `-j, --json`: Render output in JSON format instead of Markdown.
+- `--help`: Show help message and exit.
+
+#### Examples
 
 Get basic protocol information for a trial:
 
 ```bash
 biomcp trial get NCT04267848
+```
+
+or
+
+```bash
+biomcp trial get NCT04267848 Protocol
 ```
 
 Get location information for a trial:
@@ -125,3 +145,8 @@ Get outcomes data for a trial:
 ```bash
 biomcp trial get NCT04267848 Outcomes
 ```
+
+Get protocol information as JSON:
+
+```bash
+biomcp trial get NCT04267848 Protocol --json
