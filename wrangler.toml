@@ -1,0 +1,25 @@
+name = "biomcp-worker"
+main = "src/biomcp/workers/worker_entry.js"
+compatibility_date = "2025-04-28"
+
+[vars]
+# Environment variables for the worker
+# These can be overridden in several ways:
+# 1. In the Cloudflare dashboard under Workers & Pages > your-worker > Settings > Variables
+# 2. Using wrangler CLI: wrangler secret put REMOTE_MCP_SERVER_URL
+# 3. During local development: wrangler dev --var REMOTE_MCP_SERVER_URL="http://localhost:8000"
+# 4. In your CI/CD pipeline using environment variables with the format CF_REMOTE_MCP_SERVER_URL
+REMOTE_MCP_SERVER_URL = "http://localhost:8000"  # Default value
+# MCP_SERVER_API_KEY = ""
+
+# Note: The ability to allow plaintext connections is now configured in the Cloudflare dashboard
+# under Security settings for your Worker
+
+[build]
+command = ""
+
+[triggers]
+crons = []
+
+[observability.logs]
+enabled = false
