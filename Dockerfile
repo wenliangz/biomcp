@@ -4,28 +4,27 @@ FROM python:3.11-slim
 # set work directory
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements (pyproject.toml, etc.)
-COPY pyproject.toml .
-COPY README.md .
-COPY LICENSE .
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
-COPY src ./src
-COPY tests ./tests
-COPY Makefile .
-COPY tox.ini .
+# Copy the application code
+COPY . .
 
-# Install the package with worker dependencies
-RUN pip install --upgrade pip && pip install .[worker]
+# Install the package in development mode
+RUN pip install -e .
 
-# Expose port for remote MCP connections
-EXPOSE 8000
+# Set environment variables
+ENV PORT=8088
+ENV TRANSPORT=sse
 
-# Set default mode to worker, but allow it to be overridden
-ENV MCP_MODE=stdio
+# Expose the port
+EXPOSE ${PORT}
 
-# Run the MCP server with configurable mode
-CMD ["sh", "-c", "biomcp run --mode ${MCP_MODE}"]
+# Run the server
+CMD ["python", "src/server.py"]

@@ -1,11 +1,23 @@
 services:
-  biomcp-server:
-    platform: linux/amd64
+  webiomcp:
+    image: webiomcp:v1.0
+    restart: unless-stopped 
     build: .
-    image: us.gcr.io/graceful-medley-134315/biomcp-server:${TAG}
-    container_name: biomcp-server
     ports:
-      - "8000:8000"
+      - 8088:8088
     environment:
-      - MCP_MODE=worker # Can be set to 'stdio' or 'worker'
-    restart: unless-stopped
+      - VIRTUAL_HOST=webiomcp.wedaita.com
+      # virtual_port number has to match the port number INSIDE the docker
+      - VIRTUAL_PORT=8088
+      - LETSENCRYPT_HOST=webiomcp.wedaita.com
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    external: true
+    name: wedaita

@@ -1,0 +1,10 @@
+  {
+    "mcpServers": {
+      "WeBioMCP Server": {
+        "url": "https://webiomcp.wedaita.com/sse",
+        "description": "WeDaita MCP server for biomedical research",
+        "timeout": 30
+      }
+    }
+  }
+  
