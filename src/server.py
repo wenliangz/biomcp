@@ -13,6 +13,8 @@ from variants.tools import register_variant_tools
 from trials.tools import register_trial_tools
 from articles.tools import register_article_tools
 from resources.tools import register_resource_tools
+from chembl.tools import register_chembl_tools
+from proteins.tools import register_proteins_tools
 
 load_dotenv()
 
@@ -41,12 +43,15 @@ mcp = FastMCP(
 
 async def main():
     """Run the WeBioMCP server."""
+    print("Entering main function")
     # Register module-specific tools
     await register_variant_tools(mcp)
     await register_trial_tools(mcp)
     await register_article_tools(mcp)
     await register_resource_tools(mcp)
-    
+    await register_chembl_tools(mcp)
+    await register_proteins_tools(mcp)
+
     transport = os.getenv("TRANSPORT", "sse")
     print(f"Starting WeBioMCP server with {transport} transport...")
     
