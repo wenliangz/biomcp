@@ -2,6 +2,7 @@
 
 from enum import Enum
 from typing import Any, TypeVar, Union
+from pydantic import BaseModel
 
 T = TypeVar("T")
 
@@ -20,3 +21,11 @@ def ensure_list(value: Union[T, list[T], None]) -> list[T]:
     if isinstance(value, list):
         return value
     return [value] 
+
+
+class ToolError(Exception):
+    """Base class for all tool errors"""
+
+
+class WedaitaBaseModel(BaseModel):
+    """Base class for all data models"""

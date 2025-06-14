@@ -15,6 +15,9 @@ from articles.tools import register_article_tools
 from resources.tools import register_resource_tools
 from chembl.tools import register_chembl_tools
 from proteins.tools import register_proteins_tools
+from dgidb.tools import register_dgidb_tools
+from gtex.tools import register_gtex_tools
+from opentargets.tools import register_opentargets_tools
 
 load_dotenv()
 
@@ -50,7 +53,10 @@ async def main():
     await register_article_tools(mcp)
     await register_resource_tools(mcp)
     await register_chembl_tools(mcp)
-    await register_proteins_tools(mcp)
+    # await register_proteins_tools(mcp)
+    await register_dgidb_tools(mcp)
+    # await register_gtex_tools(mcp)
+    await register_opentargets_tools(mcp)
 
     transport = os.getenv("TRANSPORT", "sse")
     print(f"Starting WeBioMCP server with {transport} transport...")

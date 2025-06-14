@@ -9,11 +9,21 @@ async def register_variant_tools(mcp):
     
     @mcp.tool()
     async def search_variants_tool(ctx: Context, query: str, limit: int = 3) -> str:
-        """Search for genetic variants using semantic search.
+        """Search for genetic variants in the MyVariant.info database.
+
+        This tool is specifically for searching genetic variants (mutations, SNPs, etc.) in genes.
+        It is NOT for searching general research articles or therapies.
+        Use search_articles_tool for searching research papers and therapies.
+
+        Examples of appropriate queries:
+        - "BRAF V600E mutation"
+        - "TP53 mutations in cancer"
+        - "EGFR gene variants"
+        - "KRAS mutations"
 
         Args:
             ctx: The MCP server provided context
-            query: Search query string describing what you're looking for
+            query: Search query string describing the genetic variant you're looking for
             limit: Maximum number of results to return (default: 3)
         """
         try:
@@ -29,9 +39,13 @@ async def register_variant_tools(mcp):
     async def get_variant_tool(ctx: Context, variant_id: str) -> str:
         """Get detailed information about a specific genetic variant.
 
+        This tool retrieves detailed information about a specific genetic variant
+        from the MyVariant.info database. It is NOT for searching general research
+        articles or therapies.
+
         Args:
             ctx: The MCP server provided context
-            variant_id: The identifier of the variant to retrieve
+            variant_id: The identifier of the variant to retrieve (e.g., "chr7:g.140453136A>T" or "rs113488022")
         """
         try:
             return await get_variant(variant_id)

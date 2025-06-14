@@ -3,15 +3,10 @@ from __future__ import annotations
 from biothings_client import get_client
 
 from pydantic import BaseModel
+from src import WedaitaBaseModel, ToolError
 
 
 
-class ToolError(Exception):
-    """Base class for all tool errors"""
-
-
-class WedaitaBaseModel(BaseModel):
-    """Base class for all data models"""
 
 class GeneMapping(WedaitaBaseModel):
     entrezgene: int
