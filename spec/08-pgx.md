@@ -1,0 +1,61 @@
+# Pharmacogenomics Queries
+
+PGx commands surface CPIC and PharmGKB-aligned interaction context for gene-drug decision support. This file validates core query modes and recommendation views around CYP2D6 and warfarin. Assertions prioritize durable section headings and table schemas.
+
+| Section | Command focus | Why it matters |
+|---|---|---|
+| Gene search | `search pgx -g CYP2D6` | Confirms gene-centric PGx search |
+| Drug search | `search pgx -d warfarin` | Confirms drug-centric PGx search |
+| PGx detail | `get pgx CYP2D6` | Confirms expanded interaction card |
+| CPIC level filter | `search pgx ... --cpic-level A` | Confirms evidence-level filtering |
+| Recommendations | `get pgx CYP2D6 recommendations` | Confirms recommendation table output |
+
+## Searching by Gene
+
+Gene-centric PGx search should return interaction rows with CPIC context and guideline labels. We assert on heading context and canonical table columns.
+
+```bash
+out="$(biomcp search pgx -g CYP2D6 --limit 3)"
+echo "$out" | mustmatch like "# PGx Search: gene=CYP2D6"
+echo "$out" | mustmatch like "| Gene | Drug | CPIC Level | PGx Testing | Guideline |"
+```
+
+## Searching by Drug
+
+Drug-centric PGx search is useful for medication review and genotype-aware prescribing. We check the drug heading and a case-insensitive warfarin match.
+
+```bash
+out="$(biomcp search pgx -d warfarin --limit 3)"
+echo "$out" | mustmatch like "# PGx Search: drug=warfarin"
+echo "$out" | mustmatch '/warfarin/i'
+```
+
+## Getting PGx Details
+
+`get pgx` aggregates affected drugs and recommendation context for the query anchor. The assertions verify card heading and affected-drug summary marker.
+
+```bash
+out="$(biomcp get pgx CYP2D6)"
+echo "$out" | mustmatch like "# PGx: CYP2D6"
+echo "$out" | mustmatch like "Affected Drugs:"
+```
+
+## Filtering by CPIC Level
+
+CPIC filtering narrows results to specific evidence tiers in prescribing workflows. The query echo and gene row token should both be present.
+
+```bash
+out="$(biomcp search pgx -g CYP2D6 --cpic-level A --limit 3)"
+echo "$out" | mustmatch like "cpic_level=A"
+echo "$out" | mustmatch like "| CYP2D6 |"
+```
+
+## PGx Recommendations
+
+Recommendation view should expose a compact, repeatable table for downstream review. We assert on section heading and recommendation table columns.
+
+```bash
+out="$(biomcp get pgx CYP2D6 recommendations)"
+echo "$out" | mustmatch like "# CYP2D6 - recommendations"
+echo "$out" | mustmatch like "| Drug | Gene | CPIC Level | PGx Testing |"
+```
