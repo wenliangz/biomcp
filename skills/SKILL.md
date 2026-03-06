@@ -65,6 +65,23 @@ biomcp drug adverse-events pembrolizumab
 biomcp protein structures P15056
 ```
 
+## Study-Native cBioPortal Queries
+
+Use the `study` command family for local matrix-level queries on downloaded cBioPortal studies.
+
+```bash
+biomcp study list
+biomcp study query --study msk_impact_2017 --gene TP53 --type mutations
+biomcp study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type cna
+biomcp study query --study paad_qcmg_uq_2016 --gene KRAS --type expression
+biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS
+```
+
+Requirements:
+
+- Set `BIOMCP_STUDY_DIR` to a directory containing per-study folders (for example `msk_impact_2017/`, `brca_tcga_pan_can_atlas_2018/`, `paad_qcmg_uq_2016/`).
+- Study folders should include cBioPortal TSV files such as `meta_study.txt`, `data_mutations.txt`, `data_clinical_sample.txt`, and optional `data_cna.txt` / expression matrices.
+
 Rules:
 
 - Helpers usually take only the ID/name. Do not invent extra filters for helpers.

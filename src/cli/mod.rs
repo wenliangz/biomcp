@@ -81,6 +81,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ProteinCommand,
     },
+    /// Local cBioPortal study analytics
+    Study {
+        #[command(subcommand)]
+        cmd: StudyCommand,
+    },
     /// Check external API connectivity
     Health {
         /// Check external APIs only
@@ -121,7 +126,7 @@ EXAMPLES:
     Uninstall,
     /// Command reference for entities and flags
     List {
-        /// Optional entity name (gene, variant, article, trial, drug, disease, pgx, gwas, pathway, protein, adverse-event, search-all)
+        /// Optional entity name (gene, variant, article, trial, drug, disease, pgx, gwas, pathway, protein, study, adverse-event, search-all)
         entity: Option<String>,
     },
     /// Parallel get operations (comma-separated IDs, max 10)
@@ -1325,6 +1330,51 @@ See also: biomcp list protein")]
         /// Skip the first N results
         #[arg(long, default_value = "0")]
         offset: usize,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum StudyCommand {
+    /// List locally available cBioPortal studies
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study list
+
+See also: biomcp list study")]
+    List,
+    /// Run a study-scoped query for one gene
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study query --study msk_impact_2017 --gene TP53 --type mutations
+  biomcp study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type cna
+  biomcp study query --study paad_qcmg_uq_2016 --gene KRAS --type expression
+
+See also: biomcp list study")]
+    Query {
+        /// Study identifier (e.g., msk_impact_2017)
+        #[arg(short, long)]
+        study: String,
+        /// HGNC gene symbol (e.g., TP53)
+        #[arg(short, long)]
+        gene: String,
+        /// Query type (mutations, cna, expression)
+        #[arg(short = 't', long = "type")]
+        query_type: String,
+    },
+    /// Compute pairwise mutation co-occurrence across genes
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS
+  biomcp study co-occurrence --study brca_tcga_pan_can_atlas_2018 --genes TP53,PIK3CA,GATA3
+
+See also: biomcp list study")]
+    CoOccurrence {
+        /// Study identifier (e.g., msk_impact_2017)
+        #[arg(short, long)]
+        study: String,
+        /// Comma-separated gene symbols (2..=10)
+        #[arg(short, long)]
+        genes: String,
     },
 }
 
@@ -3077,6 +3127,49 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     }
                 }
             },
+            Commands::Study { cmd } => match cmd {
+                StudyCommand::List => {
+                    let studies = crate::entities::study::list_studies().await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&studies)?)
+                    } else {
+                        Ok(crate::render::markdown::study_list_markdown(&studies))
+                    }
+                }
+                StudyCommand::Query {
+                    study,
+                    gene,
+                    query_type,
+                } => {
+                    let query_type = crate::entities::study::StudyQueryType::from_flag(&query_type)?;
+                    let result = crate::entities::study::query_study(&study, &gene, query_type).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&result)?)
+                    } else {
+                        Ok(crate::render::markdown::study_query_markdown(&result))
+                    }
+                }
+                StudyCommand::CoOccurrence { study, genes } => {
+                    let genes = genes
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|gene| !gene.is_empty())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    if genes.len() < 2 || genes.len() > 10 {
+                        return Err(crate::error::BioMcpError::InvalidArgument(
+                            "--genes must contain 2 to 10 comma-separated symbols".into(),
+                        )
+                        .into());
+                    }
+                    let result = crate::entities::study::co_occurrence(&study, &genes).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&result)?)
+                    } else {
+                        Ok(crate::render::markdown::study_co_occurrence_markdown(&result))
+                    }
+                }
+            },
             Commands::Batch {
                 entity,
                 ids,
@@ -4414,11 +4507,11 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArticleCommand, Cli, Commands, DrugCommand, GeneCommand, ProteinCommand, VariantCommand,
-        execute, extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
-        parse_trial_location_paging, resolve_query_input, resolve_variant_query,
-        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
-        truncate_article_annotations,
+        ArticleCommand, Cli, Commands, DrugCommand, GeneCommand, ProteinCommand, StudyCommand,
+        VariantCommand, execute, extract_json_from_sections, paginate_trial_locations,
+        parse_simple_gene_change, parse_trial_location_paging, resolve_query_input,
+        resolve_variant_query, should_try_pathway_trial_fallback, trial_locations_json,
+        trial_search_query_summary, truncate_article_annotations,
     };
     use clap::Parser;
 
@@ -5047,6 +5140,72 @@ mod tests {
     }
 
     #[test]
+    fn study_list_parses_subcommand() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "study", "list"]).expect("study list should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::List,
+            } => {}
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_query_parses_required_flags() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "query",
+            "--study",
+            "msk_impact_2017",
+            "--gene",
+            "TP53",
+            "--type",
+            "mutations",
+        ])
+        .expect("study query should parse");
+        match cli.command {
+            Commands::Study {
+                cmd:
+                    StudyCommand::Query {
+                        study,
+                        gene,
+                        query_type,
+                    },
+            } => {
+                assert_eq!(study, "msk_impact_2017");
+                assert_eq!(gene, "TP53");
+                assert_eq!(query_type, "mutations");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_co_occurrence_parses_gene_list() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "co-occurrence",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--genes",
+            "TP53,PIK3CA,GATA3",
+        ])
+        .expect("study co-occurrence should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::CoOccurrence { study, genes },
+            } => {
+                assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
+                assert_eq!(genes, "TP53,PIK3CA,GATA3");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn search_variant_parses_single_token_positional_query() {
         let cli = Cli::try_parse_from(["biomcp", "search", "variant", "BRAF", "--limit", "2"])
             .expect("search variant positional query should parse");
@@ -5440,5 +5599,21 @@ mod tests {
         .expect_err("search all should require typed slots");
         assert!(err.to_string().contains("at least one typed slot"));
         assert!(err.to_string().contains("--gene"));
+    }
+
+    #[tokio::test]
+    async fn study_co_occurrence_requires_2_to_10_genes() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "co-occurrence".to_string(),
+            "--study".to_string(),
+            "msk_impact_2017".to_string(),
+            "--genes".to_string(),
+            "TP53".to_string(),
+        ])
+        .await
+        .expect_err("study co-occurrence should validate gene count");
+        assert!(err.to_string().contains("--genes must contain 2 to 10"));
     }
 }
