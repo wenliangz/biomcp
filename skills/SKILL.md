@@ -1,153 +1,214 @@
 ---
 name: biomcp
-description: Search and retrieve biomedical data — genes, variants, clinical trials, articles, drugs, diseases, pathways, proteins, adverse events, pharmacogenomics, and phenotype-disease matching. 15 sources including PubMed, ClinicalTrials.gov, ClinVar, OncoKB, Reactome, UniProt, PharmGKB, OpenFDA, Monarch. Use when asked about gene function, variant pathogenicity, trial matching, drug safety, resistance mechanisms, hereditary syndromes, or literature evidence.
+description: Search and retrieve biomedical data - genes, variants, clinical trials, articles, drugs, diseases, pathways, proteins, adverse events, pharmacogenomics, and phenotype-disease matching. Use for gene function, variant pathogenicity, trials, drug safety, pathway context, disease workups, and literature evidence.
 ---
 
 # BioMCP CLI
 
-BioMCP is a biomedical command-line tool plus an embedded workflow catalog for agents. The CLI supports direct lookup/search tasks, while skills provide reusable multi-step investigation patterns.
+## Pick the Narrowest Valid Command
 
-## Quick Start
+- If the prompt names a specific entity, start with `get` or a helper for that entity.
+- Use `search all` only for broad multi-entity investigations.
+- If the CLI surface is unclear, run `biomcp list <entity>` before guessing flags or sections.
 
-Run these three commands first in every new session:
-
-```bash
-biomcp health
-biomcp list
-biomcp list gene
-```
-
-What each command gives you:
-- `biomcp health`: verifies source/API connectivity.
-- `biomcp list`: shows all entities, patterns, and helper families.
-- `biomcp list <entity>`: shows detailed per-entity filters, IDs, and examples.
-
-## Command Model
-
-BioMCP follows a small command grammar:
-
-- `biomcp search <entity> [filters]`
-- `biomcp get <entity> <id> [section...]`
-- `biomcp <entity-family> <helper> <id-or-name>`
-
-Examples:
+## Command Grammar
 
 ```bash
-biomcp get gene BRAF pathways
-biomcp get variant rs113488022 clinvar
-biomcp get article 22663011 annotations
-biomcp get trial NCT02576665 eligibility
-biomcp get drug carboplatin shortage
+biomcp search <entity> [filters]
+biomcp get <entity> <id> [sections]
+biomcp <entity-family> <helper> <id-or-name>
 ```
+
+Only use documented sections and helper arguments.
+If an entity ID or name contains spaces, quote the whole value when using `get` or helper commands.
 
 ## Search Patterns
 
-Free-text searches:
-- `gene`, `disease`, `drug`, `pathway`, `protein` support `-q` (and positional query input).
-- `article` supports `-k/--keyword` and `-q/--query` aliases (and positional query input).
-
-Structured/filter-first searches:
-- `variant` uses structured filters (for example: gene, significance, consequence, protein change).
-- `trial` uses structured filters (for example: condition, intervention, mutation, criteria, phase, status).
-
-Query examples:
+Free-text entities use positional query or `-q`:
 
 ```bash
-biomcp search disease "lung cancer"
-biomcp search gene -q BRAF --limit 5
-biomcp search article -q "immunotherapy resistance" --limit 5
+biomcp search gene BRAF --limit 5
+biomcp search disease "Lynch syndrome" --limit 5
+biomcp search pathway "MAPK" --limit 5
+biomcp search protein TP53 --limit 5
+```
+
+Structured entities use filters:
+
+```bash
 biomcp search variant -g BRAF --significance pathogenic --limit 5
+biomcp search article -g BRAF -d melanoma --since 2023-01-01 --limit 5
+biomcp search article -k "immunotherapy resistance" --sort citations --limit 5
 biomcp search trial -c melanoma --mutation "BRAF V600E" --status recruiting --limit 5
-biomcp search trial -c "endometrial cancer" --criteria "mismatch repair deficient" --status recruiting --limit 5
+biomcp search drug --target EGFR --indication "non-small cell lung cancer" --limit 5
 ```
 
-## Cross-Entity Helpers
-
-Helpers let you pivot quickly between related entities without manually rebuilding filters.
+Positional shorthand (single entity + query):
 
 ```bash
-biomcp variant trials "BRAF V600E"
+biomcp search variant BRAF V600E
+biomcp search trial melanoma --status recruiting --limit 5
+biomcp search all BRAF
+```
+
+Drug search uses positional query or `-q/--query`, not `-k/--keyword`.
+
+## Helpers and Pivots
+
+```bash
 biomcp variant articles "BRAF V600E"
-biomcp drug adverse-events pembrolizumab
-biomcp drug trials pembrolizumab
-biomcp disease trials melanoma
-biomcp disease drugs melanoma
-biomcp disease articles "Lynch syndrome"
-biomcp gene trials BRAF
-biomcp gene drugs BRAF
-biomcp gene articles BRCA1
+biomcp variant trials "BRAF V600E"
 biomcp gene pathways BRAF
-biomcp pathway drugs R-HSA-5673001
-biomcp pathway articles R-HSA-5673001
-biomcp pathway trials R-HSA-5673001
+biomcp gene articles BRCA1
+biomcp disease trials melanoma
+biomcp drug adverse-events pembrolizumab
 biomcp protein structures P15056
-biomcp article entities 22663011
 ```
 
-## Per-Entity Guides
+Rules:
 
-Use `biomcp list <entity>` for the full reference page of an entity.
+- Helpers usually take only the ID/name. Do not invent extra filters for helpers.
+- If you need date filters, sort, disease filters, or drug filters, use `search article` or `search trial`.
+- For FDA adverse-event filtering, use `search adverse-event --drug <name> ...`. Do not attach filters to `drug adverse-events <name>`.
+- When a search result returns a multi-word drug name such as `"erlotinib hydrochloride"`, copy it exactly and quote it in `get drug`.
 
-Each page includes:
-- supported command forms (`search`, `get`, helpers)
-- ID formats and section names
-- filter vocabulary
-- practical examples
+## Variant Rules
 
-Common entries:
+1. Always quote variant IDs in every command, including helpers.
 
 ```bash
-biomcp list gene
-biomcp list variant
-biomcp list article
-biomcp list trial
-biomcp list protein
+biomcp get variant "BRAF V600E" clinvar
+biomcp get variant "chr7:g.140453136A>T" predictions
+biomcp variant trials "chr7:g.140453136A>T"
+biomcp variant articles "rs113488022"
 ```
 
-## Skills
+2. Keep using the original variant ID through the workflow unless the task explicitly requires a different identifier format. Do not switch from `"BRAF V600E"` to HGVS just because the output mentions an HGVS alias.
 
-Skills are step-by-step investigation workflows. Each skill chains multiple BioMCP commands into a validated research pattern.
-
-Use skills when you need a structured investigation, not just a single lookup.
+3. For variant-specific literature, use:
 
 ```bash
-biomcp skill list
-biomcp skill 03
-biomcp skill gene-set-analysis
+biomcp variant articles "BRAF V600E"
 ```
 
-| # | Slug | Focus |
-|---|------|-------|
-| 01 | `variant-to-treatment` | Variant to treatment/evidence workflow |
-| 02 | `drug-investigation` | Drug mechanism, safety, alternatives |
-| 03 | `trial-searching` | Trial discovery + patient matching |
-| 04 | `rare-disease` | Rare disease evidence and trial strategy |
-| 05 | `drug-shortages` | Shortage monitoring and alternatives |
-| 06 | `advanced-therapies` | CAR-T/checkpoint therapy workflows |
-| 07 | `hereditary-cancer` | Hereditary syndrome workflows |
-| 08 | `resistance` | Resistance and next-line options |
-| 09 | `gene-function-lookup` | Gene-centric function and context lookup |
-| 10 | `gene-set-analysis` | Enrichment + pathway + interaction synthesis |
-| 11 | `literature-synthesis` | Evidence synthesis with cross-entity checks |
-| 12 | `pharmacogenomics` | PGx gene-drug interactions and dosing |
-| 13 | `phenotype-triage` | Symptom-first rare disease workup |
-| 14 | `protein-pathway` | Protein structure and pathway deep dive |
+`search article` does not have a variant filter.
 
-## Common Pitfalls
+4. Do not invent sections. `get variant ... oncokb` is invalid.
 
-- Variant IDs with shell metacharacters must be quoted:
+5. Avoid token-gated helpers unless the task explicitly requires them and the environment is configured. In this environment, prefer `clinvar`, `predictions`, `population`, `civic`, `cgi`, `cbioportal`, articles, and trials before `variant oncokb`.
+
+6. Exon-level labels and free-text alteration names are not safe `get variant` IDs. Do not write commands like:
 
 ```bash
-biomcp get variant "chr7:g.140453136A>T"
+biomcp get variant "EGFR Exon 19 Deletion" ...
 ```
 
-- Variant `search` vs `get`:
-  - `search variant` is filter-based.
-  - `get variant` accepts rsID, HGVS, or `GENE CHANGE` formats.
+For exon 19 deletions, exon 20 insertions, or other complex alterations:
 
-- Best-effort helpers search free-text fields (for example, eligibility criteria or abstracts). Results depend on source document wording.
+- use `search variant ...` first
+- only `get variant` if BioMCP returned an exact rsID or HGVS ID
+- otherwise summarize from search/article/trial evidence without forcing `get variant`
 
-- If zero results:
-  - broaden to a higher-level entity (for example, `gene` before `variant`),
-  - try alternate wording/synonyms,
-  - try a different source option where supported (for example, `--source nci` for trial workflows).
+7. `search variant --consequence` only accepts documented ontology terms. Use values like `missense_variant`, `inframe_deletion`, or `inframe_insertion`. Do not invent generic values like `deletion`, `insertion`, or `mutation`.
+
+## Deterministic Variant Pathogenicity Workflow
+
+For a focused question like "Is variant X pathogenic? What is the clinical evidence?", use this pattern first and stop once supported:
+
+```bash
+biomcp get variant "<id>" clinvar predictions population
+biomcp get variant "<id>" civic cgi
+biomcp variant trials "<id>"
+biomcp variant articles "<id>"
+```
+
+Only add more commands if a needed claim is still unsupported.
+
+## Deterministic Drug Safety Workflow
+
+For a focused question like "What are the safety concerns with drug X?" use one of these exact patterns:
+
+Quick safety summary:
+
+```bash
+biomcp get drug <name> label interactions approvals
+biomcp drug adverse-events <name>
+```
+
+Filtered FDA adverse-event check:
+
+```bash
+biomcp get drug <name> label interactions approvals
+biomcp search adverse-event --drug <name> --outcome death --limit 10
+```
+
+Do not write `biomcp drug adverse-events <name> --outcome ...`.
+
+## Deterministic Broad Gene-Disease Workflow
+
+For questions like "Tell me everything relevant about EGFR in NSCLC", use one orienting pass and then a small number of focused follow-ups:
+
+```bash
+biomcp search all --gene <gene> --disease "<disease>" --counts-only
+biomcp get gene <gene> pathways diseases protein druggability civic
+biomcp search drug --target <gene> --indication "<disease>" --limit 10
+biomcp search trial -c "<disease>" --mutation "<gene>" --status recruiting --limit 10
+biomcp search article -g <gene> -d "<disease>" --sort citations --limit 10
+```
+
+Rules:
+
+- do not run `search disease` unless you need an ontology ID or phenotype sections
+- do not use free-text `search drug` when `--target` or `--indication` is enough
+- do not run both `search drug <gene>` and `search drug --target <gene>` in the same investigation
+- `get variant` only for simple substitutions or exact IDs copied from search results
+- do not `get variant` on exon-level free text like `"Exon 19 Deletion"`
+- for EGFR/NSCLC, cover exon 19 deletions and exon 20 insertions from disease, drug, trial, or article evidence unless an exact variant ID is surfaced
+- if you need a variant deep dive, choose at most two exemplar simple substitutions such as `L858R` and `T790M`
+- choose at most two exemplar variants for deep follow-up
+- choose at most three representative EGFR drugs for deep follow-up; do not fetch near-duplicates like both `erlotinib` and `erlotinib hydrochloride` unless the distinction matters
+- fetch only one or two key articles or trials unless the prompt explicitly asks for exhaustive evidence
+- stop once you can cover: gene role/pathway, actionable alterations, approved drugs, active trials, and resistance mechanisms
+
+## Deterministic Drug Resistance Workflow
+
+For questions like "What genes does drug X target and what are the resistance mechanisms?", use this compact pattern:
+
+```bash
+biomcp search all --drug <name> --counts-only
+biomcp get drug <name> targets label civic
+biomcp search article --drug <name> -k resistance --type review --sort citations --limit 5
+biomcp search article -k "<drug> resistance mechanism" --sort citations --limit 5
+biomcp get article <PMID>
+biomcp get gene <primary_target> pathways
+```
+
+Rules:
+
+- stop after you have 3 to 5 named mechanisms with article support
+- do not keep launching near-duplicate keyword searches once the mechanism list is stable
+- prefer one review article plus one or two landmark papers over many repetitive searches
+
+## Common Real Sections
+
+- gene: `pathways`, `ontology`, `diseases`, `protein`, `go`, `interactions`, `civic`, `expression`, `druggability`, `clingen`
+- variant: `clinvar`, `predict`, `predictions`, `population`, `conservation`, `civic`, `cgi`, `cbioportal`, `gwas`
+- article: `annotations`, `fulltext`
+- trial: `eligibility`, `locations`, `outcomes`, `arms`, `references`
+- drug: `label`, `targets`, `shortage`, `indications`, `interactions`, `approvals`, `civic`
+- disease: `genes`, `pathways`, `phenotypes`, `variants`, `models`, `prevalence`, `civic`
+- pathway: `genes`, `events`, `enrichment`
+- protein: `domains`, `interactions`, `structures`
+
+## Evidence Discipline
+
+- Only claim facts the current outputs support.
+- If you need a mechanism, approval, trial criterion, or article detail, fetch the section or article that shows it.
+- Prefer source-tied phrasing such as `ClinVar shows...`, `CIViC reports...`, or `the retrieved trials include...`.
+- If an exact numeric count or score is not clearly visible in the current output, summarize qualitatively instead of guessing a number.
+- Avoid words like `definitive`, `overwhelming`, or `proves` unless the retrieved evidence directly justifies that level of certainty.
+- If one command already answers the question, do not keep searching.
+
+## Efficiency Target
+
+Focused tasks should usually take `4-12` BioMCP commands. Broad investigations may need more.

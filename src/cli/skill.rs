@@ -384,3 +384,29 @@ pub fn install_skills(dir: Option<&str>, force: bool) -> Result<String, BioMcpEr
 
     Ok("No installation selected".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_skill_overview_includes_t017_t018_polish() -> Result<(), BioMcpError> {
+        let overview = show_overview()?;
+
+        assert!(overview.contains("biomcp search gene BRAF --limit 5"));
+        assert!(overview.contains("biomcp search variant BRAF V600E"));
+        assert!(overview.contains("biomcp search trial melanoma --status recruiting --limit 5"));
+        assert!(overview.contains("biomcp search all BRAF"));
+        assert!(overview.contains("`expression`, `druggability`, `clingen`"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn embedded_use_case_catalog_is_empty() -> Result<(), BioMcpError> {
+        assert!(list_use_case_refs()?.is_empty());
+        assert_eq!(list_use_cases()?, "No skills found");
+        assert!(show_use_case("01").is_err());
+        Ok(())
+    }
+}
