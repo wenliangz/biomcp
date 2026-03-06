@@ -26,6 +26,7 @@ Documentation = "https://biomcp.org"
 
 [project.optional-dependencies]
 dev = [
+  "jsonschema>=4.26",
   "mcp>=1.0.0",
   "mustmatch>=0.0.2",
   "pytest>=8.0",

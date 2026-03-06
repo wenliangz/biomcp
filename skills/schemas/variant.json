@@ -6,9 +6,68 @@
   "properties": {
     "id": { "type": "string" },
     "gene": { "type": "string" },
-    "hgvsp": { "type": ["string", "null"] },
+    "hgvs_p": { "type": ["string", "null"] },
+    "hgvs_c": { "type": ["string", "null"] },
+    "rsid": { "type": ["string", "null"] },
+    "cosmic_id": { "type": ["string", "null"] },
     "significance": { "type": ["string", "null"] },
-    "clinvar": { "type": ["object", "null"] }
+    "clinvar_id": { "type": ["string", "null"] },
+    "clinvar_review_status": { "type": ["string", "null"] },
+    "clinvar_review_stars": { "type": ["integer", "null"] },
+    "conditions": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "gnomad_af": { "type": ["number", "null"] },
+    "consequence": { "type": ["string", "null"] },
+    "cadd_score": { "type": ["number", "null"] },
+    "polyphen_pred": { "type": ["string", "null"] },
+    "sift_pred": { "type": ["string", "null"] },
+    "conservation": { "type": ["object", "null"] },
+    "expanded_predictions": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "population_breakdown": { "type": ["object", "null"] },
+    "cosmic_context": { "type": ["object", "null"] },
+    "cgi_associations": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "civic": { "type": ["object", "null"] },
+    "clinvar_conditions": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "clinvar_condition_reports": { "type": ["integer", "null"] },
+    "cancer_frequencies": {
+      "type": ["array", "null"],
+      "items": { "type": "object" }
+    },
+    "cancer_frequency_source": { "type": ["string", "null"] },
+    "prediction": { "type": ["object", "null"] },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

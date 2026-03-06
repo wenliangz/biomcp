@@ -7,10 +7,46 @@
     "symbol": { "type": "string" },
     "name": { "type": "string" },
     "entrez_id": { "type": ["string", "null"] },
-    "chromosome": { "type": ["string", "null"] },
+    "ensembl_id": { "type": ["string", "null"] },
+    "location": { "type": ["string", "null"] },
+    "genomic_coordinates": { "type": ["string", "null"] },
+    "omim_id": { "type": ["string", "null"] },
+    "uniprot_id": { "type": ["string", "null"] },
+    "summary": { "type": ["string", "null"] },
+    "gene_type": { "type": ["string", "null"] },
     "aliases": {
       "type": ["array", "null"],
       "items": { "type": "string" }
+    },
+    "clinical_diseases": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "clinical_drugs": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true
