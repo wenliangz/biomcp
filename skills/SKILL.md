@@ -212,3 +212,35 @@ Rules:
 ## Efficiency Target
 
 Focused tasks should usually take `4-12` BioMCP commands. Broad investigations may need more.
+
+## JSON Output and Supporting Files
+
+Use `--json` before the subcommand for machine-readable output:
+
+```bash
+biomcp --json get gene BRAF
+biomcp --json search trial -c melanoma --limit 5
+```
+
+Get commands return the entity fields plus `_meta` (`evidence_urls`, `next_commands`).
+Search commands return:
+
+```json
+{
+  "pagination": {
+    "offset": 0,
+    "limit": 5,
+    "returned": 5,
+    "total": null,
+    "has_more": true,
+    "next_page_token": null
+  },
+  "count": 5,
+  "results": []
+}
+```
+
+JSON-processing references in `skills/`:
+- `schemas/` - JSON schemas for each entity type (`gene`, `variant`, `trial`, `article`, `drug`, `disease`, `pathway`)
+- `examples/` - paired `.json` and `.txt` example outputs for common commands
+- `jq-examples.md` - jq one-liners for extracting common fields from JSON output

@@ -5,11 +5,59 @@
   "required": ["name"],
   "properties": {
     "name": { "type": "string" },
+    "drugbank_id": { "type": ["string", "null"] },
+    "chembl_id": { "type": ["string", "null"] },
+    "unii": { "type": ["string", "null"] },
     "drug_type": { "type": ["string", "null"] },
     "mechanism": { "type": ["string", "null"] },
+    "mechanisms": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "approval_date": { "type": ["string", "null"] },
+    "brand_names": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "route": { "type": ["string", "null"] },
     "targets": {
       "type": ["array", "null"],
       "items": { "type": "string" }
+    },
+    "target": { "type": ["string", "null"] },
+    "indications": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "pharm_classes": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "top_adverse_events": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true
