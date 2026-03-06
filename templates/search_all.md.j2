@@ -2,6 +2,9 @@
 {% for section in sections %}
 {% if counts_only or section.error or section.rows | length > 0 or section.links | length > 0 -%}
 ## {{ section.label }} ({{ section.heading_count }})
+{% if section.note -%}
+> {{ section.note }}
+{% endif -%}
 {% if section.error -%}
 Error: {{ section.error }}
 {% elif counts_only -%}

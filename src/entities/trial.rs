@@ -440,6 +440,21 @@ COMPLETED, SUSPENDED, TERMINATED, WITHDRAWN. Aliases: active, comma/space forms.
     ))
 }
 
+fn normalize_single_status(value: &str) -> Result<&'static str, BioMcpError> {
+    let key = normalize_enum_key(value);
+    match key.as_str() {
+        "NOT_YET_RECRUITING" => Ok("NOT_YET_RECRUITING"),
+        "RECRUITING" => Ok("RECRUITING"),
+        "ENROLLING_BY_INVITATION" | "ENROLLING" => Ok("ENROLLING_BY_INVITATION"),
+        "ACTIVE_NOT_RECRUITING" | "ACTIVE" => Ok("ACTIVE_NOT_RECRUITING"),
+        "COMPLETED" | "COMPLETE" => Ok("COMPLETED"),
+        "SUSPENDED" => Ok("SUSPENDED"),
+        "TERMINATED" => Ok("TERMINATED"),
+        "WITHDRAWN" => Ok("WITHDRAWN"),
+        _ => Err(invalid_status_error(value)),
+    }
+}
+
 fn normalize_status(value: &str) -> Result<String, BioMcpError> {
     let raw = value.trim();
     if raw.is_empty() {
@@ -448,19 +463,26 @@ fn normalize_status(value: &str) -> Result<String, BioMcpError> {
         ));
     }
 
-    let key = normalize_enum_key(raw);
-    let canonical = match key.as_str() {
-        "NOT_YET_RECRUITING" => "NOT_YET_RECRUITING",
-        "RECRUITING" => "RECRUITING",
-        "ENROLLING_BY_INVITATION" | "ENROLLING" => "ENROLLING_BY_INVITATION",
-        "ACTIVE_NOT_RECRUITING" | "ACTIVE" => "ACTIVE_NOT_RECRUITING",
-        "COMPLETED" | "COMPLETE" => "COMPLETED",
-        "SUSPENDED" => "SUSPENDED",
-        "TERMINATED" => "TERMINATED",
-        "WITHDRAWN" => "WITHDRAWN",
-        _ => return Err(invalid_status_error(raw)),
-    };
-    Ok(canonical.to_string())
+    // Preserve existing single-value aliases, including
+    // "active, not recruiting".
+    if let Ok(single) = normalize_single_status(raw) {
+        return Ok(single.to_string());
+    }
+
+    let parts = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return Err(invalid_status_error(raw));
+    }
+
+    let mut normalized = Vec::with_capacity(parts.len());
+    for part in parts {
+        normalized.push(normalize_single_status(part)?.to_string());
+    }
+    Ok(normalized.join(","))
 }
 
 fn status_priority(value: &str) -> u8 {
@@ -1593,11 +1615,9 @@ pub async fn get(
         return Err(BioMcpError::InvalidArgument("NCT ID is too long.".into()));
     }
     if !looks_like_nct_id(nct_id) {
-        return Err(BioMcpError::NotFound {
-            entity: "trial".into(),
-            id: nct_id.to_string(),
-            suggestion: format!("Try searching: biomcp search trial -c \"{nct_id}\""),
-        });
+        return Err(BioMcpError::InvalidArgument(format!(
+            "Expected an NCT ID like NCT02576665 (got '{nct_id}')"
+        )));
     }
 
     let section_flags = parse_sections(sections)?;
@@ -1968,11 +1988,29 @@ mod tests {
     }
 
     #[test]
+    fn normalize_status_accepts_comma_separated_values() {
+        assert_eq!(
+            normalize_status("RECRUITING,ACTIVE_NOT_RECRUITING").unwrap(),
+            "RECRUITING,ACTIVE_NOT_RECRUITING"
+        );
+        assert_eq!(
+            normalize_status("recruiting,active").unwrap(),
+            "RECRUITING,ACTIVE_NOT_RECRUITING"
+        );
+    }
+
+    #[test]
     fn normalize_status_rejects_invalid_value() {
         let err = normalize_status("bogus").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("Unrecognized --status value"));
         assert!(msg.contains("ENROLLING_BY_INVITATION"));
+    }
+
+    #[test]
+    fn normalize_status_rejects_comma_list_with_invalid_value() {
+        let err = normalize_status("bogus,recruiting").unwrap_err();
+        assert!(err.to_string().contains("Unrecognized --status value"));
     }
 
     #[test]
@@ -2012,6 +2050,21 @@ mod tests {
     fn normalize_nct_id_uppercases_prefix() {
         assert_eq!(normalize_nct_id("nct06162221"), "NCT06162221");
         assert_eq!(normalize_nct_id("NCT06162221"), "NCT06162221");
+    }
+
+    #[tokio::test]
+    async fn get_rejects_non_nct_id_with_format_hint() {
+        let err = get("WRONG", &[], TrialSource::ClinicalTrialsGov)
+            .await
+            .expect_err("invalid trial id should fail before API call");
+
+        match err {
+            BioMcpError::InvalidArgument(message) => {
+                assert!(message.contains("Expected an NCT ID like NCT02576665"));
+                assert!(message.contains("got 'WRONG'"));
+            }
+            other => panic!("expected InvalidArgument, got: {other}"),
+        }
     }
 
     #[tokio::test]

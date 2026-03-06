@@ -1988,6 +1988,7 @@ pub fn search_all_markdown(
         label: String,
         heading_count: usize,
         error: Option<String>,
+        note: Option<String>,
         links: Vec<crate::cli::search_all::SearchAllLink>,
         columns: Vec<String>,
         rows: Vec<Vec<String>>,
@@ -2009,6 +2010,7 @@ pub fn search_all_markdown(
                 label: section.label.clone(),
                 heading_count,
                 error: section.error.clone(),
+                note: section.note.clone(),
                 links: section.links.clone(),
                 columns: section
                     .markdown_columns()
@@ -2422,5 +2424,37 @@ mod tests {
         assert!(markdown.contains("## Europe PMC"));
         assert!(markdown.contains("| PMID | Title | Journal | Date | Score |"));
         assert!(markdown.contains("| PMID | Title | Journal | Date | Cit. |"));
+    }
+
+    #[test]
+    fn search_all_markdown_renders_section_note() {
+        let results = crate::cli::search_all::SearchAllResults {
+            query: "gene=EGFR disease=non-small cell lung cancer".to_string(),
+            sections: vec![crate::cli::search_all::SearchAllSection {
+                entity: "variant".to_string(),
+                label: "Variants".to_string(),
+                count: 1,
+                total: Some(1),
+                error: None,
+                note: Some(
+                    "No disease-filtered variants found; showing top gene variants.".to_string(),
+                ),
+                results: vec![serde_json::json!({
+                    "id": "rs121434568",
+                    "gene": "EGFR",
+                    "hgvs_p": "L858R",
+                    "significance": "Pathogenic",
+                })],
+                links: Vec::new(),
+            }],
+            searches_dispatched: 1,
+            searches_with_results: 1,
+            wall_time_ms: 42,
+        };
+
+        let markdown = search_all_markdown(&results, false).expect("markdown should render");
+        assert!(
+            markdown.contains("> No disease-filtered variants found; showing top gene variants.")
+        );
     }
 }
