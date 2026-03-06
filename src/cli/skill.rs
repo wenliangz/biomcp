@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -251,14 +252,157 @@ fn resolve_install_dir(input: PathBuf) -> PathBuf {
     input.join("skills").join("biomcp")
 }
 
-fn agent_candidates() -> Result<Vec<PathBuf>, BioMcpError> {
-    Ok(vec![
-        expand_tilde("~/.claude")?,
-        expand_tilde("~/.codex")?,
-        expand_tilde("~/.config/opencode")?,
-        expand_tilde("~/.gemini")?,
-        expand_tilde("~/.pi")?,
-    ])
+#[derive(Debug, Clone)]
+struct CandidateEntry {
+    key: &'static str,
+    agent_root: PathBuf,
+    skills_dir: PathBuf,
+    biomcp_dir: PathBuf,
+    skill_md: PathBuf,
+}
+
+fn candidate_entry(key: &'static str, agent_root: PathBuf, skills_rel: &[&str]) -> CandidateEntry {
+    let skills_dir = skills_rel
+        .iter()
+        .fold(agent_root.clone(), |path, component| path.join(component));
+    let biomcp_dir = skills_dir.join("biomcp");
+    let skill_md = biomcp_dir.join("SKILL.md");
+
+    CandidateEntry {
+        key,
+        agent_root,
+        skills_dir,
+        biomcp_dir,
+        skill_md,
+    }
+}
+
+fn candidate_entries(home: &Path, cwd: &Path) -> Vec<CandidateEntry> {
+    vec![
+        candidate_entry("home-agents", home.join(".agents"), &["skills"]),
+        candidate_entry("home-claude", home.join(".claude"), &["skills"]),
+        candidate_entry("home-codex", home.join(".codex"), &["skills"]),
+        candidate_entry(
+            "home-opencode",
+            home.join(".config").join("opencode"),
+            &["skills"],
+        ),
+        candidate_entry("home-pi", home.join(".pi"), &["agent", "skills"]),
+        candidate_entry("home-gemini", home.join(".gemini"), &["skills"]),
+        candidate_entry("cwd-agents", cwd.join(".agents"), &["skills"]),
+        candidate_entry("cwd-claude", cwd.join(".claude"), &["skills"]),
+    ]
+}
+
+fn find_existing_install(candidates: &[CandidateEntry]) -> Option<(PathBuf, Vec<PathBuf>)> {
+    let mut primary: Option<PathBuf> = None;
+    let mut also_found: Vec<PathBuf> = Vec::new();
+
+    for candidate in candidates {
+        if !candidate.skill_md.is_file() {
+            continue;
+        }
+        if primary.is_none() {
+            primary = Some(candidate.biomcp_dir.clone());
+        } else {
+            also_found.push(candidate.biomcp_dir.clone());
+        }
+    }
+
+    primary.map(|path| (path, also_found))
+}
+
+fn skills_dir_has_other_skills(skills_dir: &Path) -> bool {
+    if !skills_dir.exists() {
+        return false;
+    }
+
+    let Ok(entries) = fs::read_dir(skills_dir) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        if entry.file_name() == "biomcp" {
+            return false;
+        }
+
+        entry.file_type().is_ok_and(|kind| kind.is_dir())
+    })
+}
+
+fn find_best_target(candidates: &[CandidateEntry]) -> Result<(PathBuf, &'static str), BioMcpError> {
+    let mut seen_skills_dirs: HashSet<PathBuf> = HashSet::new();
+    let mut populated_entries: Vec<&CandidateEntry> = Vec::new();
+
+    for candidate in candidates {
+        if !seen_skills_dirs.insert(candidate.skills_dir.clone()) {
+            continue;
+        }
+        if skills_dir_has_other_skills(&candidate.skills_dir) {
+            populated_entries.push(candidate);
+        }
+    }
+
+    if let Some(home_agents) = populated_entries
+        .iter()
+        .find(|candidate| candidate.key == "home-agents")
+    {
+        return Ok((
+            home_agents.biomcp_dir.clone(),
+            "existing skills directory detected",
+        ));
+    }
+
+    if let Some(first_populated) = populated_entries.first() {
+        return Ok((
+            first_populated.biomcp_dir.clone(),
+            "existing skills directory detected",
+        ));
+    }
+
+    if let Some(home_agents) = candidates
+        .iter()
+        .find(|candidate| candidate.key == "home-agents")
+        && home_agents.agent_root.exists()
+    {
+        return Ok((
+            home_agents.biomcp_dir.clone(),
+            "existing agent root detected",
+        ));
+    }
+
+    if let Some(home_claude) = candidates
+        .iter()
+        .find(|candidate| candidate.key == "home-claude")
+        && home_claude.agent_root.exists()
+    {
+        return Ok((
+            home_claude.biomcp_dir.clone(),
+            "existing agent root detected",
+        ));
+    }
+
+    if let Some(first_existing_root) = candidates
+        .iter()
+        .find(|candidate| candidate.agent_root.exists())
+    {
+        return Ok((
+            first_existing_root.biomcp_dir.clone(),
+            "existing agent root detected",
+        ));
+    }
+
+    let home_agents = candidates
+        .iter()
+        .find(|candidate| candidate.key == "home-agents")
+        .ok_or_else(|| {
+            BioMcpError::InvalidArgument("Missing home-agents install candidate".into())
+        })?;
+
+    Ok((
+        home_agents.biomcp_dir.clone(),
+        "no existing agent directories found; using cross-tool default",
+    ))
 }
 
 fn prompt_confirm(path: &Path) -> Result<bool, BioMcpError> {
@@ -275,6 +419,11 @@ fn prompt_confirm(path: &Path) -> Result<bool, BioMcpError> {
     io::stdin().read_line(&mut line).map_err(BioMcpError::Io)?;
     let ans = line.trim().to_ascii_lowercase();
     Ok(ans == "y" || ans == "yes")
+}
+
+fn write_stderr_line(line: &str) -> Result<(), BioMcpError> {
+    let mut stderr = io::stderr();
+    writeln!(&mut stderr, "{line}").map_err(BioMcpError::Io)
 }
 
 fn install_to_dir(dir: &Path, force: bool) -> Result<String, BioMcpError> {
@@ -355,39 +504,78 @@ pub fn install_skills(dir: Option<&str>, force: bool) -> Result<String, BioMcpEr
         return install_to_dir(&target, force);
     }
 
-    // Auto-detect installed agents.
-    let candidates = agent_candidates()?;
-    let mut found_any = false;
-    for base in candidates {
-        if !base.exists() {
-            continue;
-        }
-        found_any = true;
-        let target = resolve_install_dir(base);
-        if !std::io::stdin().is_terminal() {
-            return Err(BioMcpError::InvalidArgument(
-                "Non-interactive session: specify a directory (e.g. biomcp skill install ~/.claude)"
-                    .into(),
-            ));
-        }
-        if prompt_confirm(&target)? {
-            return install_to_dir(&target, force);
-        }
+    let home = expand_tilde("~")?;
+    let cwd = std::env::current_dir().map_err(BioMcpError::Io)?;
+    let candidates = candidate_entries(&home, &cwd);
+
+    let (target, reason, also_found) =
+        if let Some((target, also_found)) = find_existing_install(&candidates) {
+            (target, "existing BioMCP skill found", also_found)
+        } else {
+            let (target, reason) = find_best_target(&candidates)?;
+            (target, reason, Vec::new())
+        };
+
+    if !also_found.is_empty() {
+        let extra = also_found
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        write_stderr_line(&format!("Note: BioMCP skill also found at: {extra}"))?;
     }
 
-    if !found_any {
-        return Err(BioMcpError::InvalidArgument(
-            "No supported agent directories found. Specify a directory: biomcp skill install ~/.claude"
-                .into(),
-        ));
+    write_stderr_line(&format!("Auto-detected: {} ({reason})", target.display()))?;
+
+    if std::io::stdin().is_terminal() && !prompt_confirm(&target)? {
+        return Ok("No installation selected".into());
     }
 
-    Ok("No installation selected".into())
+    install_to_dir(&target, force)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestPaths {
+        root: PathBuf,
+        home: PathBuf,
+        cwd: PathBuf,
+    }
+
+    impl TestPaths {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "biomcp-skill-test-{name}-{}-{unique}",
+                std::process::id()
+            ));
+            let home = root.join("home");
+            let cwd = root.join("cwd");
+
+            fs::create_dir_all(&home).expect("create test home dir");
+            fs::create_dir_all(&cwd).expect("create test cwd dir");
+
+            Self { root, home, cwd }
+        }
+
+        fn create_file(&self, path: &Path) {
+            let parent = path.parent().expect("path has parent");
+            fs::create_dir_all(parent).expect("create parent dirs");
+            fs::write(path, "# test").expect("write test file");
+        }
+    }
+
+    impl Drop for TestPaths {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 
     #[test]
     fn embedded_skill_overview_includes_t017_t018_polish() -> Result<(), BioMcpError> {
@@ -407,6 +595,121 @@ mod tests {
         assert!(list_use_case_refs()?.is_empty());
         assert_eq!(list_use_cases()?, "No skills found");
         assert!(show_use_case("01").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn find_existing_install_detects_claude() {
+        let paths = TestPaths::new("existing-claude");
+        let skill_md = paths.home.join(".claude/skills/biomcp/SKILL.md");
+        paths.create_file(&skill_md);
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let (target, also_found) =
+            find_existing_install(&candidates).expect("expected existing install");
+
+        assert_eq!(target, paths.home.join(".claude/skills/biomcp"));
+        assert!(also_found.is_empty());
+    }
+
+    #[test]
+    fn find_existing_install_prefers_agents_and_reports_others() {
+        let paths = TestPaths::new("existing-prefer-agents");
+        paths.create_file(&paths.home.join(".agents/skills/biomcp/SKILL.md"));
+        paths.create_file(&paths.home.join(".claude/skills/biomcp/SKILL.md"));
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let (target, also_found) =
+            find_existing_install(&candidates).expect("expected existing installs");
+
+        assert_eq!(target, paths.home.join(".agents/skills/biomcp"));
+        assert_eq!(also_found, vec![paths.home.join(".claude/skills/biomcp")]);
+    }
+
+    #[test]
+    fn find_existing_install_ignores_skill_md_directory() -> Result<(), BioMcpError> {
+        let paths = TestPaths::new("existing-ignore-directory");
+        fs::create_dir_all(paths.home.join(".claude/skills/biomcp/SKILL.md"))?;
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let existing = find_existing_install(&candidates);
+
+        assert!(existing.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn find_best_target_prefers_agents_populated_skills_dir() -> Result<(), BioMcpError> {
+        let paths = TestPaths::new("best-populated-prefer-agents");
+        paths.create_file(&paths.home.join(".agents/skills/example/SKILL.md"));
+        paths.create_file(&paths.home.join(".claude/skills/other/SKILL.md"));
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let (target, reason) = find_best_target(&candidates)?;
+
+        assert_eq!(target, paths.home.join(".agents/skills/biomcp"));
+        assert_eq!(reason, "existing skills directory detected");
+        Ok(())
+    }
+
+    #[test]
+    fn find_best_target_ignores_non_skill_files_in_skills_dir() -> Result<(), BioMcpError> {
+        let paths = TestPaths::new("best-ignore-non-skill-files");
+        paths.create_file(&paths.home.join(".claude/skills/.DS_Store"));
+        paths.create_file(&paths.home.join(".codex/skills/example/SKILL.md"));
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let (target, reason) = find_best_target(&candidates)?;
+
+        assert_eq!(target, paths.home.join(".codex/skills/biomcp"));
+        assert_eq!(reason, "existing skills directory detected");
+        Ok(())
+    }
+
+    #[test]
+    fn find_best_target_falls_back_to_agents_root_then_claude_root() -> Result<(), BioMcpError> {
+        let agents = TestPaths::new("best-root-agents");
+        fs::create_dir_all(agents.home.join(".agents"))?;
+        let (agents_target, agents_reason) =
+            find_best_target(&candidate_entries(&agents.home, &agents.cwd))?;
+        assert_eq!(agents_target, agents.home.join(".agents/skills/biomcp"));
+        assert_eq!(agents_reason, "existing agent root detected");
+
+        let claude = TestPaths::new("best-root-claude");
+        fs::create_dir_all(claude.home.join(".claude"))?;
+        let (claude_target, claude_reason) =
+            find_best_target(&candidate_entries(&claude.home, &claude.cwd))?;
+        assert_eq!(claude_target, claude.home.join(".claude/skills/biomcp"));
+        assert_eq!(claude_reason, "existing agent root detected");
+
+        Ok(())
+    }
+
+    #[test]
+    fn find_best_target_preserves_pi_agent_skills_path() -> Result<(), BioMcpError> {
+        let paths = TestPaths::new("best-pi");
+        fs::create_dir_all(paths.home.join(".pi"))?;
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let (target, reason) = find_best_target(&candidates)?;
+
+        assert_eq!(target, paths.home.join(".pi/agent/skills/biomcp"));
+        assert_eq!(reason, "existing agent root detected");
+        Ok(())
+    }
+
+    #[test]
+    fn find_best_target_defaults_to_home_agents_when_nothing_exists() -> Result<(), BioMcpError> {
+        let paths = TestPaths::new("best-default");
+
+        let candidates = candidate_entries(&paths.home, &paths.cwd);
+        let (target, reason) = find_best_target(&candidates)?;
+
+        assert_eq!(target, paths.home.join(".agents/skills/biomcp"));
+        assert_eq!(
+            reason,
+            "no existing agent directories found; using cross-tool default"
+        );
         Ok(())
     }
 }
