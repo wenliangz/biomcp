@@ -408,8 +408,34 @@ pub fn parse_variant_id(id: &str) -> Result<VariantIdFormat, BioMcpError> {
         });
     }
 
+    let looks_like_search_phrase = {
+        let lower = id.to_ascii_lowercase();
+        [
+            "exon",
+            "deletion",
+            "insertion",
+            "duplication",
+            "fusion",
+            "rearrangement",
+            "amplification",
+            "splice",
+            "promoter",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    };
+
+    let search_hint = if looks_like_search_phrase {
+        format!(
+            "\n\nThis looks like a search phrase or alteration description, not an exact variant ID.\n\
+Use `biomcp search variant \"{id}\"` to search, or pass an exact rsID/HGVS/gene+protein change to `get variant`."
+        )
+    } else {
+        String::new()
+    };
+
     Err(BioMcpError::InvalidArgument(format!(
-        "Unrecognized variant format: '{id}'\n\n\
+        "Unrecognized variant format: '{id}'{search_hint}\n\n\
 Supported formats:\n\
 - rsID: rs113488022\n\
 - HGVS genomic: chr7:g.140453136A>T\n\
@@ -1686,6 +1712,16 @@ mod tests {
             VariantIdFormat::RsId(v) => assert_eq!(v, "rs113488022"),
             _ => panic!("expected rsid"),
         }
+    }
+
+    #[test]
+    fn parse_variant_id_suggests_search_for_complex_alteration_text() {
+        let message = match parse_variant_id("EGFR Exon 19 Deletion") {
+            Ok(_) => panic!("expected complex alteration text to be rejected"),
+            Err(err) => err.to_string(),
+        };
+        assert!(message.contains("search phrase or alteration description"));
+        assert!(message.contains("biomcp search variant \"EGFR Exon 19 Deletion\""));
     }
 
     #[test]
