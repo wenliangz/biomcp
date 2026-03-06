@@ -14,7 +14,7 @@ Use gene commands to retrieve canonical metadata and targeted biological context
 Start with search when you are unsure of symbol spelling or aliases.
 
 ```bash
-biomcp search gene -q BRAF --limit 5
+biomcp search gene BRAF --limit 5
 ```
 
 Useful fields in search output typically include symbol, Entrez ID, and species.
@@ -65,6 +65,24 @@ CIViC evidence summary:
 
 ```bash
 biomcp get gene BRAF civic
+```
+
+Tissue expression (GTEx):
+
+```bash
+biomcp get gene BRAF expression
+```
+
+Druggability profile (DGIdb):
+
+```bash
+biomcp get gene BRAF druggability
+```
+
+Gene-disease validity (ClinGen):
+
+```bash
+biomcp get gene BRAF clingen
 ```
 
 Multiple sections can be chained:

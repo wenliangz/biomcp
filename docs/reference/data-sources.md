@@ -9,7 +9,7 @@ and operational caveats so users can reason about result quality and troubleshoo
 | Entity / feature | Primary source(s) | Base URL | Auth required | Notes |
 |------------------|-------------------|----------|---------------|-------|
 | Gene | MyGene.info | `https://mygene.info/v3` | No | Symbol lookup, aliases, summaries |
-| Gene sections | UniProt, QuickGO, STRING | `https://rest.uniprot.org`, `https://www.ebi.ac.uk/QuickGO/services`, `https://string-db.org/api` | No | Protein summary, GO terms, interaction network |
+| Gene sections | UniProt, QuickGO, STRING, GTEx, DGIdb, ClinGen | `https://rest.uniprot.org`, `https://www.ebi.ac.uk/QuickGO/services`, `https://string-db.org/api`, `https://gtexportal.org/api/v2`, `https://dgidb.org/api/graphql`, `https://search.clinicalgenome.org` | No | Protein summary, GO terms, interactions, tissue expression, druggability, gene-disease validity |
 | Variant | MyVariant.info | `https://myvariant.info/v1` | No | rsID/HGVS lookup, ClinVar and population annotations |
 | Variant population section | MyVariant.info (gnomAD fields) | `https://myvariant.info/v1` | No | Uses cached gnomAD AF/subpopulation fields from MyVariant payload |
 | Variant GWAS section and GWAS search | GWAS Catalog REST API | `https://www.ebi.ac.uk/gwas/rest/api` | No | rsID, gene, and trait association retrieval |
@@ -18,7 +18,7 @@ and operational caveats so users can reason about result quality and troubleshoo
 | Trial (default) | ClinicalTrials.gov API v2 | `https://clinicaltrials.gov/api/v2` | No | Default trial search/get source |
 | Trial (optional) | NCI CTS API | `https://clinicaltrialsapi.cancer.gov/api/v2` | Yes (`NCI_API_KEY`) | Enabled via `--source nci` |
 | NCI CTS trial search | NCI CTS API | `https://clinicaltrialsapi.cancer.gov/api/v2` | Yes (`NCI_API_KEY`) | `search trial --source nci` |
-| Article metadata | Europe PMC + PubMed | `https://www.ebi.ac.uk/europepmc/webservices/rest` | No | Search and bibliographic metadata |
+| Article search & metadata | PubTator3 + Europe PMC | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api`, `https://www.ebi.ac.uk/europepmc/webservices/rest` | No | Federated search with PMID dedup and source-grouped output |
 | Article annotations | PubTator3 | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api` | No | Entity annotations |
 | Article fulltext resolution | PMC OA + NCBI ID Converter | `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi`, `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles` | No | Full-text and PMID/PMCID/DOI bridging |
 | Drug | MyChem.info | `https://mychem.info/v1` | No | Drug metadata, targets, synonyms |
@@ -88,9 +88,10 @@ BioMCP supports two trial backends with similar command syntax but different ret
 
 Article workflows compose multiple APIs for different tasks:
 
-1. Europe PMC / PubMed for search and bibliographic metadata
-2. PubTator3 for annotations
-3. NCBI ID converter + PMC OA for full-text resolution where available
+1. PubTator3 + Europe PMC for federated search (parallel fan-out, PMID dedup, PubTator-priority merge for duplicate PMIDs)
+2. Europe PMC for bibliographic metadata
+3. PubTator3 for entity annotations
+4. NCBI ID converter + PMC OA for full-text resolution where available
 
 This means metadata, annotations, and fulltext may have different availability for the same PMID.
 

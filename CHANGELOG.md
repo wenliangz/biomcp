@@ -1,11 +1,50 @@
 # Changelog
 
-## 0.9.0
+## [Unreleased]
 
-- Added boolean-aware eligibility query handling for `search trial --mutation` (supports `OR`/`AND`/`NOT` operator expressions).
-- Added `search trial --criteria` for explicit eligibility-text matching in ClinicalTrials.gov workflows.
-- Improved `search all` trial relevance by pushing disease+keyword intent into trial condition queries.
-- Added PyPI install path documentation and release pipeline updates for publishing `biomcp-cli`.
+- No unreleased entries yet.
+
+## 0.8.11 — 2026-03-06
+
+- Added `expression` section to gene output (GTEx tissue-specific TPM data).
+- Added `druggability` section to gene output (DGIdb drug-gene interactions and categories).
+- Added `clingen` section to gene output (gene-disease validity and dosage sensitivity).
+- Added evidence URLs (`_meta.evidence_urls`) to all entity output — includes Ensembl, OMIM, NCBI Gene, and UniProt links where available.
+- Added `spec/` BDD documentation suite with 54 passing executable specifications.
+- Unified article search: fan-out across PubTator3 and Europe PMC in parallel with PMID deduplication, source-grouped rendering, and `--source <all|pubtator|europepmc>`.
+- Added infinite cache mode via `BIOMCP_CACHE_MODE=infinite` for offline/demo workflows.
+- Consolidated CI into a single job; streamlined release pipeline.
+
+## 0.8.10 — 2026-03-04
+
+- Polished `search all` output: GWAS trait relevance filtering, clinical significance sorting, uninformative variant suppression.
+- Gene-anchored article search via `GENE_PROTEIN` field for higher precision.
+- Added trial search improvements (`--mutation` boolean handling and `--criteria` support).
+- Added PyPI trusted publisher setup and release workflow updates.
+
+## 0.8.9 — 2026-03-03
+
+- Added `search all` cross-entity command — parallel fan-out across major entities (genes, variants, diseases, drugs, trials, articles, pathways, PGx, GWAS, and adverse events) with counts-first display and HATEOAS deep-dive links.
+
+## 0.8.8 — 2026-03-02
+
+- Output cleanup across entity renderers for consistent markdown formatting.
+- Improved help discoverability and completeness across all subcommands.
+- Rewrote footer output with streamlined next-step suggestions.
+
+## 0.8.7 — 2026-02-27
+
+- Improved help text discoverability and completeness for all CLI subcommands.
+
+## 0.8.6 — 2026-02-27
+
+- Fixed trial filter accuracy: age-based post-filtering, exclusion-criteria detection, and pathway source correctness.
+
+## 0.8.5 — 2026-02-26
+
+- Fixed `install.sh` to resolve `latest` tag to a release that has downloadable assets.
+- Hardened input safety with SSRF prevention on user-supplied URLs.
+- Enforced pagination and validation contracts across search endpoints.
 
 ## 0.8.4
 

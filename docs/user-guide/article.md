@@ -35,6 +35,21 @@ Exclude preprints when supported by source metadata:
 biomcp search article -g BRAF --since 2024-01-01 --no-preprints --limit 5
 ```
 
+### Multi-source federation
+
+Article search fans out to PubTator3 and Europe PMC in parallel by default.
+Results are deduplicated by PMID when both backends return the same paper.
+Output is grouped by source; PubTator rows include a score column.
+
+Use `--source <all|pubtator|europepmc>` to select one backend or keep the default federated search.
+
+To search a single backend:
+
+```bash
+biomcp search article -g BRAF --source pubtator --limit 5
+biomcp search article -g BRAF --source europepmc --limit 5
+```
+
 ## Get an article
 
 Supported IDs include PMID, PMCID, and DOI.

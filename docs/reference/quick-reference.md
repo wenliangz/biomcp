@@ -41,13 +41,15 @@ biomcp variant oncokb "BRAF V600E"
 ## Common searches
 
 ```bash
-biomcp search gene -q BRAF --limit 5
+biomcp search gene BRAF --limit 5
 biomcp search variant -g BRCA1 --significance pathogenic --limit 5
 biomcp search trial -c melanoma --status recruiting --phase 2 --limit 5
 biomcp search article -g BRAF -d melanoma --since 2024-01-01 --limit 5
 biomcp search pathway -q "MAPK signaling" --limit 5
 biomcp search protein -q kinase --limit 5
 biomcp search adverse-event --drug pembrolizumab --serious --limit 5
+biomcp search all --gene BRAF --disease melanoma
+biomcp search all --keyword resistance --counts-only
 ```
 
 ## Output modes and discovery commands
