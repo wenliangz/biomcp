@@ -180,6 +180,9 @@ See also: biomcp list search-all")]
         /// Keyword slot
         #[arg(short = 'k', long)]
         keyword: Option<String>,
+        /// Optional positional query alias for -k/--keyword
+        #[arg(value_name = "QUERY")]
+        positional_query: Option<String>,
         /// Date lower bound for date-capable sections (YYYY, YYYY-MM, or YYYY-MM-DD)
         #[arg(long)]
         since: Option<String>,
@@ -270,6 +273,9 @@ See also: biomcp list pgx")]
         /// Filter by gene symbol
         #[arg(short = 'g', long)]
         gene: Option<String>,
+        /// Optional positional query alias for -g/--gene
+        #[arg(value_name = "QUERY")]
+        positional_query: Option<String>,
         /// Filter by drug name
         #[arg(short = 'd', long)]
         drug: Option<String>,
@@ -317,6 +323,9 @@ See also: biomcp list gwas")]
         /// Filter by gene symbol
         #[arg(short = 'g', long)]
         gene: Option<String>,
+        /// Optional positional query alias for -g/--gene
+        #[arg(value_name = "QUERY")]
+        positional_query: Option<String>,
         /// Filter by disease trait text
         #[arg(long = "trait")]
         trait_query: Option<String>,
@@ -433,6 +442,9 @@ See also: biomcp list trial")]
         /// Filter by condition/disease
         #[arg(short = 'c', long)]
         condition: Option<String>,
+        /// Optional positional query alias for -c/--condition
+        #[arg(value_name = "QUERY")]
+        positional_query: Option<String>,
 
         /// Filter by intervention/drug
         #[arg(short = 'i', long)]
@@ -550,9 +562,9 @@ See also: biomcp list variant")]
         /// Filter by gene symbol
         #[arg(short = 'g', long)]
         gene: Option<String>,
-        /// Optional positional query alias for -g/--gene
-        #[arg(value_name = "QUERY")]
-        positional_query: Option<String>,
+        /// Optional positional query tokens
+        #[arg(value_name = "QUERY", num_args = 0..)]
+        positional_query: Vec<String>,
 
         /// Filter by protein change (e.g., V600E or p.V600E)
         #[arg(long)]
@@ -736,6 +748,9 @@ See also: biomcp list adverse-event")]
         /// Drug name (required for FAERS queries)
         #[arg(short = 'd', long)]
         drug: Option<String>,
+        /// Optional positional query alias for -d/--drug
+        #[arg(value_name = "QUERY")]
+        positional_query: Option<String>,
 
         /// Device name (required for --type device)
         #[arg(long)]
@@ -1430,6 +1445,86 @@ fn resolve_query_input(
         (Some(value), None) | (None, Some(value)) => Ok(Some(value)),
         (None, None) => Ok(None),
     }
+}
+
+fn parse_simple_gene_change(query: &str) -> Option<(String, String)> {
+    let parts = query.split_whitespace().collect::<Vec<_>>();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let gene = parts[0].trim();
+    let change = parts[1]
+        .trim()
+        .trim_start_matches("p.")
+        .trim_start_matches("P.");
+    if gene.is_empty() || change.is_empty() {
+        return None;
+    }
+
+    let candidate = format!("{gene} {change}");
+    match crate::entities::variant::parse_variant_id(&candidate).ok()? {
+        crate::entities::variant::VariantIdFormat::GeneProteinChange { gene, change } => {
+            Some((gene, change))
+        }
+        _ => None,
+    }
+}
+
+type VariantQueryResolution = (Option<String>, Option<String>, Option<String>);
+
+fn resolve_variant_query(
+    gene_flag: Option<String>,
+    hgvsp_flag: Option<String>,
+    condition_flag: Option<String>,
+    positional_tokens: Vec<String>,
+) -> Result<VariantQueryResolution, crate::error::BioMcpError> {
+    let gene_flag = normalize_cli_query(gene_flag);
+    let hgvsp_flag = normalize_cli_query(hgvsp_flag);
+    let condition_flag = normalize_cli_query(condition_flag);
+
+    let positional = positional_tokens
+        .iter()
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let positional = normalize_cli_query(Some(positional));
+
+    let Some(query) = positional else {
+        return Ok((gene_flag, hgvsp_flag, condition_flag));
+    };
+
+    let token_count = query.split_whitespace().count();
+    if token_count <= 1 {
+        if gene_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Use either positional QUERY or --gene, not both".into(),
+            ));
+        }
+        return Ok((Some(query), hgvsp_flag, condition_flag));
+    }
+
+    if let Some((gene, change)) = parse_simple_gene_change(&query) {
+        if gene_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional \"GENE CHANGE\" conflicts with --gene".into(),
+            ));
+        }
+        if hgvsp_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional \"GENE CHANGE\" conflicts with --hgvsp".into(),
+            ));
+        }
+        return Ok((Some(gene), Some(change), condition_flag));
+    }
+
+    if condition_flag.is_some() {
+        return Err(crate::error::BioMcpError::InvalidArgument(
+            "Use either positional QUERY or --condition, not both".into(),
+        ));
+    }
+    Ok((gene_flag, hgvsp_flag, Some(query)))
 }
 
 async fn render_gene_card(
@@ -3210,10 +3305,12 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     disease,
                     drug,
                     keyword,
+                    positional_query,
                     since,
                     limit,
                     counts_only,
                 } => {
+                    let keyword = resolve_query_input(keyword, positional_query, "--keyword")?;
                     let input = crate::cli::search_all::SearchAllInput {
                         gene,
                         variant,
@@ -3312,6 +3409,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 }
                 SearchEntity::Pgx {
                     gene,
+                    positional_query,
                     drug,
                     cpic_level,
                     pgx_testing,
@@ -3319,6 +3417,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     limit,
                     offset,
                 } => {
+                    let gene = resolve_query_input(gene, positional_query, "--gene")?;
                     let filters = crate::entities::pgx::PgxSearchFilters {
                         gene,
                         drug,
@@ -3373,12 +3472,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 }
                 SearchEntity::Gwas {
                     gene,
+                    positional_query,
                     trait_query,
                     region,
                     p_value,
                     limit,
                     offset,
                 } => {
+                    let gene = resolve_query_input(gene, positional_query, "--gene")?;
                     let filters = crate::entities::variant::GwasSearchFilters {
                         gene,
                         trait_query,
@@ -3518,6 +3619,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 }
                 SearchEntity::Trial {
                     condition,
+                    positional_query,
                     intervention,
                     facility,
                     phase,
@@ -3545,6 +3647,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     next_page,
                     limit,
                 } => {
+                    let condition =
+                        resolve_query_input(condition, positional_query, "--condition")?;
                     let trial_source = crate::entities::trial::TrialSource::from_flag(&source)?;
                     let filters = crate::entities::trial::TrialSearchFilters {
                         condition,
@@ -3655,7 +3759,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     limit,
                     offset,
                 } => {
-                    let gene = resolve_query_input(gene, positional_query, "--gene")?;
+                    let (gene, hgvsp, condition) =
+                        resolve_variant_query(gene, hgvsp, condition, positional_query)?;
                     let filters = crate::entities::variant::VariantSearchFilters {
                         gene,
                         hgvsp,
@@ -3854,6 +3959,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 }
                 SearchEntity::AdverseEvent {
                     drug,
+                    positional_query,
                     device,
                     manufacturer,
                     product_code,
@@ -3873,6 +3979,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     limit,
                     offset,
                 } => {
+                    let drug = resolve_query_input(drug, positional_query, "--drug")?;
                     let query_type =
                         crate::entities::adverse_event::AdverseEventQueryType::from_flag(&r#type)?;
 
@@ -4240,9 +4347,10 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
 mod tests {
     use super::{
         ArticleCommand, Cli, Commands, GeneCommand, ProteinCommand, VariantCommand, execute,
-        extract_json_from_sections, paginate_trial_locations, parse_trial_location_paging,
-        resolve_query_input, should_try_pathway_trial_fallback, trial_locations_json,
-        trial_search_query_summary, truncate_article_annotations,
+        extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
+        parse_trial_location_paging, resolve_query_input, resolve_variant_query,
+        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
+        truncate_article_annotations,
     };
     use clap::Parser;
 
@@ -4431,6 +4539,95 @@ mod tests {
         let err_gene =
             resolve_query_input(Some("TP53".into()), Some("BRAF".into()), "--gene").unwrap_err();
         assert!(format!("{err_gene}").contains("Use either positional QUERY or --gene, not both"));
+    }
+
+    #[test]
+    fn parse_simple_gene_change_detects_supported_forms() {
+        assert_eq!(
+            parse_simple_gene_change("BRAF V600E"),
+            Some(("BRAF".into(), "V600E".into()))
+        );
+        assert_eq!(
+            parse_simple_gene_change("EGFR T790M"),
+            Some(("EGFR".into(), "T790M".into()))
+        );
+        assert_eq!(
+            parse_simple_gene_change("BRAF p.V600E"),
+            Some(("BRAF".into(), "V600E".into()))
+        );
+    }
+
+    #[test]
+    fn parse_simple_gene_change_rejects_non_simple_forms() {
+        assert_eq!(parse_simple_gene_change("BRAF"), None);
+        assert_eq!(parse_simple_gene_change("EGFR Exon 19 Deletion"), None);
+        assert_eq!(parse_simple_gene_change("EGFR Exon19"), None);
+        assert_eq!(parse_simple_gene_change("braf V600E"), None);
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_single_token_to_gene() {
+        let (gene, hgvsp, condition) =
+            resolve_variant_query(None, None, None, vec!["BRAF".into()]).unwrap();
+        assert_eq!(gene.as_deref(), Some("BRAF"));
+        assert!(hgvsp.is_none());
+        assert!(condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_simple_gene_change_to_gene_and_hgvsp() {
+        let (gene, hgvsp, condition) =
+            resolve_variant_query(None, None, None, vec!["BRAF".into(), "V600E".into()]).unwrap();
+        assert_eq!(gene.as_deref(), Some("BRAF"));
+        assert_eq!(hgvsp.as_deref(), Some("V600E"));
+        assert!(condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_complex_text_to_condition() {
+        let (gene, hgvsp, condition) = resolve_variant_query(
+            None,
+            None,
+            None,
+            vec!["EGFR".into(), "Exon".into(), "19".into(), "Deletion".into()],
+        )
+        .unwrap();
+        assert!(gene.is_none());
+        assert!(hgvsp.is_none());
+        assert_eq!(condition.as_deref(), Some("EGFR Exon 19 Deletion"));
+    }
+
+    #[test]
+    fn resolve_variant_query_rejects_conflicts_with_positional_mapping() {
+        let gene_conflict = resolve_variant_query(
+            Some("TP53".into()),
+            None,
+            None,
+            vec!["BRAF".into(), "V600E".into()],
+        )
+        .unwrap_err();
+        assert!(format!("{gene_conflict}").contains("conflicts with --gene"));
+
+        let hgvsp_conflict = resolve_variant_query(
+            None,
+            Some("G12D".into()),
+            None,
+            vec!["KRAS".into(), "G12C".into()],
+        )
+        .unwrap_err();
+        assert!(format!("{hgvsp_conflict}").contains("conflicts with --hgvsp"));
+
+        let condition_conflict = resolve_variant_query(
+            None,
+            None,
+            Some("lung cancer".into()),
+            vec!["EGFR".into(), "Exon".into(), "19".into(), "Deletion".into()],
+        )
+        .unwrap_err();
+        assert!(
+            format!("{condition_conflict}")
+                .contains("Use either positional QUERY or --condition, not both")
+        );
     }
 
     #[test]
@@ -4623,7 +4820,7 @@ mod tests {
     }
 
     #[test]
-    fn search_variant_parses_positional_query() {
+    fn search_variant_parses_single_token_positional_query() {
         let cli = Cli::try_parse_from(["biomcp", "search", "variant", "BRAF", "--limit", "2"])
             .expect("search variant positional query should parse");
         match cli.command {
@@ -4637,7 +4834,205 @@ mod tests {
                     },
             } => {
                 assert!(gene.is_none());
+                assert_eq!(positional_query, vec!["BRAF".to_string()]);
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_variant_parses_multi_token_positional_query_and_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp", "search", "variant", "BRAF", "V600E", "--limit", "5",
+        ])
+        .expect("search variant positional+flag should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Variant {
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(
+                    positional_query,
+                    vec!["BRAF".to_string(), "V600E".to_string()]
+                );
+                assert_eq!(limit, 5);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_variant_parses_quoted_gene_change_positional_query() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "search", "variant", "BRAF V600E", "--limit", "5"])
+                .expect("search variant quoted positional should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Variant {
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(positional_query, vec!["BRAF V600E".to_string()]);
+                assert_eq!(limit, 5);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_trial_parses_positional_query() {
+        let cli = Cli::try_parse_from(["biomcp", "search", "trial", "melanoma", "--limit", "2"])
+            .expect("search trial positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Trial {
+                        condition,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert!(condition.is_none());
+                assert_eq!(positional_query.as_deref(), Some("melanoma"));
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_trial_parses_multi_word_positional_query() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "trial",
+            "non-small cell lung cancer",
+            "--limit",
+            "2",
+        ])
+        .expect("search trial multi-word positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Trial {
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(
+                    positional_query.as_deref(),
+                    Some("non-small cell lung cancer")
+                );
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_trial_parses_positional_query_with_status_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "trial",
+            "melanoma",
+            "--status",
+            "recruiting",
+        ])
+        .expect("search trial positional query with status should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Trial {
+                        positional_query,
+                        status,
+                        ..
+                    },
+            } => {
+                assert_eq!(positional_query.as_deref(), Some("melanoma"));
+                assert_eq!(status.as_deref(), Some("recruiting"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_pgx_parses_positional_query() {
+        let cli = Cli::try_parse_from(["biomcp", "search", "pgx", "CYP2D6", "--limit", "2"])
+            .expect("search pgx positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Pgx {
+                        gene,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert!(gene.is_none());
+                assert_eq!(positional_query.as_deref(), Some("CYP2D6"));
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_gwas_parses_positional_query() {
+        let cli = Cli::try_parse_from(["biomcp", "search", "gwas", "BRAF", "--limit", "2"])
+            .expect("search gwas positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Gwas {
+                        gene,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert!(gene.is_none());
                 assert_eq!(positional_query.as_deref(), Some("BRAF"));
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_adverse_event_parses_positional_query() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "adverse-event",
+            "pembrolizumab",
+            "--limit",
+            "2",
+        ])
+        .expect("search adverse-event positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::AdverseEvent {
+                        drug,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert!(drug.is_none());
+                assert_eq!(positional_query.as_deref(), Some("pembrolizumab"));
                 assert_eq!(limit, 2);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -4683,6 +5078,28 @@ mod tests {
                 assert_eq!(since.as_deref(), Some("2024-01-01"));
                 assert!(counts_only);
                 assert_eq!(limit, 4);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_all_parses_positional_keyword() {
+        let cli = Cli::try_parse_from(["biomcp", "search", "all", "BRAF", "--limit", "2"])
+            .expect("search all positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::All {
+                        keyword,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert!(keyword.is_none());
+                assert_eq!(positional_query.as_deref(), Some("BRAF"));
+                assert_eq!(limit, 2);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -4765,6 +5182,24 @@ mod tests {
         .await
         .expect_err("enrich should reject --limit > 50");
         assert!(err.to_string().contains("--limit must be between 1 and 50"));
+    }
+
+    #[tokio::test]
+    async fn search_adverse_event_device_rejects_positional_drug_alias() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "search".to_string(),
+            "adverse-event".to_string(),
+            "pembrolizumab".to_string(),
+            "--type".to_string(),
+            "device".to_string(),
+        ])
+        .await
+        .expect_err("device query should reject positional drug alias");
+        assert!(
+            err.to_string()
+                .contains("--drug cannot be used with --type device")
+        );
     }
 
     #[tokio::test]
