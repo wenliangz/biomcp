@@ -8,7 +8,10 @@ use tracing::warn;
 use crate::entities::SearchPage;
 use crate::error::BioMcpError;
 use crate::sources::civic::{CivicClient, CivicContext};
+use crate::sources::clingen::{ClinGenClient, GeneClinGen};
+use crate::sources::dgidb::{DgidbClient, GeneDruggability};
 use crate::sources::enrichr::EnrichrClient;
+use crate::sources::gtex::{GeneExpression, GtexClient};
 use crate::sources::mygene::MyGeneClient;
 use crate::sources::opentargets::OpenTargetsClient;
 use crate::sources::quickgo::QuickGoClient;
@@ -52,6 +55,12 @@ pub struct Gene {
     pub interactions: Option<Vec<GeneInteraction>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub civic: Option<CivicContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression: Option<GeneExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub druggability: Option<GeneDruggability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clingen: Option<GeneClinGen>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +126,9 @@ enum GeneIncludeType {
     Go,
     Interactions,
     Civic,
+    Expression,
+    Druggability,
+    ClinGen,
 }
 
 const GENE_SECTION_PATHWAYS: &str = "pathways";
@@ -126,6 +138,9 @@ const GENE_SECTION_PROTEIN: &str = "protein";
 const GENE_SECTION_GO: &str = "go";
 const GENE_SECTION_INTERACTIONS: &str = "interactions";
 const GENE_SECTION_CIVIC: &str = "civic";
+const GENE_SECTION_EXPRESSION: &str = "expression";
+const GENE_SECTION_DRUGGABILITY: &str = "druggability";
+const GENE_SECTION_CLINGEN: &str = "clingen";
 const GENE_SECTION_ALL: &str = "all";
 
 pub const GENE_SECTION_NAMES: &[&str] = &[
@@ -136,6 +151,9 @@ pub const GENE_SECTION_NAMES: &[&str] = &[
     GENE_SECTION_GO,
     GENE_SECTION_INTERACTIONS,
     GENE_SECTION_CIVIC,
+    GENE_SECTION_EXPRESSION,
+    GENE_SECTION_DRUGGABILITY,
+    GENE_SECTION_CLINGEN,
     GENE_SECTION_ALL,
 ];
 
@@ -149,6 +167,9 @@ impl GeneIncludeType {
             GENE_SECTION_GO => Some(Self::Go),
             GENE_SECTION_INTERACTIONS | "interaction" => Some(Self::Interactions),
             GENE_SECTION_CIVIC => Some(Self::Civic),
+            GENE_SECTION_EXPRESSION => Some(Self::Expression),
+            GENE_SECTION_DRUGGABILITY | "drugs" => Some(Self::Druggability),
+            GENE_SECTION_CLINGEN => Some(Self::ClinGen),
             _ => None,
         }
     }
@@ -159,7 +180,13 @@ impl GeneIncludeType {
             Self::Pathways => &[],
             Self::Ontology => &["GO_Biological_Process_2025", "GO_Molecular_Function_2025"],
             Self::Diseases => &["DisGeNET", "OMIM_Disease"],
-            Self::Protein | Self::Go | Self::Interactions | Self::Civic => &[],
+            Self::Protein
+            | Self::Go
+            | Self::Interactions
+            | Self::Civic
+            | Self::Expression
+            | Self::Druggability
+            | Self::ClinGen => &[],
         }
     }
 }
@@ -359,7 +386,10 @@ async fn enrich_gene(
             | GeneIncludeType::Protein
             | GeneIncludeType::Go
             | GeneIncludeType::Interactions
-            | GeneIncludeType::Civic => {}
+            | GeneIncludeType::Civic
+            | GeneIncludeType::Expression
+            | GeneIncludeType::Druggability
+            | GeneIncludeType::ClinGen => {}
             GeneIncludeType::Ontology => {
                 if let Some(v) = ontology.as_mut() {
                     v.push(result);
@@ -414,6 +444,9 @@ fn parse_sections(sections: &[String]) -> Result<Vec<GeneIncludeType>, BioMcpErr
             GeneIncludeType::Go,
             GeneIncludeType::Interactions,
             GeneIncludeType::Civic,
+            GeneIncludeType::Expression,
+            GeneIncludeType::Druggability,
+            GeneIncludeType::ClinGen,
         ];
     }
 
@@ -664,6 +697,115 @@ async fn add_civic_section(gene: &mut Gene) {
     }
 }
 
+async fn add_expression_section(gene: &mut Gene) {
+    let Some(ensembl_id) = gene
+        .ensembl_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        gene.expression = Some(GeneExpression::default());
+        return;
+    };
+
+    let expression_fut = async {
+        let client = GtexClient::new()?;
+        let tissues = client.median_gene_expression(ensembl_id).await?;
+        Ok::<_, BioMcpError>(GeneExpression { tissues })
+    };
+
+    match tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, expression_fut).await {
+        Ok(Ok(expression)) => gene.expression = Some(expression),
+        Ok(Err(err)) => {
+            warn!(
+                symbol = %gene.symbol,
+                ensembl_id = %ensembl_id,
+                "GTEx unavailable for gene expression section: {err}"
+            );
+            gene.expression = Some(GeneExpression::default());
+        }
+        Err(_) => {
+            warn!(
+                symbol = %gene.symbol,
+                ensembl_id = %ensembl_id,
+                timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
+                "GTEx expression section timed out"
+            );
+            gene.expression = Some(GeneExpression::default());
+        }
+    }
+}
+
+async fn add_druggability_section(gene: &mut Gene) {
+    let symbol = gene.symbol.trim();
+    if symbol.is_empty() {
+        gene.druggability = Some(GeneDruggability::default());
+        return;
+    }
+
+    let dgidb_fut = async {
+        let client = DgidbClient::new()?;
+        client.gene_interactions(symbol).await
+    };
+
+    match tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, dgidb_fut).await {
+        Ok(Ok(druggability)) => gene.druggability = Some(druggability),
+        Ok(Err(err)) => {
+            warn!(
+                symbol = %gene.symbol,
+                "DGIdb unavailable for gene druggability section: {err}"
+            );
+            gene.druggability = Some(GeneDruggability::default());
+        }
+        Err(_) => {
+            warn!(
+                symbol = %gene.symbol,
+                timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
+                "DGIdb gene section timed out"
+            );
+            gene.druggability = Some(GeneDruggability::default());
+        }
+    }
+}
+
+async fn add_clingen_section(gene: &mut Gene) {
+    let symbol = gene.symbol.trim();
+    if symbol.is_empty() {
+        gene.clingen = Some(GeneClinGen::default());
+        return;
+    }
+
+    let clingen_fut = async {
+        let client = ClinGenClient::new()?;
+        let validity = client.gene_validity(symbol).await?;
+        let (haploinsufficiency, triplosensitivity) = client.dosage_sensitivity(symbol).await?;
+        Ok::<_, BioMcpError>(GeneClinGen {
+            validity,
+            haploinsufficiency,
+            triplosensitivity,
+        })
+    };
+
+    match tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, clingen_fut).await {
+        Ok(Ok(clingen)) => gene.clingen = Some(clingen),
+        Ok(Err(err)) => {
+            warn!(
+                symbol = %gene.symbol,
+                "ClinGen unavailable for gene clingen section: {err}"
+            );
+            gene.clingen = Some(GeneClinGen::default());
+        }
+        Err(_) => {
+            warn!(
+                symbol = %gene.symbol,
+                timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
+                "ClinGen gene section timed out"
+            );
+            gene.clingen = Some(GeneClinGen::default());
+        }
+    }
+}
+
 pub async fn get(symbol: &str, sections: &[String]) -> Result<Gene, BioMcpError> {
     if symbol.trim().is_empty() {
         return Err(BioMcpError::InvalidArgument(
@@ -738,6 +880,18 @@ pub async fn get(symbol: &str, sections: &[String]) -> Result<Gene, BioMcpError>
 
     if include.contains(&GeneIncludeType::Civic) {
         add_civic_section(&mut gene).await;
+    }
+
+    if include.contains(&GeneIncludeType::Expression) {
+        add_expression_section(&mut gene).await;
+    }
+
+    if include.contains(&GeneIncludeType::Druggability) {
+        add_druggability_section(&mut gene).await;
+    }
+
+    if include.contains(&GeneIncludeType::ClinGen) {
+        add_clingen_section(&mut gene).await;
     }
 
     Ok(gene)
@@ -1089,5 +1243,29 @@ mod tests {
     fn normalize_go_id_rejects_free_text() {
         let err = normalize_go_id("DNA repair").expect_err("free text should fail");
         assert!(err.to_string().contains("GO:0000000"));
+    }
+
+    #[test]
+    fn gene_section_names_include_new_enrichment_sections() {
+        assert!(GENE_SECTION_NAMES.contains(&"expression"));
+        assert!(GENE_SECTION_NAMES.contains(&"druggability"));
+        assert!(GENE_SECTION_NAMES.contains(&"clingen"));
+    }
+
+    #[test]
+    fn parse_sections_accepts_new_enrichment_sections() {
+        let parsed = parse_sections(&[
+            "expression".to_string(),
+            "druggability".to_string(),
+            "clingen".to_string(),
+        ])
+        .expect("new gene sections should parse");
+        assert_eq!(parsed.len(), 3);
+    }
+
+    #[test]
+    fn parse_sections_all_includes_new_gene_sections() {
+        let parsed = parse_sections(&["all".to_string()]).expect("all should parse");
+        assert_eq!(parsed.len(), 10);
     }
 }

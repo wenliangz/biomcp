@@ -394,6 +394,9 @@ fn is_section_like_token(token: &str) -> bool {
             | "go"
             | "interactions"
             | "civic"
+            | "expression"
+            | "druggability"
+            | "clingen"
             | "predict"
             | "predictions"
             | "clinvar"
@@ -804,5 +807,12 @@ mod tests {
         fs::remove_file(&session_path).expect("cleanup");
 
         assert!(err.to_string().contains("invalid JSONL line"));
+    }
+
+    #[test]
+    fn section_like_tokens_include_new_gene_enrichment_sections() {
+        assert!(is_section_like_token("expression"));
+        assert!(is_section_like_token("druggability"));
+        assert!(is_section_like_token("clingen"));
     }
 }

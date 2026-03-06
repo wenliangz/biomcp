@@ -108,6 +108,65 @@ No CIViC records returned for this gene query.
 No CIViC records returned for this gene query.
 {% endif -%}
 {% endif -%}
+{% if show_expression_section -%}
+## Expression (GTEx)
+
+{% if expression and expression.tissues -%}
+| Tissue | Median TPM |
+|---|---|
+{% for row in expression.tissues -%}
+| {{ row.tissue }} | {{ row.median_tpm | score }} |
+{% endfor -%}
+{% else -%}
+No GTEx expression records returned for this gene query.
+{% endif -%}
+{% endif -%}
+{% if show_druggability_section -%}
+## Druggability (DGIdb)
+
+{% if druggability -%}
+{% if druggability.categories -%}
+Categories: {{ druggability.categories | join(", ") }}
+{% endif -%}
+{% if druggability.interactions -%}
+| Drug | Interaction Types | Score | Approved | Sources |
+|---|---|---|---|---|
+{% for row in druggability.interactions -%}
+| {{ row.drug }} | {% if row.interaction_types %}{{ row.interaction_types | join(", ") }}{% else %}-{% endif %} | {% if row.score is not none %}{{ row.score | score }}{% else %}-{% endif %} | {% if row.approved is none %}-{% elif row.approved %}yes{% else %}no{% endif %} | {{ row.source_count }} |
+{% endfor -%}
+{% else -%}
+No DGIdb interactions returned for this gene query.
+{% endif -%}
+{% else -%}
+No DGIdb interactions returned for this gene query.
+{% endif -%}
+{% endif -%}
+{% if show_clingen_section -%}
+## ClinGen
+
+{% if clingen -%}
+{% if clingen.validity -%}
+### Gene-Disease Validity
+
+| Disease | Classification | Review Date | MOI |
+|---|---|---|---|
+{% for row in clingen.validity -%}
+| {{ row.disease | truncate(55) }} | {{ row.classification }} | {{ row.review_date or "-" }} | {{ row.moi or "-" }} |
+{% endfor -%}
+{% endif -%}
+{% if clingen.haploinsufficiency or clingen.triplosensitivity -%}
+### Dosage Sensitivity
+
+- Haploinsufficiency: {{ clingen.haploinsufficiency or "No evidence" }}
+- Triplosensitivity: {{ clingen.triplosensitivity or "No evidence" }}
+{% endif -%}
+{% if not clingen.validity and not clingen.haploinsufficiency and not clingen.triplosensitivity -%}
+No ClinGen records returned for this gene query.
+{% endif -%}
+{% else -%}
+No ClinGen records returned for this gene query.
+{% endif -%}
+{% endif -%}
 {% if sections_block %}{{ sections_block }}
 {% endif -%}
 {% if related_block %}{{ related_block }}

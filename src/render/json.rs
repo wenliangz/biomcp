@@ -107,6 +107,9 @@ mod tests {
             go: None,
             interactions: None,
             civic: None,
+            expression: None,
+            druggability: None,
+            clingen: None,
         };
 
         let json = to_pretty(&gene).expect("gene json");
