@@ -16,6 +16,12 @@ biomcp get <entity> <id> [section...]
 
 Section names are positional trailing arguments after `<id>`.
 
+## Evidence metadata
+
+`get` responses include outbound evidence links in markdown output where available.
+In JSON mode, links are exposed under `_meta.evidence_urls` and can include
+Ensembl, OMIM, NCBI Gene, and UniProt URLs.
+
 ## Top-level commands
 
 ```text
@@ -35,6 +41,14 @@ biomcp version
 ```
 
 ## Search command families
+
+### All (cross-entity)
+
+```bash
+biomcp search all --gene BRAF --disease melanoma
+biomcp search all --gene BRAF --counts-only
+biomcp search all --keyword "immunotherapy resistance" --since 2024-01-01
+```
 
 ### Gene
 
@@ -119,8 +133,9 @@ biomcp search adverse-event --type device --product-code PQP --limit 5
 
 ```bash
 biomcp get gene BRAF
-biomcp get gene BRAF pathways
-biomcp get gene BRAF diseases
+biomcp get gene BRAF pathways ontology diseases protein
+biomcp get gene BRAF go interactions civic expression druggability clingen
+biomcp get gene BRAF all
 ```
 
 ### Disease
