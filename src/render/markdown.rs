@@ -905,8 +905,12 @@ pub fn gene_markdown(gene: &Gene, requested_sections: &[String]) -> Result<Strin
     let section_only = is_section_only_requested(requested_sections);
     let include_all = has_all_section(requested_sections);
     let requested = requested_section_names(requested_sections);
-    let show_civic_section =
-        include_all || requested.iter().any(|s| s.eq_ignore_ascii_case("civic"));
+    let has_requested = |name: &str| requested.iter().any(|s| s.eq_ignore_ascii_case(name));
+    let show_civic_section = include_all || has_requested("civic");
+    let show_expression_section = include_all || has_requested("expression");
+    let show_druggability_section =
+        include_all || has_requested("druggability") || has_requested("drugs");
+    let show_clingen_section = include_all || has_requested("clingen");
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(&gene.symbol, requested_sections),
@@ -930,7 +934,13 @@ pub fn gene_markdown(gene: &Gene, requested_sections: &[String]) -> Result<Strin
         go_terms => &gene.go,
         interactions => &gene.interactions,
         civic => &gene.civic,
+        expression => &gene.expression,
+        druggability => &gene.druggability,
+        clingen => &gene.clingen,
         show_civic_section => show_civic_section,
+        show_expression_section => show_expression_section,
+        show_druggability_section => show_druggability_section,
+        show_clingen_section => show_clingen_section,
         sections_block => format_sections_block("gene", &gene.symbol, sections_gene(gene, requested_sections)),
         related_block => format_related_block(related_gene(gene)),
     })?;
@@ -2062,12 +2072,62 @@ mod tests {
             go: None,
             interactions: None,
             civic: None,
+            expression: None,
+            druggability: None,
+            clingen: None,
         };
 
         let markdown = gene_markdown(&gene, &[]).expect("rendered markdown");
         assert!(markdown.contains("BRAF"));
         assert!(markdown.contains("[NCBI Gene](https://www.ncbi.nlm.nih.gov/gene/673)"));
         assert!(markdown.contains("[UniProt](https://www.uniprot.org/uniprot/P15056)"));
+    }
+
+    #[test]
+    fn gene_markdown_section_only_shows_new_gene_enrichment_sections() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: Some("ENSG00000157764".to_string()),
+            location: Some("7q34".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P15056".to_string()),
+            summary: Some("Kinase involved in MAPK signaling.".to_string()),
+            gene_type: Some("protein-coding".to_string()),
+            aliases: vec!["BRAF1".to_string()],
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            druggability: None,
+            clingen: None,
+        };
+
+        let markdown = gene_markdown(
+            &gene,
+            &[
+                "expression".to_string(),
+                "druggability".to_string(),
+                "clingen".to_string(),
+            ],
+        )
+        .expect("rendered markdown");
+
+        assert!(markdown.contains("# BRAF - expression, druggability, clingen"));
+        assert!(markdown.contains("## Expression (GTEx)"));
+        assert!(markdown.contains("## Druggability (DGIdb)"));
+        assert!(markdown.contains("## ClinGen"));
+        assert!(markdown.contains("No GTEx expression records returned"));
+        assert!(markdown.contains("No DGIdb interactions returned"));
+        assert!(markdown.contains("No ClinGen records returned"));
     }
 
     #[test]
@@ -2225,6 +2285,9 @@ mod tests {
             go: None,
             interactions: None,
             civic: None,
+            expression: None,
+            druggability: None,
+            clingen: None,
         };
 
         let urls = gene_evidence_urls(&gene);

@@ -815,7 +815,7 @@ See also: biomcp list gene")]
     Gene {
         /// Gene symbol (e.g., BRAF, TP53, EGFR)
         symbol: String,
-        /// Sections to include (pathways, ontology, diseases, protein, go, interactions, all)
+        /// Sections to include (pathways, ontology, diseases, protein, go, interactions, civic, expression, druggability, clingen, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },

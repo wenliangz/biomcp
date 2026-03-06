@@ -174,6 +174,9 @@ pub fn from_mygene_get(resp: MyGeneGetResponse) -> Gene {
         go: None,
         interactions: None,
         civic: None,
+        expression: None,
+        druggability: None,
+        clingen: None,
     }
 }
 

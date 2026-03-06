@@ -68,6 +68,9 @@ fn affects_for_api(api: &str) -> Option<&'static str> {
         "CPIC" | "PharmGKB" => Some("pgx recommendations and annotations"),
         "Monarch" => Some("disease genes, phenotypes, and models"),
         "GWAS Catalog" => Some("gwas search and variant gwas context"),
+        "GTEx" => Some("gene expression section"),
+        "DGIdb" => Some("gene druggability section"),
+        "ClinGen" => Some("gene clingen section"),
         _ => None,
     }
 }
@@ -77,6 +80,58 @@ async fn check_one(client: reqwest::Client, api: &str, url: &str) -> HealthRow {
     let resp = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await;
+
+    match resp {
+        Ok(resp) => {
+            let status = resp.status();
+            let elapsed = start.elapsed().as_millis();
+            if status.is_success() {
+                HealthRow {
+                    api: api.to_string(),
+                    status: "ok".into(),
+                    latency: format!("{elapsed}ms"),
+                    affects: None,
+                }
+            } else {
+                HealthRow {
+                    api: api.to_string(),
+                    status: "error".into(),
+                    latency: format!("{elapsed}ms (HTTP {})", status.as_u16()),
+                    affects: affects_for_api(api).map(str::to_string),
+                }
+            }
+        }
+        Err(err) => {
+            let reason = if err.is_timeout() {
+                "timeout"
+            } else if err.is_connect() {
+                "connect"
+            } else {
+                "error"
+            };
+            HealthRow {
+                api: api.to_string(),
+                status: "error".into(),
+                latency: reason.into(),
+                affects: affects_for_api(api).map(str::to_string),
+            }
+        }
+    }
+}
+
+async fn check_one_post_json(
+    client: reqwest::Client,
+    api: &str,
+    url: &str,
+    payload: serde_json::Value,
+) -> HealthRow {
+    let start = Instant::now();
+    let resp = client
+        .post(url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .json(&payload)
         .send()
         .await;
 
@@ -202,6 +257,9 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
         pharmgkb,
         monarch,
         gwas,
+        gtex,
+        dgidb,
+        clingen,
     ) = tokio::join!(
         check_one(
             client.clone(),
@@ -263,11 +321,23 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
             "GWAS Catalog",
             "https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/rs7903146"
         ),
+        check_one(client.clone(), "GTEx", "https://gtexportal.org/api/v2/"),
+        check_one_post_json(
+            client.clone(),
+            "DGIdb",
+            "https://dgidb.org/api/graphql",
+            serde_json::json!({"query":"query { __typename }"})
+        ),
+        check_one(
+            client.clone(),
+            "ClinGen",
+            "https://search.clinicalgenome.org/api/genes/look/BRAF"
+        ),
     );
 
     let mut rows = vec![
         mygene, myvariant, mychem, pubtator, ctgov, enrichr, europe_pmc, openfda, cpic, pharmgkb,
-        monarch, gwas,
+        monarch, gwas, gtex, dgidb, clingen,
     ];
     if !apis_only {
         rows.push(check_cache_dir().await);
@@ -282,7 +352,7 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HealthReport, HealthRow};
+    use super::{HealthReport, HealthRow, affects_for_api};
 
     #[test]
     fn markdown_shows_affects_column_when_present() {
@@ -332,5 +402,12 @@ mod tests {
         let md = report.to_markdown();
         assert!(md.contains("| API | Status | Latency |"));
         assert!(!md.contains("| API | Status | Latency | Affects |"));
+    }
+
+    #[test]
+    fn affects_mapping_includes_new_gene_enrichment_apis() {
+        assert_eq!(affects_for_api("GTEx"), Some("gene expression section"));
+        assert_eq!(affects_for_api("DGIdb"), Some("gene druggability section"));
+        assert_eq!(affects_for_api("ClinGen"), Some("gene clingen section"));
     }
 }

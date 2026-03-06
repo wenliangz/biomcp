@@ -73,6 +73,9 @@ fn list_gene() -> String {
 - `get gene <symbol> go` - QuickGO terms
 - `get gene <symbol> interactions` - STRING interactions
 - `get gene <symbol> civic` - CIViC evidence/assertion summary
+- `get gene <symbol> expression` - GTEx tissue expression summary
+- `get gene <symbol> druggability` - DGIdb target categories/interactions
+- `get gene <symbol> clingen` - ClinGen validity + dosage sensitivity
 - `get gene <symbol> all` - include every section
 - `gene definition <symbol>` - same card as `get gene <symbol>`
 - `gene get <symbol>` - alias for `gene definition <symbol>`
@@ -613,7 +616,7 @@ fn list_adverse_event() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render;
+    use super::{list_gene, render};
 
     #[test]
     fn list_root_includes_quickstart_and_skills_tip() {
@@ -639,6 +642,14 @@ mod tests {
         let enrich = render(Some("enrich")).expect("list enrich should render");
         assert!(enrich.contains("# enrich"));
         assert!(enrich.contains("enrich <GENE1,GENE2,...>"));
+    }
+
+    #[test]
+    fn list_gene_mentions_new_gene_sections() {
+        let out = list_gene();
+        assert!(out.contains("get gene <symbol> expression"));
+        assert!(out.contains("get gene <symbol> druggability"));
+        assert!(out.contains("get gene <symbol> clingen"));
     }
 
     #[test]
