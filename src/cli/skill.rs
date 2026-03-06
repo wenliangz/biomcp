@@ -537,6 +537,7 @@ pub fn install_skills(dir: Option<&str>, force: bool) -> Result<String, BioMcpEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestPaths {
@@ -577,6 +578,15 @@ mod tests {
         }
     }
 
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn read_json_fixture(path: &Path) -> Value {
+        let contents = fs::read_to_string(path).expect("read JSON fixture");
+        serde_json::from_str(&contents).expect("parse JSON fixture")
+    }
+
     #[test]
     fn embedded_skill_overview_includes_t017_t018_polish() -> Result<(), BioMcpError> {
         let overview = show_overview()?;
@@ -588,6 +598,47 @@ mod tests {
         assert!(overview.contains("`expression`, `druggability`, `clingen`"));
 
         Ok(())
+    }
+
+    #[test]
+    fn validate_skills_target_uses_uv_dev_environment() {
+        let makefile = fs::read_to_string(repo_root().join("Makefile")).expect("read Makefile");
+        let pyproject =
+            fs::read_to_string(repo_root().join("pyproject.toml")).expect("read pyproject");
+
+        assert!(makefile.contains("validate-skills:"));
+        assert!(makefile.contains("uv run --extra dev ./scripts/validate-skills.sh"));
+        assert!(pyproject.contains("\"jsonschema>="));
+    }
+
+    #[test]
+    fn refreshed_search_examples_are_non_empty() {
+        for file_name in ["search-article.json", "search-drug.json"] {
+            let path = repo_root().join("skills/examples").join(file_name);
+            let payload = read_json_fixture(&path);
+            let count = payload
+                .get("count")
+                .and_then(Value::as_u64)
+                .expect("count should be present");
+            let returned = payload
+                .pointer("/pagination/returned")
+                .and_then(Value::as_u64)
+                .expect("pagination.returned should be present");
+            let results = payload
+                .get("results")
+                .and_then(Value::as_array)
+                .expect("results should be an array");
+
+            assert!(
+                count > 0,
+                "{file_name} should keep at least one example row"
+            );
+            assert!(returned > 0, "{file_name} should report returned rows");
+            assert!(
+                !results.is_empty(),
+                "{file_name} should keep non-empty results"
+            );
+        }
     }
 
     #[test]

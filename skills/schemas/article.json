@@ -5,10 +5,46 @@
   "required": ["title"],
   "properties": {
     "pmid": { "type": ["string", "null"] },
+    "pmcid": { "type": ["string", "null"] },
+    "doi": { "type": ["string", "null"] },
     "title": { "type": "string" },
+    "authors": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
     "journal": { "type": ["string", "null"] },
-    "year": { "type": ["integer", "null"] },
-    "abstract": { "type": ["string", "null"] }
+    "date": { "type": ["string", "null"] },
+    "citation_count": { "type": ["integer", "number", "null"] },
+    "publication_type": { "type": ["string", "null"] },
+    "open_access": { "type": ["boolean", "null"] },
+    "abstract_text": { "type": ["string", "null"] },
+    "annotations": { "type": ["object", "null"] },
+    "pubtator_fallback": { "type": ["boolean", "null"] },
+    "source": { "type": ["string", "null"] },
+    "score": { "type": ["number", "null"] },
+    "is_retracted": { "type": ["boolean", "null"] },
+    "_meta": {
+      "type": ["object", "null"],
+      "properties": {
+        "evidence_urls": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["label", "url"],
+            "additionalProperties": true
+          }
+        },
+        "next_commands": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }
