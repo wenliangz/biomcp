@@ -358,25 +358,26 @@ See also: biomcp list article")]
         gene: Option<String>,
 
         /// Filter by disease name
-        #[arg(short, long)]
-        disease: Option<String>,
+        #[arg(short, long, num_args = 1..)]
+        disease: Vec<String>,
 
         /// Filter by drug/chemical name
-        #[arg(long)]
-        drug: Option<String>,
+        #[arg(long, num_args = 1..)]
+        drug: Vec<String>,
 
         /// Filter by author name
-        #[arg(short = 'a', long)]
-        author: Option<String>,
+        #[arg(short = 'a', long, num_args = 1..)]
+        author: Vec<String>,
 
         /// Free text keyword search (alias: -q, --query)
         #[arg(
             short = 'k',
             long = "keyword",
             visible_short_alias = 'q',
-            visible_alias = "query"
+            visible_alias = "query",
+            num_args = 1..
         )]
-        keyword: Option<String>,
+        keyword: Vec<String>,
         /// Optional positional query alias for -k/--keyword/--query
         #[arg(value_name = "QUERY")]
         positional_query: Option<String>,
@@ -385,7 +386,7 @@ See also: biomcp list article")]
         #[arg(long = "date-from", alias = "since")]
         date_from: Option<String>,
         /// Published before date (YYYY-MM-DD)
-        #[arg(long = "date-to")]
+        #[arg(long = "date-to", alias = "until")]
         date_to: Option<String>,
 
         // `long = "type"` is used instead of deriving from the field name because
@@ -394,8 +395,8 @@ See also: biomcp list article")]
         #[arg(long = "type")]
         article_type: Option<String>,
         /// Filter by journal title
-        #[arg(long)]
-        journal: Option<String>,
+        #[arg(long, num_args = 1..)]
+        journal: Vec<String>,
 
         /// Restrict to open-access articles (default: off, includes all access models)
         #[arg(long = "open-access")]
@@ -440,19 +441,19 @@ Trial search is filter-based (no free-text query).
 See also: biomcp list trial")]
     Trial {
         /// Filter by condition/disease
-        #[arg(short = 'c', long)]
-        condition: Option<String>,
+        #[arg(short = 'c', long, num_args = 1..)]
+        condition: Vec<String>,
         /// Optional positional query alias for -c/--condition
         #[arg(value_name = "QUERY")]
         positional_query: Option<String>,
 
         /// Filter by intervention/drug
-        #[arg(short = 'i', long)]
-        intervention: Option<String>,
+        #[arg(short = 'i', long, num_args = 1..)]
+        intervention: Vec<String>,
 
         /// Filter by institution/facility name
-        #[arg(long)]
-        facility: Option<String>,
+        #[arg(long, num_args = 1..)]
+        facility: Vec<String>,
 
         /// Filter by phase [values: NA, 1, 1/2, 2, 3, 4, EARLY_PHASE1, PHASE1-PHASE4]
         #[arg(short = 'p', long)]
@@ -474,32 +475,32 @@ See also: biomcp list trial")]
         status: Option<String>,
 
         /// Search eligibility criteria for mutation (best-effort)
-        #[arg(long)]
-        mutation: Option<String>,
+        #[arg(long, num_args = 1..)]
+        mutation: Vec<String>,
 
         /// Search eligibility criteria with free-text terms (best-effort)
-        #[arg(long)]
-        criteria: Option<String>,
+        #[arg(long, num_args = 1..)]
+        criteria: Vec<String>,
 
         /// Biomarker filter (NCI CTS; best-effort for ctgov)
-        #[arg(long)]
-        biomarker: Option<String>,
+        #[arg(long, num_args = 1..)]
+        biomarker: Vec<String>,
 
         /// Prior therapy mentioned in eligibility
-        #[arg(long)]
-        prior_therapies: Option<String>,
+        #[arg(long, num_args = 1..)]
+        prior_therapies: Vec<String>,
 
         /// Drug/therapy patient progressed on
-        #[arg(long)]
-        progression_on: Option<String>,
+        #[arg(long, num_args = 1..)]
+        progression_on: Vec<String>,
 
         /// Line of therapy: 1L, 2L, 3L+
         #[arg(long)]
         line_of_therapy: Option<String>,
 
         /// Filter by sponsor (best-effort)
-        #[arg(long)]
-        sponsor: Option<String>,
+        #[arg(long, num_args = 1..)]
+        sponsor: Vec<String>,
 
         /// Sponsor/funder category [values: nih, industry, fed, other]
         #[arg(long = "sponsor-type")]
@@ -509,7 +510,7 @@ See also: biomcp list trial")]
         #[arg(long = "date-from", alias = "since")]
         date_from: Option<String>,
         /// Trials updated before date (YYYY-MM-DD)
-        #[arg(long = "date-to")]
+        #[arg(long = "date-to", alias = "until")]
         date_to: Option<String>,
 
         /// Latitude for geographic search
@@ -780,7 +781,7 @@ See also: biomcp list adverse-event")]
         #[arg(long = "date-from", alias = "since")]
         date_from: Option<String>,
         /// Received before year/date (YYYY or YYYY-MM-DD)
-        #[arg(long = "date-to")]
+        #[arg(long = "date-to", alias = "until")]
         date_to: Option<String>,
         /// Restrict to suspect drugs only
         #[arg(long = "suspect-only")]
@@ -1429,6 +1430,16 @@ fn normalize_cli_query(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn normalize_cli_tokens(values: Vec<String>) -> Option<String> {
+    let joined = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    normalize_cli_query(Some(joined))
 }
 
 fn resolve_query_input(
@@ -3527,8 +3538,15 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     limit,
                     offset,
                 } => {
-                    let keyword =
-                        resolve_query_input(keyword, positional_query, "--keyword/--query")?;
+                    let disease = normalize_cli_tokens(disease);
+                    let drug = normalize_cli_tokens(drug);
+                    let author = normalize_cli_tokens(author);
+                    let keyword = resolve_query_input(
+                        normalize_cli_tokens(keyword),
+                        positional_query,
+                        "--keyword/--query",
+                    )?;
+                    let journal = normalize_cli_tokens(journal);
                     let sort = crate::entities::article::ArticleSort::from_flag(&sort)?;
                     let source_filter =
                         crate::entities::article::ArticleSourceFilter::from_flag(&source)?;
@@ -3647,8 +3665,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     next_page,
                     limit,
                 } => {
-                    let condition =
-                        resolve_query_input(condition, positional_query, "--condition")?;
+                    let condition = resolve_query_input(
+                        normalize_cli_tokens(condition),
+                        positional_query,
+                        "--condition",
+                    )?;
+                    let intervention = normalize_cli_tokens(intervention);
+                    let facility = normalize_cli_tokens(facility);
+                    let mutation = normalize_cli_tokens(mutation);
+                    let criteria = normalize_cli_tokens(criteria);
+                    let biomarker = normalize_cli_tokens(biomarker);
+                    let prior_therapies = normalize_cli_tokens(prior_therapies);
+                    let progression_on = normalize_cli_tokens(progression_on);
+                    let sponsor = normalize_cli_tokens(sponsor);
                     let trial_source = crate::entities::trial::TrialSource::from_flag(&source)?;
                     let filters = crate::entities::trial::TrialSearchFilters {
                         condition,
@@ -4701,6 +4730,87 @@ mod tests {
     }
 
     #[test]
+    fn search_article_parses_multi_token_keyword_and_until_alias() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "article",
+            "-k",
+            "vemurafenib",
+            "resistance",
+            "melanoma",
+            "--sort",
+            "date",
+            "--since",
+            "2010-01-01",
+            "--until",
+            "2015-12-31",
+            "--limit",
+            "10",
+        ])
+        .expect("search article multi-token keyword with --until should parse");
+
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Article {
+                        keyword,
+                        date_from,
+                        date_to,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(
+                    keyword,
+                    vec![
+                        "vemurafenib".to_string(),
+                        "resistance".to_string(),
+                        "melanoma".to_string()
+                    ]
+                );
+                assert_eq!(date_from.as_deref(), Some("2010-01-01"));
+                assert_eq!(date_to.as_deref(), Some("2015-12-31"));
+                assert_eq!(limit, 10);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_article_parses_keyword_with_extra_free_text() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "article",
+            "-k",
+            "EGFR resistance mechanism",
+            "non-small cell lung cancer",
+            "--sort",
+            "citations",
+            "--limit",
+            "5",
+        ])
+        .expect("search article keyword plus extra free text should parse");
+
+        match cli.command {
+            Commands::Search {
+                entity: super::SearchEntity::Article { keyword, limit, .. },
+            } => {
+                assert_eq!(
+                    keyword,
+                    vec![
+                        "EGFR resistance mechanism".to_string(),
+                        "non-small cell lung cancer".to_string()
+                    ]
+                );
+                assert_eq!(limit, 5);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn search_trial_parses_new_filter_flags() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -4738,12 +4848,54 @@ mod tests {
                         ..
                     },
             } => {
-                assert_eq!(facility.as_deref(), Some("MD Anderson"));
+                assert_eq!(facility, vec!["MD Anderson".to_string()]);
                 assert_eq!(age, Some(67));
                 assert_eq!(sex.as_deref(), Some("female"));
-                assert_eq!(criteria.as_deref(), Some("mismatch repair deficient"));
+                assert_eq!(criteria, vec!["mismatch repair deficient".to_string()]);
                 assert_eq!(sponsor_type.as_deref(), Some("nih"));
                 assert!(count_only);
+                assert_eq!(limit, 3);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_trial_parses_unquoted_multi_token_mutation() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "trial",
+            "-c",
+            "melanoma",
+            "--mutation",
+            "BRAF",
+            "V600E",
+            "--intervention",
+            "vemurafenib",
+            "--status",
+            "recruiting",
+            "--limit",
+            "3",
+        ])
+        .expect("search trial unquoted multi-token mutation should parse");
+
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Trial {
+                        condition,
+                        mutation,
+                        intervention,
+                        status,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(condition, vec!["melanoma".to_string()]);
+                assert_eq!(mutation, vec!["BRAF".to_string(), "V600E".to_string()]);
+                assert_eq!(intervention, vec!["vemurafenib".to_string()]);
+                assert_eq!(status.as_deref(), Some("recruiting"));
                 assert_eq!(limit, 3);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -4901,7 +5053,7 @@ mod tests {
                         ..
                     },
             } => {
-                assert!(condition.is_none());
+                assert!(condition.is_empty());
                 assert_eq!(positional_query.as_deref(), Some("melanoma"));
                 assert_eq!(limit, 2);
             }
