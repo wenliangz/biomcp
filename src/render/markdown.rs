@@ -308,7 +308,7 @@ fn append_evidence_urls(mut body: String, urls: Vec<(&str, String)>) -> String {
     body
 }
 
-fn gene_evidence_urls(gene: &Gene) -> Vec<(&'static str, String)> {
+pub(crate) fn gene_evidence_urls(gene: &Gene) -> Vec<(&'static str, String)> {
     let mut urls = Vec::new();
     if !gene.entrez_id.trim().is_empty() {
         urls.push((
@@ -330,10 +330,29 @@ fn gene_evidence_urls(gene: &Gene) -> Vec<(&'static str, String)> {
             format!("https://www.uniprot.org/uniprot/{uniprot}"),
         ));
     }
+    if let Some(ensembl) = gene
+        .ensembl_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        urls.push((
+            "Ensembl",
+            format!("https://www.ensembl.org/Homo_sapiens/Gene/Summary?g={ensembl}"),
+        ));
+    }
+    if let Some(omim) = gene
+        .omim_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        urls.push(("OMIM", format!("https://www.omim.org/entry/{omim}")));
+    }
     urls
 }
 
-fn variant_evidence_urls(variant: &Variant) -> Vec<(&'static str, String)> {
+pub(crate) fn variant_evidence_urls(variant: &Variant) -> Vec<(&'static str, String)> {
     let mut urls = Vec::new();
     if let Some(clinvar_id) = variant
         .clinvar_id
@@ -346,10 +365,29 @@ fn variant_evidence_urls(variant: &Variant) -> Vec<(&'static str, String)> {
             format!("https://www.ncbi.nlm.nih.gov/clinvar/variation/{clinvar_id}/"),
         ));
     }
+    if let Some(rsid) = variant
+        .rsid
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        urls.push(("dbSNP", format!("https://www.ncbi.nlm.nih.gov/snp/{rsid}")));
+    }
+    if let Some(cosmic_id) = variant
+        .cosmic_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        urls.push((
+            "COSMIC",
+            format!("https://cancer.sanger.ac.uk/cosmic/mutation/overview?id={cosmic_id}"),
+        ));
+    }
     urls
 }
 
-fn article_evidence_urls(article: &Article) -> Vec<(&'static str, String)> {
+pub(crate) fn article_evidence_urls(article: &Article) -> Vec<(&'static str, String)> {
     let mut urls = Vec::new();
     if let Some(pmid) = article
         .pmid
@@ -373,7 +411,7 @@ fn article_evidence_urls(article: &Article) -> Vec<(&'static str, String)> {
     urls
 }
 
-fn trial_evidence_urls(trial: &Trial) -> Vec<(&'static str, String)> {
+pub(crate) fn trial_evidence_urls(trial: &Trial) -> Vec<(&'static str, String)> {
     if trial.nct_id.trim().is_empty() {
         return Vec::new();
     }
@@ -383,7 +421,7 @@ fn trial_evidence_urls(trial: &Trial) -> Vec<(&'static str, String)> {
     )]
 }
 
-fn disease_evidence_urls(disease: &Disease) -> Vec<(&'static str, String)> {
+pub(crate) fn disease_evidence_urls(disease: &Disease) -> Vec<(&'static str, String)> {
     if disease.id.trim().is_empty() {
         return Vec::new();
     }
@@ -393,7 +431,7 @@ fn disease_evidence_urls(disease: &Disease) -> Vec<(&'static str, String)> {
     )]
 }
 
-fn drug_evidence_urls(drug: &Drug) -> Vec<(&'static str, String)> {
+pub(crate) fn drug_evidence_urls(drug: &Drug) -> Vec<(&'static str, String)> {
     let mut urls = Vec::new();
     if let Some(drugbank_id) = drug
         .drugbank_id
@@ -406,10 +444,21 @@ fn drug_evidence_urls(drug: &Drug) -> Vec<(&'static str, String)> {
             format!("https://go.drugbank.com/drugs/{drugbank_id}"),
         ));
     }
+    if let Some(chembl_id) = drug
+        .chembl_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        urls.push((
+            "ChEMBL",
+            format!("https://www.ebi.ac.uk/chembl/compound_report_card/{chembl_id}"),
+        ));
+    }
     urls
 }
 
-fn pathway_evidence_urls(pathway: &Pathway) -> Vec<(&'static str, String)> {
+pub(crate) fn pathway_evidence_urls(pathway: &Pathway) -> Vec<(&'static str, String)> {
     if pathway.id.trim().is_empty() {
         return Vec::new();
     }
@@ -419,7 +468,7 @@ fn pathway_evidence_urls(pathway: &Pathway) -> Vec<(&'static str, String)> {
     )]
 }
 
-fn protein_evidence_urls(protein: &Protein) -> Vec<(&'static str, String)> {
+pub(crate) fn protein_evidence_urls(protein: &Protein) -> Vec<(&'static str, String)> {
     if protein.accession.trim().is_empty() {
         return Vec::new();
     }
@@ -432,7 +481,7 @@ fn protein_evidence_urls(protein: &Protein) -> Vec<(&'static str, String)> {
     )]
 }
 
-fn adverse_event_evidence_urls(event: &AdverseEvent) -> Vec<(&'static str, String)> {
+pub(crate) fn adverse_event_evidence_urls(event: &AdverseEvent) -> Vec<(&'static str, String)> {
     if event.report_id.trim().is_empty() {
         return Vec::new();
     }
@@ -445,7 +494,7 @@ fn adverse_event_evidence_urls(event: &AdverseEvent) -> Vec<(&'static str, Strin
     )]
 }
 
-fn device_event_evidence_urls(event: &DeviceEvent) -> Vec<(&'static str, String)> {
+pub(crate) fn device_event_evidence_urls(event: &DeviceEvent) -> Vec<(&'static str, String)> {
     if event.report_id.trim().is_empty() {
         return Vec::new();
     }
@@ -456,6 +505,24 @@ fn device_event_evidence_urls(event: &DeviceEvent) -> Vec<(&'static str, String)
             event.report_id.trim()
         ),
     )]
+}
+
+pub(crate) fn pgx_evidence_urls(pgx: &Pgx) -> Vec<(&'static str, String)> {
+    let mut urls = Vec::new();
+    if let Some(gene) = pgx.gene.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        urls.push((
+            "CPIC",
+            format!("https://cpicpgx.org/genes/{}/", gene.to_ascii_lowercase()),
+        ));
+        urls.push(("PharmGKB", format!("https://www.pharmgkb.org/gene/{gene}")));
+    }
+    if let Some(drug) = pgx.drug.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        urls.push((
+            "PharmGKB",
+            format!("https://www.pharmgkb.org/chemical/{drug}"),
+        ));
+    }
+    urls
 }
 
 fn quote_arg(value: &str) -> String {
@@ -646,7 +713,7 @@ fn sections_adverse_event(event: &AdverseEvent, requested: &[String]) -> Vec<Str
     )
 }
 
-fn related_gene(gene: &Gene) -> Vec<String> {
+pub(crate) fn related_gene(gene: &Gene) -> Vec<String> {
     let symbol = gene.symbol.trim();
     if symbol.is_empty() {
         return Vec::new();
@@ -659,7 +726,7 @@ fn related_gene(gene: &Gene) -> Vec<String> {
     ]
 }
 
-fn related_variant(variant: &Variant) -> Vec<String> {
+pub(crate) fn related_variant(variant: &Variant) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     if !variant.gene.trim().is_empty() {
         let gene = variant.gene.trim();
@@ -681,7 +748,7 @@ fn related_variant(variant: &Variant) -> Vec<String> {
     out
 }
 
-fn related_article(article: &Article) -> Vec<String> {
+pub(crate) fn related_article(article: &Article) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     if let Some(ann) = article.annotations.as_ref() {
         for g in &ann.genes {
@@ -717,7 +784,7 @@ fn related_article(article: &Article) -> Vec<String> {
     out
 }
 
-fn related_trial(trial: &Trial) -> Vec<String> {
+pub(crate) fn related_trial(trial: &Trial) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
 
     if let Some(condition) = trial.conditions.first().map(String::as_str) {
@@ -740,7 +807,7 @@ fn related_trial(trial: &Trial) -> Vec<String> {
     out
 }
 
-fn related_disease(disease: &Disease) -> Vec<String> {
+pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
     let name = quote_arg(&disease.name);
     if name.is_empty() {
         return Vec::new();
@@ -752,7 +819,7 @@ fn related_disease(disease: &Disease) -> Vec<String> {
     ]
 }
 
-fn related_pgx(pgx: &Pgx) -> Vec<String> {
+pub(crate) fn related_pgx(pgx: &Pgx) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(gene) = pgx.gene.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         out.push(format!("biomcp search pgx -g {gene}"));
@@ -763,7 +830,7 @@ fn related_pgx(pgx: &Pgx) -> Vec<String> {
     out
 }
 
-fn related_pathway(pathway: &Pathway) -> Vec<String> {
+pub(crate) fn related_pathway(pathway: &Pathway) -> Vec<String> {
     let id = quote_arg(&pathway.id);
     if id.is_empty() {
         return Vec::new();
@@ -772,7 +839,7 @@ fn related_pathway(pathway: &Pathway) -> Vec<String> {
     vec![format!("biomcp pathway drugs {id}")]
 }
 
-fn related_protein(protein: &Protein) -> Vec<String> {
+pub(crate) fn related_protein(protein: &Protein) -> Vec<String> {
     let accession = quote_arg(&protein.accession);
     let mut out = Vec::new();
     if !accession.is_empty() {
@@ -789,7 +856,7 @@ fn related_protein(protein: &Protein) -> Vec<String> {
     out
 }
 
-fn related_drug(drug: &Drug) -> Vec<String> {
+pub(crate) fn related_drug(drug: &Drug) -> Vec<String> {
     let name = quote_arg(&drug.name);
     if name.is_empty() {
         return Vec::new();
@@ -810,7 +877,7 @@ fn related_drug(drug: &Drug) -> Vec<String> {
     out
 }
 
-fn related_adverse_event(event: &AdverseEvent) -> Vec<String> {
+pub(crate) fn related_adverse_event(event: &AdverseEvent) -> Vec<String> {
     let drug = quote_arg(&event.drug);
     if drug.is_empty() {
         return Vec::new();
@@ -822,7 +889,7 @@ fn related_adverse_event(event: &AdverseEvent) -> Vec<String> {
     ]
 }
 
-fn related_device_event(event: &DeviceEvent) -> Vec<String> {
+pub(crate) fn related_device_event(event: &DeviceEvent) -> Vec<String> {
     let device = quote_arg(&event.device);
     if device.is_empty() {
         return Vec::new();
@@ -1193,7 +1260,7 @@ pub fn pgx_markdown(pgx: &Pgx, requested_sections: &[String]) -> Result<String, 
         sections_block => format_sections_block("pgx", &pgx.query, sections_pgx(pgx, requested_sections)),
         related_block => format_related_block(related_pgx(pgx)),
     })?;
-    Ok(body)
+    Ok(append_evidence_urls(body, pgx_evidence_urls(pgx)))
 }
 
 #[allow(dead_code)]
@@ -1960,6 +2027,7 @@ mod tests {
     use crate::entities::article::{
         AnnotationCount, Article, ArticleAnnotations, ArticleSearchResult, ArticleSource,
     };
+    use crate::entities::drug::Drug;
     use crate::entities::gene::Gene;
     use crate::entities::pgx::Pgx;
     use crate::entities::variant::{TreatmentImplication, Variant, VariantOncoKbResult};
@@ -2132,6 +2200,112 @@ mod tests {
         let related = related_pgx(&pgx);
         assert!(related.contains(&"biomcp search pgx -g CYP2D6".to_string()));
         assert!(related.contains(&"biomcp search pgx -d \"warfarin sodium\"".to_string()));
+    }
+
+    #[test]
+    fn gene_evidence_urls_include_ensembl_and_omim() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: Some("ENSG00000157764".to_string()),
+            location: Some("7q34".to_string()),
+            genomic_coordinates: None,
+            omim_id: Some("164757".to_string()),
+            uniprot_id: Some("P15056".to_string()),
+            summary: None,
+            gene_type: None,
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+        };
+
+        let urls = gene_evidence_urls(&gene);
+        assert!(urls.contains(&(
+            "Ensembl",
+            "https://www.ensembl.org/Homo_sapiens/Gene/Summary?g=ENSG00000157764".to_string()
+        )));
+        assert!(urls.contains(&("OMIM", "https://www.omim.org/entry/164757".to_string())));
+    }
+
+    #[test]
+    fn variant_evidence_urls_include_dbsnp_and_cosmic() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "chr7:g.140453136A>T",
+            "gene": "BRAF",
+            "rsid": "rs113488022",
+            "cosmic_id": "COSM476",
+            "clinvar_id": "13961"
+        }))
+        .expect("variant should deserialize");
+
+        let urls = variant_evidence_urls(&variant);
+        assert!(urls.contains(&(
+            "dbSNP",
+            "https://www.ncbi.nlm.nih.gov/snp/rs113488022".to_string()
+        )));
+        assert!(urls.contains(&(
+            "COSMIC",
+            "https://cancer.sanger.ac.uk/cosmic/mutation/overview?id=COSM476".to_string()
+        )));
+    }
+
+    #[test]
+    fn drug_evidence_urls_include_chembl() {
+        let drug = Drug {
+            name: "osimertinib".to_string(),
+            drugbank_id: Some("DB09330".to_string()),
+            chembl_id: Some("CHEMBL3353410".to_string()),
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            label: None,
+            shortage: None,
+            approvals: None,
+            civic: None,
+        };
+
+        let urls = drug_evidence_urls(&drug);
+        assert!(urls.contains(&(
+            "ChEMBL",
+            "https://www.ebi.ac.uk/chembl/compound_report_card/CHEMBL3353410".to_string()
+        )));
+    }
+
+    #[test]
+    fn pgx_markdown_includes_evidence_links() {
+        let pgx = Pgx {
+            query: "CYP2D6".to_string(),
+            gene: Some("CYP2D6".to_string()),
+            drug: Some("warfarin".to_string()),
+            interactions: Vec::new(),
+            recommendations: Vec::new(),
+            frequencies: Vec::new(),
+            guidelines: Vec::new(),
+            annotations: Vec::new(),
+            annotations_note: None,
+        };
+
+        let markdown = pgx_markdown(&pgx, &[]).expect("rendered markdown");
+        assert!(markdown.contains("[CPIC](https://cpicpgx.org/genes/cyp2d6/)"));
+        assert!(markdown.contains("[PharmGKB](https://www.pharmgkb.org/gene/CYP2D6)"));
+        assert!(markdown.contains("[PharmGKB](https://www.pharmgkb.org/chemical/warfarin)"));
     }
 
     #[test]
