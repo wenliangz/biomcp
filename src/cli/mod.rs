@@ -1439,7 +1439,11 @@ async fn render_gene_card(
 ) -> anyhow::Result<String> {
     let gene = crate::entities::gene::get(symbol, sections).await?;
     if json_output {
-        Ok(crate::render::json::to_pretty(&gene)?)
+        Ok(crate::render::json::to_entity_json(
+            &gene,
+            crate::render::markdown::gene_evidence_urls(&gene),
+            crate::render::markdown::related_gene(&gene),
+        )?)
     } else {
         Ok(crate::render::markdown::gene_markdown(&gene, sections)?)
     }
@@ -1451,6 +1455,46 @@ struct LocationPaginationMeta {
     offset: usize,
     limit: usize,
     has_more: bool,
+}
+
+fn trial_locations_json(
+    trial: &crate::entities::trial::Trial,
+    location_pagination: LocationPaginationMeta,
+) -> anyhow::Result<String> {
+    #[derive(serde::Serialize)]
+    struct TrialWithLocationPagination<'a> {
+        #[serde(flatten)]
+        trial: &'a crate::entities::trial::Trial,
+        location_pagination: LocationPaginationMeta,
+    }
+
+    crate::render::json::to_entity_json(
+        &TrialWithLocationPagination {
+            trial,
+            location_pagination,
+        },
+        crate::render::markdown::trial_evidence_urls(trial),
+        crate::render::markdown::related_trial(trial),
+    )
+    .map_err(Into::into)
+}
+
+fn paginate_trial_locations(
+    trial: &mut crate::entities::trial::Trial,
+    offset: usize,
+    limit: usize,
+) -> LocationPaginationMeta {
+    let locations = trial.locations.take().unwrap_or_default();
+    let total = locations.len();
+    let paged: Vec<_> = locations.into_iter().skip(offset).take(limit).collect();
+    let has_more = offset.saturating_add(paged.len()) < total;
+    trial.locations = Some(paged);
+    LocationPaginationMeta {
+        total,
+        offset,
+        limit,
+        has_more,
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1959,7 +2003,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let article = crate::entities::article::get(&id, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&article)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &article,
+                        crate::render::markdown::article_evidence_urls(&article),
+                        crate::render::markdown::related_article(&article),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::article_markdown(&article, &sections)?)
                 }
@@ -1975,7 +2023,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let disease = crate::entities::disease::get(&name_or_id, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&disease)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &disease,
+                        crate::render::markdown::disease_evidence_urls(&disease),
+                        crate::render::markdown::related_disease(&disease),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::disease_markdown(&disease, &sections)?)
                 }
@@ -1987,7 +2039,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let pgx = crate::entities::pgx::get(&query, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&pgx)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &pgx,
+                        crate::render::markdown::pgx_evidence_urls(&pgx),
+                        crate::render::markdown::related_pgx(&pgx),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::pgx_markdown(&pgx, &sections)?)
                 }
@@ -2022,36 +2078,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 if includes_locations {
                     let offset = location_offset.unwrap_or(0);
                     let limit = location_limit.unwrap_or(20);
-                    if let Some(locations) = trial.locations.take() {
-                        let total = locations.len();
-                        let paged: Vec<_> =
-                            locations.into_iter().skip(offset).take(limit).collect();
-                        let has_more = offset + paged.len() < total;
-                        trial.locations = Some(paged);
-                        location_pagination = Some(LocationPaginationMeta {
-                            total,
-                            offset,
-                            limit,
-                            has_more,
-                        });
-                    }
+                    location_pagination = Some(paginate_trial_locations(&mut trial, offset, limit));
                 }
                 if json_output {
                     if let Some(loc_page) = location_pagination {
-                        #[derive(serde::Serialize)]
-                        struct TrialWithLocationPagination {
-                            #[serde(flatten)]
-                            trial: crate::entities::trial::Trial,
-                            location_pagination: LocationPaginationMeta,
-                        }
-                        Ok(crate::render::json::to_pretty(
-                            &TrialWithLocationPagination {
-                                trial,
-                                location_pagination: loc_page,
-                            },
-                        )?)
+                        trial_locations_json(&trial, loc_page)
                     } else {
-                        Ok(crate::render::json::to_pretty(&trial)?)
+                        Ok(crate::render::json::to_entity_json(
+                            &trial,
+                            crate::render::markdown::trial_evidence_urls(&trial),
+                            crate::render::markdown::related_trial(&trial),
+                        )?)
                     }
                 } else {
                     let mut md =
@@ -2080,7 +2117,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let variant = crate::entities::variant::get(&id, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&variant)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &variant,
+                        crate::render::markdown::variant_evidence_urls(&variant),
+                        crate::render::markdown::related_variant(&variant),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::variant_markdown(&variant, &sections)?)
                 }
@@ -2092,7 +2133,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let drug = crate::entities::drug::get(&name, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&drug)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &drug,
+                        crate::render::markdown::drug_evidence_urls(&drug),
+                        crate::render::markdown::related_drug(&drug),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::drug_markdown(&drug, &sections)?)
                 }
@@ -2104,7 +2149,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let pathway = crate::entities::pathway::get(&id, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&pathway)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &pathway,
+                        crate::render::markdown::pathway_evidence_urls(&pathway),
+                        crate::render::markdown::related_pathway(&pathway),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::pathway_markdown(&pathway, &sections)?)
                 }
@@ -2119,7 +2168,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let protein = crate::entities::protein::get(&accession, &sections).await?;
                 if json_output {
-                    Ok(crate::render::json::to_pretty(&protein)?)
+                    Ok(crate::render::json::to_entity_json(
+                        &protein,
+                        crate::render::markdown::protein_evidence_urls(&protein),
+                        crate::render::markdown::related_protein(&protein),
+                    )?)
                 } else {
                     Ok(crate::render::markdown::protein_markdown(&protein, &sections)?)
                 }
@@ -2135,7 +2188,22 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 let json_output = cli.json || json_override;
                 let event = crate::entities::adverse_event::get(&report_id).await?;
                 if json_output {
-                    return Ok(crate::render::json::to_pretty(&event)?);
+                    return match &event {
+                        crate::entities::adverse_event::AdverseEventReport::Faers(r) => {
+                            Ok(crate::render::json::to_entity_json(
+                                &event,
+                                crate::render::markdown::adverse_event_evidence_urls(r),
+                                crate::render::markdown::related_adverse_event(r),
+                            )?)
+                        }
+                        crate::entities::adverse_event::AdverseEventReport::Device(r) => {
+                            Ok(crate::render::json::to_entity_json(
+                                &event,
+                                crate::render::markdown::device_event_evidence_urls(r),
+                                crate::render::markdown::related_device_event(r),
+                            )?)
+                        }
+                    };
                 }
                 match event {
                     crate::entities::adverse_event::AdverseEventReport::Faers(ref r) => {
@@ -4172,9 +4240,9 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
 mod tests {
     use super::{
         ArticleCommand, Cli, Commands, GeneCommand, ProteinCommand, VariantCommand, execute,
-        extract_json_from_sections, parse_trial_location_paging, resolve_query_input,
-        should_try_pathway_trial_fallback, trial_search_query_summary,
-        truncate_article_annotations,
+        extract_json_from_sections, paginate_trial_locations, parse_trial_location_paging,
+        resolve_query_input, should_try_pathway_trial_fallback, trial_locations_json,
+        trial_search_query_summary, truncate_article_annotations,
     };
     use clap::Parser;
 
@@ -4215,6 +4283,91 @@ mod tests {
         assert_eq!(cleaned, vec!["locations".to_string()]);
         assert_eq!(offset, Some(20));
         assert_eq!(limit, Some(10));
+    }
+
+    #[test]
+    fn trial_locations_json_preserves_location_pagination_and_meta() {
+        let trial = crate::entities::trial::Trial {
+            nct_id: "NCT00000001".to_string(),
+            source: Some("ctgov".to_string()),
+            title: "Example trial".to_string(),
+            status: "Recruiting".to_string(),
+            phase: Some("Phase 2".to_string()),
+            study_type: Some("Interventional".to_string()),
+            age_range: Some("18 Years and older".to_string()),
+            conditions: vec!["melanoma".to_string()],
+            interventions: vec!["osimertinib".to_string()],
+            sponsor: Some("Example Sponsor".to_string()),
+            enrollment: Some(100),
+            summary: Some("Example summary".to_string()),
+            start_date: Some("2024-01-01".to_string()),
+            completion_date: None,
+            eligibility_text: None,
+            locations: Some(vec![crate::entities::trial::TrialLocation {
+                facility: "Example Hospital".to_string(),
+                city: "Boston".to_string(),
+                state: Some("MA".to_string()),
+                country: "United States".to_string(),
+                status: Some("Recruiting".to_string()),
+                contact_name: None,
+                contact_phone: None,
+            }]),
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        let json = trial_locations_json(
+            &trial,
+            super::LocationPaginationMeta {
+                total: 42,
+                offset: 20,
+                limit: 10,
+                has_more: true,
+            },
+        )
+        .expect("trial locations json");
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(value["nct_id"], "NCT00000001");
+        assert_eq!(value["location_pagination"]["total"], 42);
+        assert_eq!(value["location_pagination"]["offset"], 20);
+        assert_eq!(value["location_pagination"]["limit"], 10);
+        assert_eq!(value["location_pagination"]["has_more"], true);
+        assert!(value.get("_meta").is_some());
+    }
+
+    #[test]
+    fn paginate_trial_locations_handles_missing_locations() {
+        let mut trial = crate::entities::trial::Trial {
+            nct_id: "NCT00000001".to_string(),
+            source: Some("ctgov".to_string()),
+            title: "Example trial".to_string(),
+            status: "Recruiting".to_string(),
+            phase: Some("Phase 2".to_string()),
+            study_type: Some("Interventional".to_string()),
+            age_range: Some("18 Years and older".to_string()),
+            conditions: vec!["melanoma".to_string()],
+            interventions: vec!["osimertinib".to_string()],
+            sponsor: Some("Example Sponsor".to_string()),
+            enrollment: Some(100),
+            summary: Some("Example summary".to_string()),
+            start_date: Some("2024-01-01".to_string()),
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        let meta = paginate_trial_locations(&mut trial, 20, 10);
+        assert_eq!(meta.total, 0);
+        assert_eq!(meta.offset, 20);
+        assert_eq!(meta.limit, 10);
+        assert!(!meta.has_more);
+        assert!(trial.locations.is_some());
+        assert_eq!(trial.locations.as_ref().map_or(usize::MAX, Vec::len), 0);
     }
 
     #[test]

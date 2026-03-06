@@ -17,4 +17,5 @@ clean:
 	cargo clean
 
 spec:
-	BIOMCP_CACHE_MODE=infinite uv run pytest spec/ --mustmatch-lang bash -v
+	XDG_CACHE_HOME="$(CURDIR)/.cache" PATH="$(CURDIR)/target/release:$(PATH)" \
+		uv run --extra dev pytest spec/ --mustmatch-lang bash --mustmatch-timeout 60 -v

@@ -6,9 +6,62 @@ pub fn to_pretty<T: Serialize>(value: &T) -> Result<String, BioMcpError> {
     Ok(serde_json::to_string_pretty(value)?)
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EvidenceUrl {
+    pub label: String,
+    pub url: String,
+}
+
+#[derive(Serialize)]
+struct EntityMeta {
+    evidence_urls: Vec<EvidenceUrl>,
+    next_commands: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct EntityJsonResponse<'a, T: Serialize> {
+    #[serde(flatten)]
+    entity: &'a T,
+    _meta: EntityMeta,
+}
+
+pub fn to_entity_json<T: Serialize>(
+    entity: &T,
+    evidence_urls: Vec<(&str, String)>,
+    next_commands: Vec<String>,
+) -> Result<String, BioMcpError> {
+    let evidence_urls = evidence_urls
+        .into_iter()
+        .filter_map(|(label, url)| {
+            let label = label.trim();
+            let url = url.trim();
+            if label.is_empty() || url.is_empty() {
+                return None;
+            }
+            Some(EvidenceUrl {
+                label: label.to_string(),
+                url: url.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let next_commands = next_commands
+        .into_iter()
+        .map(|cmd| cmd.trim().to_string())
+        .filter(|cmd| !cmd.is_empty())
+        .collect::<Vec<_>>();
+
+    to_pretty(&EntityJsonResponse {
+        entity,
+        _meta: EntityMeta {
+            evidence_urls,
+            next_commands,
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::to_pretty;
+    use super::{to_entity_json, to_pretty};
     use crate::entities::drug::Drug;
     use crate::entities::gene::Gene;
     use serde::Serialize;
@@ -88,5 +141,64 @@ mod tests {
         let json = to_pretty(&drug).expect("drug json");
         assert!(json.contains("\"name\": \"osimertinib\""));
         assert!(json.contains("\"targets\""));
+    }
+
+    #[test]
+    fn to_entity_json_adds_meta_and_flattens_entity() {
+        #[derive(Serialize)]
+        struct DemoEntity<'a> {
+            id: &'a str,
+            label: &'a str,
+        }
+
+        let json = to_entity_json(
+            &DemoEntity {
+                id: "demo-1",
+                label: "Demo",
+            },
+            vec![
+                ("Source A", "https://example.org/source-a".to_string()),
+                ("Source B", "https://example.org/source-b".to_string()),
+            ],
+            vec!["biomcp get gene BRAF".to_string()],
+        )
+        .expect("entity json");
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(value["id"], "demo-1");
+        assert_eq!(value["label"], "Demo");
+        assert_eq!(value["_meta"]["evidence_urls"][0]["label"], "Source A");
+        assert_eq!(
+            value["_meta"]["evidence_urls"][0]["url"],
+            "https://example.org/source-a"
+        );
+        assert_eq!(value["_meta"]["next_commands"][0], "biomcp get gene BRAF");
+    }
+
+    #[test]
+    fn to_entity_json_filters_blank_evidence_rows() {
+        #[derive(Serialize)]
+        struct DemoEntity<'a> {
+            id: &'a str,
+        }
+
+        let json = to_entity_json(
+            &DemoEntity { id: "demo-2" },
+            vec![
+                ("", "https://example.org/empty-label".to_string()),
+                ("Missing URL", "".to_string()),
+                ("Valid", "https://example.org/valid".to_string()),
+            ],
+            Vec::new(),
+        )
+        .expect("entity json");
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        let urls = value["_meta"]["evidence_urls"]
+            .as_array()
+            .expect("evidence url array");
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0]["label"], "Valid");
+        assert_eq!(urls[0]["url"], "https://example.org/valid");
     }
 }
