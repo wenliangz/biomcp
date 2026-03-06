@@ -15,6 +15,10 @@ use crate::entities::gene::{Gene, GeneSearchResult};
 use crate::entities::pathway::{Pathway, PathwaySearchResult};
 use crate::entities::pgx::{Pgx, PgxSearchResult};
 use crate::entities::protein::{Protein, ProteinSearchResult};
+use crate::entities::study::{
+    CoOccurrenceResult as StudyCoOccurrenceResult, SampleUniverseBasis as StudySampleUniverseBasis,
+    StudyInfo, StudyQueryResult,
+};
 use crate::entities::trial::{Trial, TrialSearchResult};
 use crate::entities::variant::{
     Variant, VariantGwasAssociation, VariantOncoKbResult, VariantPrediction, VariantSearchResult,
@@ -1978,6 +1982,166 @@ pub fn recall_search_markdown_with_footer(
     Ok(with_pagination_footer(body, pagination_footer))
 }
 
+pub fn study_list_markdown(studies: &[StudyInfo]) -> String {
+    let mut out = String::new();
+    out.push_str("# Study Datasets\n\n");
+    if studies.is_empty() {
+        out.push_str("No local studies found.\n");
+        return out;
+    }
+
+    out.push_str("| Study ID | Name | Cancer Type | Samples | Available Data |\n");
+    out.push_str("|---|---|---|---|---|\n");
+    for study in studies {
+        let cancer_type = study.cancer_type.as_deref().unwrap_or("-");
+        let sample_count = study
+            .sample_count
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let available = if study.available_data.is_empty() {
+            "-".to_string()
+        } else {
+            study.available_data.join(", ")
+        };
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n",
+            study.study_id, study.name, cancer_type, sample_count, available
+        ));
+    }
+    out
+}
+
+pub fn study_query_markdown(result: &StudyQueryResult) -> String {
+    match result {
+        StudyQueryResult::MutationFrequency(result) => {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "# Study Mutation Frequency: {} ({})\n\n",
+                result.gene, result.study_id
+            ));
+            out.push_str("| Metric | Value |\n");
+            out.push_str("|---|---|\n");
+            out.push_str(&format!(
+                "| Mutation records | {} |\n",
+                result.mutation_count
+            ));
+            out.push_str(&format!("| Unique samples | {} |\n", result.unique_samples));
+            out.push_str(&format!("| Total samples | {} |\n", result.total_samples));
+            out.push_str(&format!("| Frequency | {:.6} |\n", result.frequency));
+            out.push_str("\n## Top Variant Classes\n\n");
+            out.push_str("| Class | Count |\n");
+            out.push_str("|---|---|\n");
+            if result.top_variant_classes.is_empty() {
+                out.push_str("| - | 0 |\n");
+            } else {
+                for (class_name, count) in &result.top_variant_classes {
+                    out.push_str(&format!("| {} | {} |\n", class_name, count));
+                }
+            }
+            out.push_str("\n## Top Protein Changes\n\n");
+            out.push_str("| Change | Count |\n");
+            out.push_str("|---|---|\n");
+            if result.top_protein_changes.is_empty() {
+                out.push_str("| - | 0 |\n");
+            } else {
+                for (change, count) in &result.top_protein_changes {
+                    out.push_str(&format!("| {} | {} |\n", change, count));
+                }
+            }
+            out
+        }
+        StudyQueryResult::CnaDistribution(result) => {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "# Study CNA Distribution: {} ({})\n\n",
+                result.gene, result.study_id
+            ));
+            out.push_str("| Bucket | Count |\n");
+            out.push_str("|---|---|\n");
+            out.push_str(&format!(
+                "| Deep deletion (-2) | {} |\n",
+                result.deep_deletion
+            ));
+            out.push_str(&format!(
+                "| Shallow deletion (-1) | {} |\n",
+                result.shallow_deletion
+            ));
+            out.push_str(&format!("| Diploid (0) | {} |\n", result.diploid));
+            out.push_str(&format!("| Gain (1) | {} |\n", result.gain));
+            out.push_str(&format!(
+                "| Amplification (2) | {} |\n",
+                result.amplification
+            ));
+            out.push_str(&format!("| Total samples | {} |\n", result.total_samples));
+            out
+        }
+        StudyQueryResult::ExpressionDistribution(result) => {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "# Study Expression Distribution: {} ({})\n\n",
+                result.gene, result.study_id
+            ));
+            out.push_str("| Metric | Value |\n");
+            out.push_str("|---|---|\n");
+            out.push_str(&format!("| File | {} |\n", result.file));
+            out.push_str(&format!("| Sample count | {} |\n", result.sample_count));
+            out.push_str(&format!("| Mean | {:.6} |\n", result.mean));
+            out.push_str(&format!("| Median | {:.6} |\n", result.median));
+            out.push_str(&format!("| Min | {:.6} |\n", result.min));
+            out.push_str(&format!("| Max | {:.6} |\n", result.max));
+            out.push_str(&format!("| Q1 | {:.6} |\n", result.q1));
+            out.push_str(&format!("| Q3 | {:.6} |\n", result.q3));
+            out
+        }
+    }
+}
+
+pub fn study_co_occurrence_markdown(result: &StudyCoOccurrenceResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# Study Co-occurrence: {}\n\n", result.study_id));
+    out.push_str(&format!("Genes: {}\n\n", result.genes.join(", ")));
+    out.push_str(&format!("Total samples: {}\n\n", result.total_samples));
+    out.push_str(&format!(
+        "Sample universe: {}\n\n",
+        match result.sample_universe_basis {
+            StudySampleUniverseBasis::ClinicalSampleFile => "clinical sample file",
+            StudySampleUniverseBasis::MutationObserved => {
+                "mutation-observed samples only (clinical sample file unavailable)"
+            }
+        }
+    ));
+    out.push_str(
+        "| Gene A | Gene B | Both | A only | B only | Neither | Log Odds Ratio | p-value |\n",
+    );
+    out.push_str("|---|---|---|---|---|---|---|---|\n");
+    if result.pairs.is_empty() {
+        out.push_str("| - | - | 0 | 0 | 0 | 0 | - | - |\n");
+        return out;
+    }
+    for pair in &result.pairs {
+        let lor = pair
+            .log_odds_ratio
+            .map(|v| format!("{v:.6}"))
+            .unwrap_or_else(|| "-".to_string());
+        let p_value = pair
+            .p_value
+            .map(|v| format!("{v:.3e}"))
+            .unwrap_or_else(|| "-".to_string());
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            pair.gene_a,
+            pair.gene_b,
+            pair.both_mutated,
+            pair.a_only,
+            pair.b_only,
+            pair.neither,
+            lor,
+            p_value
+        ));
+    }
+    out
+}
+
 pub fn search_all_markdown(
     results: &SearchAllResults,
     counts_only: bool,
@@ -2042,6 +2206,13 @@ mod tests {
     use crate::entities::drug::Drug;
     use crate::entities::gene::Gene;
     use crate::entities::pgx::Pgx;
+    use crate::entities::study::{
+        CnaDistributionResult as StudyCnaDistributionResult,
+        CoOccurrencePair as StudyCoOccurrencePair, CoOccurrenceResult as StudyCoOccurrenceResult,
+        ExpressionDistributionResult as StudyExpressionDistributionResult,
+        MutationFrequencyResult as StudyMutationFrequencyResult,
+        SampleUniverseBasis as StudySampleUniverseBasis, StudyInfo, StudyQueryResult,
+    };
     use crate::entities::variant::{TreatmentImplication, Variant, VariantOncoKbResult};
 
     #[test]
@@ -2456,5 +2627,120 @@ mod tests {
         assert!(
             markdown.contains("> No disease-filtered variants found; showing top gene variants.")
         );
+    }
+
+    #[test]
+    fn study_list_markdown_renders_study_table() {
+        let markdown = study_list_markdown(&[StudyInfo {
+            study_id: "msk_impact_2017".to_string(),
+            name: "MSK-IMPACT".to_string(),
+            cancer_type: Some("mixed".to_string()),
+            citation: Some("Zehir et al.".to_string()),
+            sample_count: Some(10945),
+            available_data: vec!["mutations".to_string(), "cna".to_string()],
+        }]);
+
+        assert!(markdown.contains("# Study Datasets"));
+        assert!(markdown.contains("| Study ID | Name | Cancer Type | Samples | Available Data |"));
+        assert!(markdown.contains("msk_impact_2017"));
+        assert!(markdown.contains("mutations, cna"));
+    }
+
+    #[test]
+    fn study_query_markdown_renders_mutation_shape() {
+        let markdown = study_query_markdown(&StudyQueryResult::MutationFrequency(
+            StudyMutationFrequencyResult {
+                study_id: "msk_impact_2017".to_string(),
+                gene: "TP53".to_string(),
+                mutation_count: 10,
+                unique_samples: 9,
+                total_samples: 100,
+                frequency: 0.09,
+                top_variant_classes: vec![("Missense_Mutation".to_string(), 8)],
+                top_protein_changes: vec![("p.R175H".to_string(), 3)],
+            },
+        ));
+
+        assert!(markdown.contains("# Study Mutation Frequency: TP53 (msk_impact_2017)"));
+        assert!(markdown.contains("| Mutation records | 10 |"));
+        assert!(markdown.contains("## Top Variant Classes"));
+        assert!(markdown.contains("## Top Protein Changes"));
+    }
+
+    #[test]
+    fn study_query_markdown_renders_cna_and_expression_shapes() {
+        let cna = study_query_markdown(&StudyQueryResult::CnaDistribution(
+            StudyCnaDistributionResult {
+                study_id: "brca_tcga_pan_can_atlas_2018".to_string(),
+                gene: "ERBB2".to_string(),
+                total_samples: 20,
+                deep_deletion: 1,
+                shallow_deletion: 2,
+                diploid: 10,
+                gain: 4,
+                amplification: 3,
+            },
+        ));
+        assert!(cna.contains("# Study CNA Distribution: ERBB2 (brca_tcga_pan_can_atlas_2018)"));
+        assert!(cna.contains("| Amplification (2) | 3 |"));
+
+        let expression = study_query_markdown(&StudyQueryResult::ExpressionDistribution(
+            StudyExpressionDistributionResult {
+                study_id: "paad_qcmg_uq_2016".to_string(),
+                gene: "KRAS".to_string(),
+                file: "data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt".to_string(),
+                sample_count: 50,
+                mean: 0.2,
+                median: 0.1,
+                min: -2.0,
+                max: 2.5,
+                q1: -0.4,
+                q3: 0.5,
+            },
+        ));
+        assert!(expression.contains("# Study Expression Distribution: KRAS (paad_qcmg_uq_2016)"));
+        assert!(expression.contains("| Sample count | 50 |"));
+    }
+
+    #[test]
+    fn study_co_occurrence_markdown_renders_pair_table() {
+        let markdown = study_co_occurrence_markdown(&StudyCoOccurrenceResult {
+            study_id: "msk_impact_2017".to_string(),
+            genes: vec!["TP53".to_string(), "KRAS".to_string()],
+            total_samples: 100,
+            sample_universe_basis: StudySampleUniverseBasis::ClinicalSampleFile,
+            pairs: vec![StudyCoOccurrencePair {
+                gene_a: "TP53".to_string(),
+                gene_b: "KRAS".to_string(),
+                both_mutated: 10,
+                a_only: 20,
+                b_only: 15,
+                neither: 55,
+                log_odds_ratio: Some(0.1234),
+                p_value: None,
+            }],
+        });
+
+        assert!(markdown.contains("# Study Co-occurrence: msk_impact_2017"));
+        assert!(markdown.contains("Sample universe: clinical sample file"));
+        assert!(markdown.contains(
+            "| Gene A | Gene B | Both | A only | B only | Neither | Log Odds Ratio | p-value |"
+        ));
+        assert!(markdown.contains("| TP53 | KRAS | 10 | 20 | 15 | 55 |"));
+    }
+
+    #[test]
+    fn study_co_occurrence_markdown_marks_mutation_observed_fallback() {
+        let markdown = study_co_occurrence_markdown(&StudyCoOccurrenceResult {
+            study_id: "fallback_study".to_string(),
+            genes: vec!["TP53".to_string(), "KRAS".to_string()],
+            total_samples: 3,
+            sample_universe_basis: StudySampleUniverseBasis::MutationObserved,
+            pairs: vec![],
+        });
+
+        assert!(markdown.contains(
+            "Sample universe: mutation-observed samples only (clinical sample file unavailable)"
+        ));
     }
 }

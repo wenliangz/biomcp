@@ -28,7 +28,7 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
 
     match cmd.as_str() {
         "search" | "get" | "variant" | "drug" | "disease" | "article" | "gene" | "pathway"
-        | "protein" | "list" | "version" | "health" | "batch" | "enrich" => true,
+        | "protein" | "study" | "list" | "version" | "health" | "batch" | "enrich" => true,
         "skill" => {
             // Allow read-only skill commands: list, show, numeric lookup
             // (e.g. "skill 03"), and slug lookup (e.g. "skill variant-to-treatment").
@@ -65,7 +65,7 @@ impl BioMcpServer {
 
         if !is_allowed_mcp_command(&args) {
             return Err(
-                "Error: MCP shell allows read-only commands only (search/get/helpers/list/version/health/batch/enrich/skill)."
+                "Error: MCP shell allows read-only commands only (search/get/helpers/study/list/version/health/batch/enrich/skill)."
                     .to_string(),
             );
         }
@@ -278,6 +278,11 @@ mod tests {
             "biomcp".into(),
             "skill".into(),
             "variant-to-treatment".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "list".into()
         ]));
         assert!(!is_allowed_mcp_command(&["biomcp".into(), "update".into()]));
         assert!(!is_allowed_mcp_command(&[

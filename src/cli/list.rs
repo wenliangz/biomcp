@@ -29,6 +29,7 @@ pub fn render(entity: Option<&str>) -> Result<String, BioMcpError> {
             "gwas" => Ok(with_skills_tip(list_gwas())),
             "pathway" => Ok(with_skills_tip(list_pathway())),
             "protein" => Ok(with_skills_tip(list_protein())),
+            "study" => Ok(with_skills_tip(list_study())),
             "adverse-event" | "adverse_event" | "adverseevent" => {
                 Ok(with_skills_tip(list_adverse_event()))
             }
@@ -37,7 +38,7 @@ pub fn render(entity: Option<&str>) -> Result<String, BioMcpError> {
             "enrich" => Ok(with_skills_tip(list_enrich())),
             "skill" | "skills" => Ok(crate::cli::skill::list_use_cases()?),
             other => Err(BioMcpError::InvalidArgument(format!(
-                "Unknown entity: {other}\n\nValid entities:\n- gene\n- variant\n- article\n- trial\n- drug\n- disease\n- phenotype\n- pgx\n- gwas\n- pathway\n- protein\n- adverse-event\n- search-all\n- batch\n- enrich\n- skill"
+                "Unknown entity: {other}\n\nValid entities:\n- gene\n- variant\n- article\n- trial\n- drug\n- disease\n- phenotype\n- pgx\n- gwas\n- pathway\n- protein\n- study\n- adverse-event\n- search-all\n- batch\n- enrich\n- skill"
             ))),
         },
     }
@@ -547,6 +548,31 @@ fn list_pathway() -> String {
     .to_string()
 }
 
+fn list_study() -> String {
+    r#"# study
+
+## Commands
+
+- `study list` - list locally available cBioPortal studies from `BIOMCP_STUDY_DIR`
+- `study query --study <id> --gene <symbol> --type <mutations|cna|expression>` - run per-study gene query
+- `study co-occurrence --study <id> --genes <g1,g2,...>` - pairwise mutation co-occurrence (2-10 genes)
+
+## Setup
+
+- `BIOMCP_STUDY_DIR` should point to a directory containing per-study folders (for example `msk_impact_2017/`).
+- Each study folder should include `meta_study.txt` and one or more matrices such as `data_mutations.txt`, `data_cna.txt`, and expression files.
+
+## Examples
+
+- `study list`
+- `study query --study msk_impact_2017 --gene TP53 --type mutations`
+- `study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type cna`
+- `study query --study paad_qcmg_uq_2016 --gene KRAS --type expression`
+- `study co-occurrence --study msk_impact_2017 --genes TP53,KRAS`
+"#
+    .to_string()
+}
+
 fn list_protein() -> String {
     r#"# protein
 
@@ -645,6 +671,15 @@ mod tests {
     }
 
     #[test]
+    fn list_study_page_exists() {
+        let out = render(Some("study")).expect("list study should render");
+        assert!(out.contains("# study"));
+        assert!(out.contains(
+            "study query --study <id> --gene <symbol> --type <mutations|cna|expression>"
+        ));
+    }
+
+    #[test]
     fn list_gene_mentions_new_gene_sections() {
         let out = list_gene();
         assert!(out.contains("get gene <symbol> expression"));
@@ -679,5 +714,6 @@ mod tests {
         assert!(msg.contains("- skill"));
         assert!(msg.contains("- enrich"));
         assert!(msg.contains("- batch"));
+        assert!(msg.contains("- study"));
     }
 }

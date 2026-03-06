@@ -27,6 +27,7 @@ New to BioMCP? Try:
 - gwas
 - pathway
 - protein
+- study
 - adverse-event
 
 ## Patterns
@@ -38,6 +39,7 @@ New to BioMCP? Try:
 - `get trial <nct_id> locations --offset <N> --limit <N>` - page trial locations
 - `enrich <GENE1,GENE2,...>` - gene-set enrichment via g:Profiler
 - `batch <entity> <id1,id2,...>` - parallel get operations
+- `study list|query|co-occurrence` - local cBioPortal study analytics
 
 ## Filter Highlights
 
@@ -62,6 +64,9 @@ New to BioMCP? Try:
 - `gene pathways <symbol> --limit <N> --offset <N>`
 - `pathway drugs|articles|trials <id>`
 - `protein structures <accession> --limit <N> --offset <N>`
+- `study list`
+- `study query --study <id> --gene <symbol> --type <mutations|cna|expression>`
+- `study co-occurrence --study <id> --genes <g1,g2,...>`
 - `search phenotype \"HP:... HP:...\"`
 - `search gwas -g <gene> | --trait <text>`
 
