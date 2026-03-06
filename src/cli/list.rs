@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn list_skill_alias_routes_to_skill_listing() {
         let out = render(Some("skill")).expect("list skill should render");
-        assert!(out.contains("Skills are step-by-step investigation workflows"));
+        assert!(out.contains("No skills found"));
     }
 
     #[test]

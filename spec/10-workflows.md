@@ -1,43 +1,42 @@
 # Skill Workflows
 
-BioMCP skills package repeatable, multi-step investigation flows as runnable guidance. This file validates skill discovery and loading, then checks two representative commands used by the variant-to-treatment workflow. Assertions prioritize workflow headers and stable structural outputs.
+BioMCP now ships one primary agent-facing `SKILL.md` and no embedded use-case catalog files. This file validates the new skill-list behavior, expected not-found responses for legacy use-case lookups, and two representative commands used by investigation workflows.
 
 | Section | Command focus | Why it matters |
 |---|---|---|
-| List skills | `biomcp skill list` | Confirms workflow catalog availability |
-| Open numeric skill | `biomcp skill 01` | Confirms index-based skill retrieval |
-| Open slug skill | `biomcp skill variant-to-treatment` | Confirms slug-based retrieval |
+| List skills | `biomcp skill list` | Confirms empty catalog behavior is explicit |
+| Open numeric skill | `biomcp skill 01` | Confirms legacy numeric lookups fail clearly |
+| Open slug skill | `biomcp skill variant-to-treatment` | Confirms legacy slug lookups fail clearly |
 | Variant interpretation step | `get variant "BRAF V600E" clinvar` | Confirms clinical interpretation building block |
 | Trial pivot step | `variant trials "BRAF V600E"` | Confirms treatment-option discovery building block |
 
 ## Listing Skills
 
-Skill listing is the workflow entrypoint and should expose stable names for navigation. We assert on two canonical skill slugs.
+Skill listing should now clearly indicate there are no embedded use-case files.
 
 ```bash
 out="$(biomcp skill list)"
-echo "$out" | mustmatch like "variant-to-treatment"
-echo "$out" | mustmatch like "drug-investigation"
+echo "$out" | mustmatch like "No skills found"
 ```
 
 ## Viewing a Skill by Number
 
-Numeric addressing is convenient for quick access from documentation and dispatch logs. The loaded skill should render pattern heading and workflow section labels.
+Numeric addressing previously selected embedded use-cases. With the catalog removed, the command should fail with a clear not-found message.
 
 ```bash
-out="$(biomcp skill 01)"
-echo "$out" | mustmatch like "# Pattern: Variant to Treatment"
-echo "$out" | mustmatch like "## Full Workflow"
+out="$(biomcp skill 01 2>&1 || true)"
+echo "$out" | mustmatch like "skill '01' not found"
+echo "$out" | mustmatch like "Try: biomcp skill list"
 ```
 
 ## Viewing a Skill by Slug
 
-Slug addressing is stable across environments where numeric ordering may change. This check verifies the same workflow can be loaded by canonical slug.
+Slug addressing for legacy use-cases should also fail with a clear not-found message.
 
 ```bash
-out="$(biomcp skill variant-to-treatment)"
-echo "$out" | mustmatch like "# Pattern: Variant to Treatment"
-echo "$out" | mustmatch like "biomcp variant trials"
+out="$(biomcp skill variant-to-treatment 2>&1 || true)"
+echo "$out" | mustmatch like "skill 'variant-to-treatment' not found"
+echo "$out" | mustmatch like "Try: biomcp skill list"
 ```
 
 ## Workflow Step: Variant Interpretation
