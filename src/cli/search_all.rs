@@ -11,6 +11,7 @@ use crate::utils::date::validate_since;
 const MAX_SEARCH_ALL_LIMIT: usize = 50;
 const EXPAND_LIMIT: usize = 20;
 const SECTION_TIMEOUT: Duration = Duration::from_secs(12);
+const ARTICLE_SECTION_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone)]
 pub struct SearchAllInput {
@@ -38,6 +39,7 @@ pub struct SearchAllSection {
     pub count: usize,
     pub total: Option<usize>,
     pub error: Option<String>,
+    pub note: Option<String>,
     pub results: Vec<Value>,
     pub links: Vec<SearchAllLink>,
 }
@@ -118,6 +120,23 @@ impl SearchAllSection {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SectionResult {
+    rows: Vec<Value>,
+    total: Option<usize>,
+    note: Option<String>,
+}
+
+impl SectionResult {
+    fn new(rows: Vec<Value>, total: Option<usize>) -> Self {
+        Self {
+            rows,
+            total,
+            note: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchAllResults {
     pub query: String,
@@ -176,6 +195,13 @@ impl SectionKind {
             Self::Gwas => "GWAS",
             Self::AdverseEvent => "Adverse Events",
         }
+    }
+}
+
+fn section_timeout(kind: SectionKind) -> Duration {
+    match kind {
+        SectionKind::Article => ARTICLE_SECTION_TIMEOUT,
+        _ => SECTION_TIMEOUT,
     }
 }
 
@@ -499,18 +525,20 @@ fn build_dispatch_plan_prepared(input: &PreparedInput) -> Vec<DispatchSpec> {
 
 async fn dispatch_section(kind: SectionKind, input: &PreparedInput) -> SearchAllSection {
     let search_self = canonical_search_command(kind, input, input.limit);
-    let section_result = tokio::time::timeout(SECTION_TIMEOUT, run_section(kind, input)).await;
+    let timeout = section_timeout(kind);
+    let section_result = tokio::time::timeout(timeout, run_section(kind, input)).await;
 
     match section_result {
-        Ok(Ok((results, total))) => {
-            let links = build_links(kind, input, &results, &search_self);
+        Ok(Ok(section_result)) => {
+            let links = build_links(kind, input, &section_result.rows, &search_self);
             SearchAllSection {
                 entity: kind.entity().to_string(),
                 label: kind.label().to_string(),
-                count: results.len(),
-                total,
+                count: section_result.rows.len(),
+                total: section_result.total,
                 error: None,
-                results,
+                note: section_result.note,
+                results: section_result.rows,
                 links,
             }
         }
@@ -520,6 +548,7 @@ async fn dispatch_section(kind: SectionKind, input: &PreparedInput) -> SearchAll
             count: 0,
             total: None,
             error: Some(err.to_string()),
+            note: None,
             results: Vec::new(),
             links: vec![SearchAllLink {
                 rel: "search.retry".to_string(),
@@ -535,8 +564,9 @@ async fn dispatch_section(kind: SectionKind, input: &PreparedInput) -> SearchAll
             error: Some(format!(
                 "{} search timed out after {}s",
                 kind.entity(),
-                SECTION_TIMEOUT.as_secs()
+                timeout.as_secs()
             )),
+            note: None,
             results: Vec::new(),
             links: vec![SearchAllLink {
                 rel: "search.retry".to_string(),
@@ -550,7 +580,7 @@ async fn dispatch_section(kind: SectionKind, input: &PreparedInput) -> SearchAll
 async fn run_section(
     kind: SectionKind,
     input: &PreparedInput,
-) -> Result<(Vec<Value>, Option<usize>), BioMcpError> {
+) -> Result<SectionResult, BioMcpError> {
     match kind {
         SectionKind::Gene => {
             let query = input.gene_anchor().ok_or_else(|| {
@@ -561,7 +591,7 @@ async fn run_section(
                 ..Default::default()
             };
             let page = crate::entities::gene::search_page(&filters, input.limit, 0).await?;
-            Ok((to_json_array(page.results)?, page.total))
+            Ok(SectionResult::new(to_json_array(page.results)?, page.total))
         }
         SectionKind::Variant => {
             if let Some(variant_id) = input
@@ -570,7 +600,7 @@ async fn run_section(
                 .and_then(|ctx| (ctx.parsed_gene.is_none()).then_some(ctx.raw.as_str()))
             {
                 let row = crate::entities::variant::get(variant_id, &[]).await?;
-                return Ok((to_json_array(vec![row])?, Some(1)));
+                return Ok(SectionResult::new(to_json_array(vec![row])?, Some(1)));
             }
 
             let filters = crate::entities::variant::VariantSearchFilters {
@@ -606,13 +636,40 @@ async fn run_section(
             }
             let page = crate::entities::variant::search_page(&filters, input.limit, 0).await?;
             let mut rows = page.results;
+            let mut total = page.total;
+            let mut note = None;
+
+            if rows.is_empty() && input.gene_anchor().is_some() && input.disease.is_some() {
+                let fallback_filters = crate::entities::variant::VariantSearchFilters {
+                    gene: filters.gene.clone(),
+                    hgvsp: filters.hgvsp.clone(),
+                    therapy: filters.therapy.clone(),
+                    ..Default::default()
+                };
+                let fallback_page =
+                    crate::entities::variant::search_page(&fallback_filters, input.limit, 0)
+                        .await?;
+                rows = fallback_page.results;
+                total = fallback_page.total;
+                if !rows.is_empty() {
+                    note = Some(
+                        "No disease-filtered variants found; showing top gene variants."
+                            .to_string(),
+                    );
+                }
+            }
+
             if input.gene_anchor().is_some() && input.disease.is_some() {
                 rows.sort_by(|a, b| {
                     variant_significance_rank(a.significance.as_deref())
                         .cmp(&variant_significance_rank(b.significance.as_deref()))
                 });
             }
-            Ok((to_json_array(rows)?, page.total))
+            Ok(SectionResult {
+                rows: to_json_array(rows)?,
+                total,
+                note,
+            })
         }
         SectionKind::Disease => {
             let query = input.disease.as_deref().ok_or_else(|| {
@@ -625,7 +682,7 @@ async fn run_section(
                 ..Default::default()
             };
             let page = crate::entities::disease::search_page(&filters, input.limit, 0).await?;
-            Ok((to_json_array(page.results)?, page.total))
+            Ok(SectionResult::new(to_json_array(page.results)?, page.total))
         }
         SectionKind::Drug => {
             // When --drug is explicit, use it as-is. Keyword pushdown only
@@ -666,10 +723,10 @@ async fn run_section(
             } else {
                 page.total
             };
-            Ok((to_json_array(rows)?, total))
+            Ok(SectionResult::new(to_json_array(rows)?, total))
         }
         SectionKind::Trial => {
-            let filters = crate::entities::trial::TrialSearchFilters {
+            let base_filters = crate::entities::trial::TrialSearchFilters {
                 condition: input.trial_condition_query(),
                 intervention: input.drug.clone(),
                 biomarker: input.gene_anchor().map(str::to_string),
@@ -678,8 +735,54 @@ async fn run_section(
                 source: crate::entities::trial::TrialSource::ClinicalTrialsGov,
                 ..Default::default()
             };
-            let page = crate::entities::trial::search_page(&filters, input.limit, 0, None).await?;
-            Ok((to_json_array(page.results)?, page.total))
+            let preferred_filters = crate::entities::trial::TrialSearchFilters {
+                status: Some(
+                    "RECRUITING,ACTIVE_NOT_RECRUITING,ENROLLING_BY_INVITATION,NOT_YET_RECRUITING"
+                        .to_string(),
+                ),
+                ..base_filters.clone()
+            };
+
+            let mut rows = Vec::new();
+            let mut total = None;
+            let mut preferred_error: Option<BioMcpError> = None;
+
+            match crate::entities::trial::search_page(&preferred_filters, input.limit, 0, None)
+                .await
+            {
+                Ok(page) => {
+                    total = page.total;
+                    rows = page.results;
+                }
+                Err(err) => {
+                    preferred_error = Some(err);
+                }
+            }
+
+            if rows.len() < input.limit {
+                let backfill_fetch = input.limit.saturating_mul(3).min(MAX_SEARCH_ALL_LIMIT);
+                match crate::entities::trial::search_page(&base_filters, backfill_fetch, 0, None)
+                    .await
+                {
+                    Ok(page) => {
+                        total = total.or(page.total);
+                        rows = merge_trial_backfill_rows(rows, page.results, input.limit);
+                    }
+                    Err(err) if rows.is_empty() => {
+                        return Err(preferred_error.unwrap_or(err));
+                    }
+                    Err(_) => {}
+                }
+            }
+
+            if rows.is_empty()
+                && let Some(err) = preferred_error
+            {
+                return Err(err);
+            }
+
+            rows.truncate(input.limit);
+            Ok(SectionResult::new(to_json_array(rows)?, total))
         }
         SectionKind::Article => {
             let filters = crate::entities::article::ArticleSearchFilters {
@@ -705,7 +808,7 @@ async fn run_section(
                 crate::entities::article::ArticleSourceFilter::All,
             )
             .await?;
-            Ok((to_json_array(page.results)?, page.total))
+            Ok(SectionResult::new(to_json_array(page.results)?, page.total))
         }
         SectionKind::Pathway => {
             let query = input.gene_anchor().ok_or_else(|| {
@@ -718,7 +821,7 @@ async fn run_section(
             let pathway_limit = input.limit.min(25);
             let (results, total) =
                 crate::entities::pathway::search_with_filters(&filters, pathway_limit).await?;
-            Ok((to_json_array(results)?, total))
+            Ok(SectionResult::new(to_json_array(results)?, total))
         }
         SectionKind::Pgx => {
             let filters = crate::entities::pgx::PgxSearchFilters {
@@ -727,7 +830,7 @@ async fn run_section(
                 ..Default::default()
             };
             let page = crate::entities::pgx::search_page(&filters, input.limit, 0).await?;
-            Ok((to_json_array(page.results)?, page.total))
+            Ok(SectionResult::new(to_json_array(page.results)?, page.total))
         }
         SectionKind::Gwas => {
             let trait_query = input.disease.as_deref().ok_or_else(|| {
@@ -747,7 +850,7 @@ async fn run_section(
             let mut rows = dedupe_gwas_rows(rows);
             rows.truncate(input.limit);
             let total = rows.len();
-            Ok((to_json_array(rows)?, Some(total)))
+            Ok(SectionResult::new(to_json_array(rows)?, Some(total)))
         }
         SectionKind::AdverseEvent => {
             let drug = input.drug.as_deref().ok_or_else(|| {
@@ -777,9 +880,34 @@ async fn run_section(
                     })
                 })
                 .collect::<Vec<_>>();
-            Ok((rows, Some(total)))
+            Ok(SectionResult::new(rows, Some(total)))
         }
     }
+}
+
+fn merge_trial_backfill_rows(
+    mut preferred: Vec<crate::entities::trial::TrialSearchResult>,
+    backfill: Vec<crate::entities::trial::TrialSearchResult>,
+    limit: usize,
+) -> Vec<crate::entities::trial::TrialSearchResult> {
+    preferred.truncate(limit);
+    if preferred.len() >= limit {
+        return preferred;
+    }
+
+    let mut seen = preferred
+        .iter()
+        .map(|row| row.nct_id.clone())
+        .collect::<HashSet<_>>();
+    for row in backfill {
+        if preferred.len() >= limit {
+            break;
+        }
+        if seen.insert(row.nct_id.clone()) {
+            preferred.push(row);
+        }
+    }
+    preferred
 }
 
 fn build_links(
@@ -1468,6 +1596,7 @@ fn dedupe_gwas_rows(
 mod tests {
     use super::*;
     use crate::entities::drug::DrugSearchResult;
+    use crate::entities::trial::TrialSearchResult;
     use crate::entities::variant::VariantGwasAssociation;
     use serde_json::json;
 
@@ -1643,6 +1772,17 @@ mod tests {
         }
     }
 
+    fn trial_row(nct_id: &str, status: &str) -> TrialSearchResult {
+        TrialSearchResult {
+            nct_id: nct_id.to_string(),
+            title: format!("Trial {nct_id}"),
+            status: status.to_string(),
+            phase: None,
+            conditions: Vec::new(),
+            sponsor: None,
+        }
+    }
+
     #[test]
     fn top_get_command_skips_civic_variant_ids() {
         let input = PreparedInput::new(&SearchAllInput {
@@ -1772,5 +1912,47 @@ mod tests {
             "6e-22"
         );
         assert_eq!(format_search_all_p_value(&json!(0.005)), "0.005");
+    }
+
+    #[test]
+    fn section_timeout_uses_article_specific_budget() {
+        assert_eq!(section_timeout(SectionKind::Article).as_secs(), 20);
+        assert_eq!(section_timeout(SectionKind::Trial).as_secs(), 12);
+    }
+
+    #[test]
+    fn merge_trial_backfill_rows_preserves_preferred_order_and_dedupes() {
+        let preferred = vec![
+            trial_row("NCT00000001", "RECRUITING"),
+            trial_row("NCT00000002", "ACTIVE_NOT_RECRUITING"),
+        ];
+        let backfill = vec![
+            trial_row("NCT00000002", "UNKNOWN"),
+            trial_row("NCT00000003", "UNKNOWN"),
+            trial_row("NCT00000004", "COMPLETED"),
+        ];
+
+        let merged = merge_trial_backfill_rows(preferred, backfill, 3);
+        let ids = merged
+            .iter()
+            .map(|row| row.nct_id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["NCT00000001", "NCT00000002", "NCT00000003"]);
+    }
+
+    #[test]
+    fn merge_trial_backfill_rows_respects_limit_with_preferred_only() {
+        let preferred = vec![
+            trial_row("NCT00000001", "RECRUITING"),
+            trial_row("NCT00000002", "ACTIVE_NOT_RECRUITING"),
+            trial_row("NCT00000003", "NOT_YET_RECRUITING"),
+        ];
+
+        let merged = merge_trial_backfill_rows(preferred, vec![], 2);
+        let ids = merged
+            .iter()
+            .map(|row| row.nct_id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["NCT00000001", "NCT00000002"]);
     }
 }

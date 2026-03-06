@@ -1019,6 +1019,8 @@ See also: biomcp list variant")]
         /// Variant identifier (rsID, HGVS, or "GENE CHANGE")
         id: String,
     },
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1065,6 +1067,8 @@ See also: biomcp list drug")]
         #[arg(long)]
         serious: bool,
     },
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1237,6 +1241,8 @@ See also: biomcp list gene")]
         #[arg(long, default_value = "0")]
         offset: usize,
     },
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Subcommand, Debug)]
@@ -2426,6 +2432,22 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         Ok(crate::render::markdown::variant_oncokb_markdown(&result))
                     }
                 }
+                VariantCommand::External(args) => {
+                    let id = args.join(" ");
+                    let variant = crate::entities::variant::get(&id, empty_sections()).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_entity_json(
+                            &variant,
+                            crate::render::markdown::variant_evidence_urls(&variant),
+                            crate::render::markdown::related_variant(&variant),
+                        )?)
+                    } else {
+                        Ok(crate::render::markdown::variant_markdown(
+                            &variant,
+                            empty_sections(),
+                        )?)
+                    }
+                }
             },
             Commands::Drug { cmd } => match cmd {
                 DrugCommand::Trials {
@@ -2517,6 +2539,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             &results,
                             &summary,
                         )?)
+                    }
+                }
+                DrugCommand::External(args) => {
+                    let name = args.join(" ");
+                    let drug = crate::entities::drug::get(&name, empty_sections()).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_entity_json(
+                            &drug,
+                            crate::render::markdown::drug_evidence_urls(&drug),
+                            crate::render::markdown::related_drug(&drug),
+                        )?)
+                    } else {
+                        Ok(crate::render::markdown::drug_markdown(&drug, empty_sections())?)
                     }
                 }
             },
@@ -2828,6 +2863,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     } else {
                         Ok(crate::render::markdown::gene_markdown(&gene, &sections)?)
                     }
+                }
+                GeneCommand::External(args) => {
+                    let symbol = args.join(" ");
+                    render_gene_card(&symbol, empty_sections(), cli.json).await
                 }
             },
             Commands::Pathway { cmd } => match cmd {
@@ -4346,8 +4385,8 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArticleCommand, Cli, Commands, GeneCommand, ProteinCommand, VariantCommand, execute,
-        extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
+        ArticleCommand, Cli, Commands, DrugCommand, GeneCommand, ProteinCommand, VariantCommand,
+        execute, extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
         parse_trial_location_paging, resolve_query_input, resolve_variant_query,
         should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
         truncate_article_annotations,
@@ -4638,6 +4677,42 @@ mod tests {
             Commands::Gene {
                 cmd: GeneCommand::Definition { symbol },
             } => assert_eq!(symbol, "BRAF"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gene_bare_symbol_parses_as_external_subcommand() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "gene", "BRAF"]).expect("bare gene symbol should parse");
+        match cli.command {
+            Commands::Gene {
+                cmd: GeneCommand::External(args),
+            } => assert_eq!(args, vec!["BRAF"]),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn drug_bare_name_parses_as_external_subcommand() {
+        let cli = Cli::try_parse_from(["biomcp", "drug", "imatinib"])
+            .expect("bare drug name should parse");
+        match cli.command {
+            Commands::Drug {
+                cmd: DrugCommand::External(args),
+            } => assert_eq!(args, vec!["imatinib"]),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn variant_bare_id_parses_as_external_subcommand() {
+        let cli = Cli::try_parse_from(["biomcp", "variant", "BRAF V600E"])
+            .expect("bare variant id should parse");
+        match cli.command {
+            Commands::Variant {
+                cmd: VariantCommand::External(args),
+            } => assert_eq!(args, vec!["BRAF V600E"]),
             other => panic!("unexpected command: {other:?}"),
         }
     }
