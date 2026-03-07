@@ -1361,6 +1361,37 @@ See also: biomcp list study")]
         #[arg(short = 't', long = "type")]
         query_type: String,
     },
+    /// Filter samples across mutation, CNA, expression, and clinical criteria
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study filter --study msk_impact_2017 --mutated TP53
+  biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --amplified ERBB2
+  biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --expression-above ERBB2:1.5 --cancer-type \"Breast Cancer\"
+
+See also: biomcp list study")]
+    Filter {
+        /// Study identifier (e.g., brca_tcga_pan_can_atlas_2018)
+        #[arg(short, long)]
+        study: String,
+        /// Gene with at least one mutation (repeatable)
+        #[arg(long)]
+        mutated: Vec<String>,
+        /// Gene with CNA amplification, value == 2 (repeatable)
+        #[arg(long)]
+        amplified: Vec<String>,
+        /// Gene with CNA deep deletion, value == -2 (repeatable)
+        #[arg(long)]
+        deleted: Vec<String>,
+        /// Gene with expression above threshold, GENE:THRESHOLD (repeatable)
+        #[arg(long = "expression-above")]
+        expression_above: Vec<String>,
+        /// Gene with expression below threshold, GENE:THRESHOLD (repeatable)
+        #[arg(long = "expression-below")]
+        expression_below: Vec<String>,
+        /// Cancer type filter, case-insensitive exact match (repeatable)
+        #[arg(long = "cancer-type")]
+        cancer_type: Vec<String>,
+    },
     /// Define a cohort split by mutation status
     #[command(after_help = "\
 EXAMPLES:
@@ -1469,6 +1500,28 @@ fn parse_usize_arg(flag: &str, value: &str) -> Result<usize, crate::error::BioMc
     value.parse::<usize>().map_err(|_| {
         crate::error::BioMcpError::InvalidArgument(format!("{flag} must be a non-negative integer"))
     })
+}
+
+fn parse_expression_filter(
+    value: &str,
+    flag: &str,
+    make_criterion: impl FnOnce(String, f64) -> crate::entities::study::FilterCriterion,
+) -> Result<crate::entities::study::FilterCriterion, crate::error::BioMcpError> {
+    let trimmed = value.trim();
+    let invalid = || {
+        crate::error::BioMcpError::InvalidArgument(format!(
+            "Invalid value '{trimmed}' for {flag}. Expected GENE:THRESHOLD."
+        ))
+    };
+
+    let (gene, threshold) = trimmed.split_once(':').ok_or_else(invalid)?;
+    let gene = gene.trim();
+    let threshold = threshold.trim();
+    if gene.is_empty() || threshold.is_empty() {
+        return Err(invalid());
+    }
+    let threshold = threshold.parse::<f64>().map_err(|_| invalid())?;
+    Ok(make_criterion(gene.to_string(), threshold))
 }
 
 type LocationPaging = (Vec<String>, Option<usize>, Option<usize>);
@@ -3200,6 +3253,56 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         Ok(crate::render::json::to_pretty(&result)?)
                     } else {
                         Ok(crate::render::markdown::study_query_markdown(&result))
+                    }
+                }
+                StudyCommand::Filter {
+                    study,
+                    mutated,
+                    amplified,
+                    deleted,
+                    expression_above,
+                    expression_below,
+                    cancer_type,
+                } => {
+                    let mut criteria = Vec::new();
+                    for gene in mutated {
+                        criteria.push(crate::entities::study::FilterCriterion::Mutated(gene));
+                    }
+                    for gene in amplified {
+                        criteria.push(crate::entities::study::FilterCriterion::Amplified(gene));
+                    }
+                    for gene in deleted {
+                        criteria.push(crate::entities::study::FilterCriterion::Deleted(gene));
+                    }
+                    for value in expression_above {
+                        criteria.push(parse_expression_filter(
+                            &value,
+                            "--expression-above",
+                            crate::entities::study::FilterCriterion::ExpressionAbove,
+                        )?);
+                    }
+                    for value in expression_below {
+                        criteria.push(parse_expression_filter(
+                            &value,
+                            "--expression-below",
+                            crate::entities::study::FilterCriterion::ExpressionBelow,
+                        )?);
+                    }
+                    for value in cancer_type {
+                        criteria.push(crate::entities::study::FilterCriterion::CancerType(value));
+                    }
+                    if criteria.is_empty() {
+                        return Err(crate::error::BioMcpError::InvalidArgument(
+                            crate::entities::study::filter_required_message().to_string(),
+                        )
+                        .into());
+                    }
+
+                    let result = crate::entities::study::filter(&study, criteria).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&result)?)
+                    } else {
+                        Ok(crate::render::markdown::study_filter_markdown(&result))
                     }
                 }
                 StudyCommand::Cohort { study, gene } => {
@@ -5381,6 +5484,59 @@ mod tests {
     }
 
     #[test]
+    fn study_filter_parses_all_flags_and_repeated_values() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "filter",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--mutated",
+            "TP53",
+            "--mutated",
+            "PIK3CA",
+            "--amplified",
+            "ERBB2",
+            "--deleted",
+            "PTEN",
+            "--expression-above",
+            "MYC:1.5",
+            "--expression-above",
+            "ERBB2:-0.5",
+            "--expression-below",
+            "ESR1:0.5",
+            "--cancer-type",
+            "Breast Cancer",
+            "--cancer-type",
+            "Lung Cancer",
+        ])
+        .expect("study filter should parse");
+        match cli.command {
+            Commands::Study {
+                cmd:
+                    StudyCommand::Filter {
+                        study,
+                        mutated,
+                        amplified,
+                        deleted,
+                        expression_above,
+                        expression_below,
+                        cancer_type,
+                    },
+            } => {
+                assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
+                assert_eq!(mutated, vec!["TP53", "PIK3CA"]);
+                assert_eq!(amplified, vec!["ERBB2"]);
+                assert_eq!(deleted, vec!["PTEN"]);
+                assert_eq!(expression_above, vec!["MYC:1.5", "ERBB2:-0.5"]);
+                assert_eq!(expression_below, vec!["ESR1:0.5"]);
+                assert_eq!(cancer_type, vec!["Breast Cancer", "Lung Cancer"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn study_co_occurrence_parses_gene_list() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -5813,6 +5969,40 @@ mod tests {
         .await
         .expect_err("study co-occurrence should validate gene count");
         assert!(err.to_string().contains("--genes must contain 2 to 10"));
+    }
+
+    #[tokio::test]
+    async fn study_filter_requires_at_least_one_criterion() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "filter".to_string(),
+            "--study".to_string(),
+            "brca_tcga_pan_can_atlas_2018".to_string(),
+        ])
+        .await
+        .expect_err("study filter should require criteria");
+        assert!(
+            err.to_string()
+                .contains("At least one filter criterion is required")
+        );
+    }
+
+    #[tokio::test]
+    async fn study_filter_rejects_malformed_expression_threshold() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "filter".to_string(),
+            "--study".to_string(),
+            "brca_tcga_pan_can_atlas_2018".to_string(),
+            "--expression-above".to_string(),
+            "MYC:not-a-number".to_string(),
+        ])
+        .await
+        .expect_err("study filter should validate threshold format");
+        assert!(err.to_string().contains("--expression-above"));
+        assert!(err.to_string().contains("GENE:THRESHOLD"));
     }
 
     #[tokio::test]

@@ -183,6 +183,31 @@ pub struct MutationComparisonByMutationResult {
     pub groups: Vec<MutationGroupStats>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum SourceFilterCriterion {
+    Mutated(String),
+    Amplified(String),
+    Deleted(String),
+    ExpressionAbove(String, f64),
+    ExpressionBelow(String, f64),
+    CancerType(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SourceFilterCriterionSummary {
+    pub description: String,
+    pub matched_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SourceFilterResult {
+    pub study_id: String,
+    pub criteria: Vec<SourceFilterCriterionSummary>,
+    pub total_study_samples: Option<usize>,
+    pub matched_count: usize,
+    pub matched_sample_ids: Vec<String>,
+}
+
 pub fn resolve_study_root() -> PathBuf {
     if let Some(path) = std::env::var("BIOMCP_STUDY_DIR")
         .ok()
@@ -612,6 +637,111 @@ pub fn mutated_sample_ids(study_dir: &Path, gene: &str) -> Result<HashSet<String
     Ok(samples)
 }
 
+pub fn cna_values_by_sample(
+    study_dir: &Path,
+    gene: &str,
+) -> Result<HashMap<String, i32>, BioMcpError> {
+    let gene = normalize_gene(gene)?;
+    let study_id = study_id_from_dir(study_dir);
+    let path = study_dir.join(CNA_FILE);
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let gene_idx = require_column(&header, "HUGO_SYMBOL", &path)?;
+    let sample_start = matrix_sample_start(&header, &reader.headers, &path)?;
+
+    while let Some(row) = reader.next_row()? {
+        if !row_field(&row, gene_idx).eq_ignore_ascii_case(&gene) {
+            continue;
+        }
+
+        let mut values = HashMap::new();
+        for (offset, sample_id) in reader.headers.iter().skip(sample_start).enumerate() {
+            let sample_id = sample_id.trim();
+            if sample_id.is_empty() {
+                continue;
+            }
+            let value = row
+                .get(sample_start + offset)
+                .map(String::as_str)
+                .unwrap_or("");
+            if let Some(value) = parse_i32(value) {
+                values.insert(sample_id.to_string(), value);
+            }
+        }
+        return Ok(values);
+    }
+
+    Err(BioMcpError::NotFound {
+        entity: "gene".to_string(),
+        id: gene,
+        suggestion: format!("Try a different gene symbol in study '{study_id}'."),
+    })
+}
+
+pub fn clinical_column_values(
+    study_dir: &Path,
+    column: &str,
+) -> Result<HashMap<String, String>, BioMcpError> {
+    let path = study_dir.join(CLINICAL_SAMPLE_FILE);
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let sample_idx = require_column(&header, "SAMPLE_ID", &path)?;
+    let column_idx = require_column(&header, column, &path)?;
+
+    let mut values = HashMap::new();
+    while let Some(row) = reader.next_row()? {
+        let sample = row_field(&row, sample_idx);
+        if sample.is_empty() {
+            continue;
+        }
+        let value = row_field(&row, column_idx);
+        values.insert(sample.to_string(), value.to_string());
+    }
+
+    Ok(values)
+}
+
+pub(crate) fn filter_samples(
+    study_dir: &Path,
+    criteria: &[SourceFilterCriterion],
+) -> Result<SourceFilterResult, BioMcpError> {
+    if criteria.is_empty() {
+        return Err(BioMcpError::InvalidArgument(
+            "At least one filter criterion is required. Use one or more of --mutated, --amplified, --deleted, --expression-above, --expression-below, --cancer-type.".to_string(),
+        ));
+    }
+
+    let mut summaries = Vec::with_capacity(criteria.len());
+    let mut intersection = None::<HashSet<String>>;
+
+    for criterion in criteria {
+        let sample_ids = criterion_sample_ids(study_dir, criterion)?;
+        summaries.push(SourceFilterCriterionSummary {
+            description: criterion_description(criterion),
+            matched_count: sample_ids.len(),
+        });
+
+        intersection = Some(match intersection.take() {
+            Some(current) => current.intersection(&sample_ids).cloned().collect(),
+            None => sample_ids,
+        });
+    }
+
+    let mut matched_sample_ids = intersection
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    matched_sample_ids.sort();
+
+    Ok(SourceFilterResult {
+        study_id: study_id_from_dir(study_dir),
+        criteria: summaries,
+        total_study_samples: clinical_sample_ids(study_dir)?.map(|ids| ids.len()),
+        matched_count: matched_sample_ids.len(),
+        matched_sample_ids,
+    })
+}
+
 pub fn sample_to_patient_map(study_dir: &Path) -> Result<HashMap<String, String>, BioMcpError> {
     let path = study_dir.join(CLINICAL_SAMPLE_FILE);
     if !path.exists() {
@@ -882,6 +1012,78 @@ pub fn compare_mutations_by_mutation(
     })
 }
 
+fn criterion_sample_ids(
+    study_dir: &Path,
+    criterion: &SourceFilterCriterion,
+) -> Result<HashSet<String>, BioMcpError> {
+    match criterion {
+        SourceFilterCriterion::Mutated(gene) => mutated_sample_ids(study_dir, gene),
+        SourceFilterCriterion::Amplified(gene) => Ok(missing_gene_row_as_empty(
+            cna_values_by_sample(study_dir, gene),
+        )?
+        .into_iter()
+        .filter_map(|(sample_id, value)| (value == 2).then_some(sample_id))
+        .collect()),
+        SourceFilterCriterion::Deleted(gene) => Ok(missing_gene_row_as_empty(
+            cna_values_by_sample(study_dir, gene),
+        )?
+        .into_iter()
+        .filter_map(|(sample_id, value)| (value == -2).then_some(sample_id))
+        .collect()),
+        SourceFilterCriterion::ExpressionAbove(gene, threshold) => Ok(missing_gene_row_as_empty(
+            expression_values_by_sample(study_dir, gene),
+        )?
+        .into_iter()
+        .filter_map(|(sample_id, value)| (value > *threshold).then_some(sample_id))
+        .collect()),
+        SourceFilterCriterion::ExpressionBelow(gene, threshold) => Ok(missing_gene_row_as_empty(
+            expression_values_by_sample(study_dir, gene),
+        )?
+        .into_iter()
+        .filter_map(|(sample_id, value)| (value < *threshold).then_some(sample_id))
+        .collect()),
+        SourceFilterCriterion::CancerType(cancer_type) => {
+            let expected = cancer_type.trim();
+            Ok(clinical_column_values(study_dir, "CANCER_TYPE")?
+                .into_iter()
+                .filter_map(|(sample_id, value)| {
+                    value
+                        .trim()
+                        .eq_ignore_ascii_case(expected)
+                        .then_some(sample_id)
+                })
+                .collect())
+        }
+    }
+}
+
+fn criterion_description(criterion: &SourceFilterCriterion) -> String {
+    match criterion {
+        SourceFilterCriterion::Mutated(gene) => format!("mutated {gene}"),
+        SourceFilterCriterion::Amplified(gene) => format!("amplified {gene}"),
+        SourceFilterCriterion::Deleted(gene) => format!("deleted {gene}"),
+        SourceFilterCriterion::ExpressionAbove(gene, threshold) => {
+            format!("expression > {} for {gene}", format_threshold(*threshold))
+        }
+        SourceFilterCriterion::ExpressionBelow(gene, threshold) => {
+            format!("expression < {} for {gene}", format_threshold(*threshold))
+        }
+        SourceFilterCriterion::CancerType(cancer_type) => {
+            format!("cancer type = {}", cancer_type.trim())
+        }
+    }
+}
+
+fn missing_gene_row_as_empty<T>(
+    result: Result<HashMap<String, T>, BioMcpError>,
+) -> Result<HashMap<String, T>, BioMcpError> {
+    match result {
+        Ok(values) => Ok(values),
+        Err(BioMcpError::NotFound { entity, .. }) if entity == "gene" => Ok(HashMap::new()),
+        Err(err) => Err(err),
+    }
+}
+
 fn parse_meta_study(path: &Path, fallback_study_id: &str) -> Result<StudyMeta, BioMcpError> {
     let file = File::open(path).map_err(|_| BioMcpError::SourceUnavailable {
         source_name: SOURCE_NAME.to_string(),
@@ -1016,6 +1218,14 @@ fn parse_i32(value: &str) -> Option<i32> {
         return None;
     }
     value.parse::<i32>().ok()
+}
+
+fn format_threshold(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        value.to_string()
+    }
 }
 
 fn sorted_counts(map: HashMap<String, usize>) -> Vec<(String, usize)> {
@@ -1395,6 +1605,41 @@ mod tests {
             .expect("write clinical patient");
     }
 
+    fn write_filter_fixture(study_dir: &Path) {
+        fs::write(
+            study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\n\
+TP53\tS1\tMissense_Mutation\tp.R175H\n\
+TP53\tS2\tMissense_Mutation\tp.R248Q\n\
+TP53\tS3\tNonsense_Mutation\tp.R213*\n\
+KRAS\tS4\tMissense_Mutation\tp.G12D\n",
+        )
+        .expect("write mutations");
+        write_minimal_clinical_samples(
+            study_dir,
+            &[
+                "P1\tS1\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P2\tS2\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+                "P3\tS3\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P4\tS4\tPancreatic Cancer\tPancreatic Ductal Adenocarcinoma\tPAAD",
+            ],
+        );
+        fs::write(
+            study_dir.join("data_cna.txt"),
+            "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\tS3\tS4\n\
+ERBB2\t2064\t0\t2\t2\t2\n\
+PTEN\t5728\t-2\t0\t0\tNA\n",
+        )
+        .expect("write cna");
+        fs::write(
+            study_dir.join("data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt"),
+            "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\tS3\tS4\n\
+MYC\t4609\t1.5\t0.2\t2.0\t0.5\n\
+ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
+        )
+        .expect("write expression");
+    }
+
     #[test]
     fn list_studies_reads_meta_and_data_flags() {
         let fixture = TestStudyDir::new("list-studies");
@@ -1519,6 +1764,190 @@ mod tests {
         assert!((result.max - 3.0).abs() < 1e-9);
         assert!((result.q1 - 1.5).abs() < 1e-9);
         assert!((result.q3 - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cna_values_by_sample_reads_matrix_rows_and_optional_entrez_column() {
+        let fixture = TestStudyDir::new("filter-cna-map");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let values = cna_values_by_sample(&study_dir, "erbb2").expect("cna values");
+        assert_eq!(values.len(), 4);
+        assert_eq!(values.get("S1"), Some(&0));
+        assert_eq!(values.get("S2"), Some(&2));
+        assert_eq!(values.get("S3"), Some(&2));
+        assert_eq!(values.get("S4"), Some(&2));
+    }
+
+    #[test]
+    fn clinical_column_values_reads_trimmed_clinical_values() {
+        let fixture = TestStudyDir::new("filter-clinical-map");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let values = clinical_column_values(&study_dir, "CANCER_TYPE").expect("clinical values");
+        assert_eq!(values.len(), 4);
+        assert_eq!(values.get("S1").map(String::as_str), Some("Breast Cancer"));
+        assert_eq!(values.get("S2").map(String::as_str), Some("Lung Cancer"));
+        assert_eq!(
+            values.get("S4").map(String::as_str),
+            Some("Pancreatic Cancer")
+        );
+    }
+
+    #[test]
+    fn filter_samples_intersects_mutation_and_cna_criteria() {
+        let fixture = TestStudyDir::new("filter-mut-cna");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let result = filter_samples(
+            &study_dir,
+            &[
+                SourceFilterCriterion::Mutated("TP53".to_string()),
+                SourceFilterCriterion::Amplified("ERBB2".to_string()),
+            ],
+        )
+        .expect("filter result");
+
+        assert_eq!(result.study_id, "filter_study");
+        assert_eq!(result.criteria.len(), 2);
+        assert_eq!(result.criteria[0].description, "mutated TP53");
+        assert_eq!(result.criteria[0].matched_count, 3);
+        assert_eq!(result.criteria[1].description, "amplified ERBB2");
+        assert_eq!(result.criteria[1].matched_count, 3);
+        assert_eq!(result.total_study_samples, Some(4));
+        assert_eq!(result.matched_count, 2);
+        assert_eq!(result.matched_sample_ids, vec!["S2", "S3"]);
+    }
+
+    #[test]
+    fn filter_samples_intersects_mutation_and_clinical_criteria() {
+        let fixture = TestStudyDir::new("filter-mut-clinical");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let result = filter_samples(
+            &study_dir,
+            &[
+                SourceFilterCriterion::Mutated("TP53".to_string()),
+                SourceFilterCriterion::CancerType(" breast cancer ".to_string()),
+            ],
+        )
+        .expect("filter result");
+
+        assert_eq!(result.matched_count, 2);
+        assert_eq!(result.matched_sample_ids, vec!["S1", "S3"]);
+    }
+
+    #[test]
+    fn filter_samples_intersects_three_way_criteria() {
+        let fixture = TestStudyDir::new("filter-three-way");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let result = filter_samples(
+            &study_dir,
+            &[
+                SourceFilterCriterion::Mutated("TP53".to_string()),
+                SourceFilterCriterion::Amplified("ERBB2".to_string()),
+                SourceFilterCriterion::ExpressionAbove("MYC".to_string(), 1.0),
+            ],
+        )
+        .expect("filter result");
+
+        assert_eq!(result.criteria[2].description, "expression > 1 for MYC");
+        assert_eq!(result.criteria[2].matched_count, 2);
+        assert_eq!(result.matched_count, 1);
+        assert_eq!(result.matched_sample_ids, vec!["S3"]);
+    }
+
+    #[test]
+    fn filter_samples_reports_empty_intersection_and_single_criterion_results() {
+        let fixture = TestStudyDir::new("filter-empty");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let single = filter_samples(
+            &study_dir,
+            &[SourceFilterCriterion::Deleted("PTEN".to_string())],
+        )
+        .expect("single criterion");
+        assert_eq!(single.matched_count, 1);
+        assert_eq!(single.matched_sample_ids, vec!["S1"]);
+
+        let no_matches = filter_samples(
+            &study_dir,
+            &[
+                SourceFilterCriterion::Deleted("PTEN".to_string()),
+                SourceFilterCriterion::CancerType("Lung Cancer".to_string()),
+            ],
+        )
+        .expect("no matches");
+        assert_eq!(no_matches.matched_count, 0);
+        assert!(no_matches.matched_sample_ids.is_empty());
+    }
+
+    #[test]
+    fn filter_samples_treats_missing_gene_rows_as_empty_sets() {
+        let fixture = TestStudyDir::new("filter-missing-gene");
+        let study_dir = fixture.study_path("filter_study");
+        write_filter_fixture(&study_dir);
+
+        let result = filter_samples(
+            &study_dir,
+            &[
+                SourceFilterCriterion::Amplified("ALK".to_string()),
+                SourceFilterCriterion::ExpressionAbove("FGFR1".to_string(), 0.5),
+            ],
+        )
+        .expect("missing gene rows should become empty sets");
+
+        assert_eq!(result.criteria.len(), 2);
+        assert_eq!(result.criteria[0].matched_count, 0);
+        assert_eq!(result.criteria[1].matched_count, 0);
+        assert_eq!(result.matched_count, 0);
+        assert!(result.matched_sample_ids.is_empty());
+    }
+
+    #[test]
+    fn filter_samples_propagates_missing_required_files_and_columns() {
+        let fixture = TestStudyDir::new("filter-missing-inputs");
+        let missing_cna = fixture.study_path("missing_cna");
+        fs::write(
+            missing_cna.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        )
+        .expect("write mutations");
+
+        let err = filter_samples(
+            &missing_cna,
+            &[SourceFilterCriterion::Amplified("ERBB2".to_string())],
+        )
+        .expect_err("missing cna file should fail");
+        assert!(matches!(err, BioMcpError::SourceUnavailable { .. }));
+
+        let missing_column = fixture.study_path("missing_column");
+        fs::write(
+            missing_column.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        )
+        .expect("write mutations");
+        fs::write(
+            missing_column.join("data_clinical_sample.txt"),
+            "PATIENT_ID\tSAMPLE_ID\nP1\tS1\n",
+        )
+        .expect("write clinical");
+
+        let err = filter_samples(
+            &missing_column,
+            &[SourceFilterCriterion::CancerType(
+                "Breast Cancer".to_string(),
+            )],
+        )
+        .expect_err("missing CANCER_TYPE should fail");
+        assert!(matches!(err, BioMcpError::SourceUnavailable { .. }));
     }
 
     #[test]

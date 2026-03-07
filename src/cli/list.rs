@@ -554,6 +554,7 @@ fn list_study() -> String {
 ## Commands
 
 - `study list` - list locally available cBioPortal studies from `BIOMCP_STUDY_DIR`
+- `study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]` - intersect sample filters across mutation, CNA, expression, and clinical data
 - `study query --study <id> --gene <symbol> --type <mutations|cna|expression>` - run per-study gene query
 - `study cohort --study <id> --gene <symbol>` - split the cohort into `<gene>-mutant` vs `<gene>-wildtype`
 - `study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]` - summarize survival aggregates by mutation group
@@ -570,6 +571,7 @@ fn list_study() -> String {
 ## Examples
 
 - `study list`
+- `study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --amplified ERBB2 --expression-above ERBB2:1.5`
 - `study query --study msk_impact_2017 --gene TP53 --type mutations`
 - `study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type cna`
 - `study query --study paad_qcmg_uq_2016 --gene KRAS --type expression`
@@ -683,6 +685,9 @@ mod tests {
     fn list_study_page_exists() {
         let out = render(Some("study")).expect("list study should render");
         assert!(out.contains("# study"));
+        assert!(out.contains(
+            "study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>]"
+        ));
         assert!(out.contains(
             "study query --study <id> --gene <symbol> --type <mutations|cna|expression>"
         ));
