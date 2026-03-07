@@ -4,6 +4,15 @@
 
 - No unreleased entries yet.
 
+## 0.8.12 — 2026-03-07
+
+- Added `study` subcommand: local cBioPortal study adapters with CLI query surface (`download`, `cohort`, `survival`, `compare`).
+- Added `study filter`: multi-omics cross-table sample joins across mutation, CNA, expression, and clinical data.
+- Added Fisher exact p-values to co-occurrence pair analysis.
+- Added skill installer auto-discovery: scans existing agent config directories in priority order and supports the `.agents/skills/` cross-tool standard.
+- Refreshed skill guidance and reference material: adopted the measured `SKILL.md` refresh and added drift validation for examples, schemas, and jq snippets.
+- CLI quality pass: positional search arguments, multi-token input handling, variant fallback, NCT ID validation, bare-entity shortcuts, staged trial fill, article request timeout, and `--until` alias.
+
 ## 0.8.11 — 2026-03-06
 
 - Added `expression` section to gene output (GTEx tissue-specific TPM data).
