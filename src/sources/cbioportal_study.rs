@@ -556,6 +556,7 @@ pub fn co_occurrence(
         _ => (observed_samples, SampleUniverseBasis::MutationObserved),
     };
     let total_samples = sample_universe.len();
+    let log_fact = build_log_factorial(total_samples);
 
     let mut pairs = Vec::new();
     for i in 0..genes.len() {
@@ -591,7 +592,13 @@ pub fn co_occurrence(
                 b_only,
                 neither,
                 log_odds_ratio: log_odds_ratio(both_mutated, a_only, b_only, neither),
-                p_value: None,
+                p_value: Some(fisher_exact_two_tailed(
+                    both_mutated,
+                    a_only,
+                    b_only,
+                    neither,
+                    &log_fact,
+                )),
             });
         }
     }
@@ -1378,6 +1385,51 @@ fn mutation_group_stats(
     }
 }
 
+fn build_log_factorial(n: usize) -> Vec<f64> {
+    let mut log_fact = vec![0.0_f64; n + 1];
+    for i in 1..=n {
+        log_fact[i] = log_fact[i - 1] + (i as f64).ln();
+    }
+    log_fact
+}
+
+fn fisher_exact_two_tailed(a: usize, b: usize, c: usize, d: usize, log_fact: &[f64]) -> f64 {
+    let n = a + b + c + d;
+    if n == 0 {
+        return 1.0;
+    }
+
+    debug_assert!(log_fact.len() > n);
+
+    let r1 = a + b;
+    let r2 = c + d;
+    let c1 = a + c;
+    let k_min = c1.saturating_sub(r2);
+    let k_max = r1.min(c1);
+
+    let log_p = |k: usize| -> f64 {
+        log_fact[r1] - log_fact[k] - log_fact[r1 - k] + log_fact[r2]
+            - log_fact[c1 - k]
+            - log_fact[r2 - (c1 - k)]
+            - log_fact[n]
+            + log_fact[c1]
+            + log_fact[n - c1]
+    };
+
+    let log_p_observed = log_p(a);
+    let log_cutoff = log_p_observed + 1e-7_f64.ln_1p();
+    let mut p_value = 0.0;
+
+    for k in k_min..=k_max {
+        let log_p_k = log_p(k);
+        if log_p_k <= log_cutoff {
+            p_value += log_p_k.exp();
+        }
+    }
+
+    p_value.min(1.0)
+}
+
 fn log_odds_ratio(both: usize, a_only: usize, b_only: usize, neither: usize) -> Option<f64> {
     let total = both + a_only + b_only + neither;
     if total == 0 {
@@ -1951,6 +2003,33 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
     }
 
     #[test]
+    fn fisher_exact_two_tailed_matches_reference_tables() {
+        let cases = [
+            ((1, 1, 1, 2), 1.0),
+            ((1, 9, 11, 3), 0.002759456185220083),
+            ((0, 5, 5, 0), 0.007936507936507936),
+            ((10, 0, 0, 10), 1.082508822446903e-05),
+            ((1, 1, 1, 0), 1.0),
+        ];
+
+        for ((a, b, c, d), expected) in cases {
+            let log_fact = build_log_factorial(a + b + c + d);
+            let actual = fisher_exact_two_tailed(a, b, c, d, &log_fact);
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "expected fisher_exact_two_tailed([{a}, {b}, {c}, {d}]) ~= {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn fisher_exact_two_tailed_returns_one_for_zero_total_table() {
+        let log_fact = build_log_factorial(0);
+        let actual = fisher_exact_two_tailed(0, 0, 0, 0, &log_fact);
+        assert_eq!(actual, 1.0);
+    }
+
+    #[test]
     fn co_occurrence_computes_pair_counts() {
         let fixture = TestStudyDir::new("co-occur");
         let study_dir = fixture.study_path("co_study");
@@ -1986,7 +2065,8 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
         assert_eq!(pair.b_only, 1);
         assert_eq!(pair.neither, 2);
         assert!(pair.log_odds_ratio.is_some());
-        assert!(pair.p_value.is_none());
+        assert!(pair.p_value.is_some());
+        assert!((pair.p_value.expect("p-value") - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -2010,6 +2090,8 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
         assert_eq!(pair.a_only, 1);
         assert_eq!(pair.b_only, 1);
         assert_eq!(pair.neither, 0);
+        assert!(pair.p_value.is_some());
+        assert!((pair.p_value.expect("p-value") - 1.0).abs() < 1e-9);
     }
 
     #[test]
