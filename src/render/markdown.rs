@@ -19,8 +19,8 @@ use crate::entities::study::{
     CoOccurrenceResult as StudyCoOccurrenceResult, CohortResult as StudyCohortResult,
     ExpressionComparisonResult as StudyExpressionComparisonResult,
     FilterResult as StudyFilterResult, MutationComparisonResult as StudyMutationComparisonResult,
-    SampleUniverseBasis as StudySampleUniverseBasis, StudyInfo, StudyQueryResult,
-    SurvivalResult as StudySurvivalResult,
+    SampleUniverseBasis as StudySampleUniverseBasis, StudyDownloadCatalog, StudyDownloadResult,
+    StudyInfo, StudyQueryResult, SurvivalResult as StudySurvivalResult,
 };
 use crate::entities::trial::{Trial, TrialSearchResult};
 use crate::entities::variant::{
@@ -2014,6 +2014,62 @@ pub fn study_list_markdown(studies: &[StudyInfo]) -> String {
     out
 }
 
+fn format_optional_stat(value: Option<f64>, decimals: usize) -> String {
+    value
+        .map(|value| format!("{value:.prec$}", prec = decimals))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn format_optional_p_value(value: Option<f64>) -> String {
+    value
+        .map(|value| {
+            if value == 0.0 {
+                "0".to_string()
+            } else if value < 0.001 {
+                format!("{value:.2e}")
+            } else if value < 0.01 {
+                format!("{value:.4}")
+            } else {
+                format!("{value:.3}")
+            }
+        })
+        .unwrap_or_else(|| "not available".to_string())
+}
+
+pub fn study_download_catalog_markdown(result: &StudyDownloadCatalog) -> String {
+    let mut out = String::new();
+    out.push_str("# Downloadable cBioPortal Studies\n\n");
+    if result.study_ids.is_empty() {
+        out.push_str("No remote study IDs found.\n");
+        return out;
+    }
+
+    out.push_str("| Study ID |\n");
+    out.push_str("|---|\n");
+    for study_id in &result.study_ids {
+        out.push_str(&format!("| {study_id} |\n"));
+    }
+    out
+}
+
+pub fn study_download_markdown(result: &StudyDownloadResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# Study Download: {}\n\n", result.study_id));
+    out.push_str("| Metric | Value |\n");
+    out.push_str("|---|---|\n");
+    out.push_str(&format!("| Study ID | {} |\n", result.study_id));
+    out.push_str(&format!("| Path | {} |\n", result.path));
+    out.push_str(&format!(
+        "| Downloaded | {} |\n",
+        if result.downloaded {
+            "yes"
+        } else {
+            "already present"
+        }
+    ));
+    out
+}
+
 pub fn study_query_markdown(result: &StudyQueryResult) -> String {
     match result {
         StudyQueryResult::MutationFrequency(result) => {
@@ -2189,23 +2245,27 @@ pub fn study_survival_markdown(result: &StudySurvivalResult) -> String {
         result.endpoint.label(),
         result.endpoint.code()
     ));
-    out.push_str("| Group | N | Events | Censored | Event Rate | Median Months |\n");
-    out.push_str("|---|---|---|---|---|---|\n");
+    out.push_str("| Group | N | Events | Censored | Event Rate | KM Median | 1yr | 3yr | 5yr |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|---|\n");
     for group in &result.groups {
-        let median = group
-            .median_months
-            .map(|value| format!("{value:.1}"))
-            .unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            "| {} | {} | {} | {} | {:.6} | {} |\n",
+            "| {} | {} | {} | {} | {:.6} | {} | {} | {} | {} |\n",
             group.group_name,
             group.n_patients,
             group.n_events,
             group.n_censored,
             group.event_rate,
-            median
+            format_optional_stat(group.km_median_months, 1),
+            format_optional_stat(group.survival_1yr, 3),
+            format_optional_stat(group.survival_3yr, 3),
+            format_optional_stat(group.survival_5yr, 3)
         ));
     }
+    out.push('\n');
+    out.push_str(&format!(
+        "Log-rank p-value: {}\n",
+        format_optional_p_value(result.log_rank_p)
+    ));
     out
 }
 
@@ -2231,6 +2291,15 @@ pub fn study_compare_expression_markdown(result: &StudyExpressionComparisonResul
             group.max
         ));
     }
+    out.push('\n');
+    out.push_str(&format!(
+        "Mann-Whitney U: {}\n",
+        format_optional_stat(result.mann_whitney_u, 3)
+    ));
+    out.push_str(&format!(
+        "Mann-Whitney p-value: {}\n",
+        format_optional_p_value(result.mann_whitney_p)
+    ));
     out
 }
 
@@ -2372,9 +2441,9 @@ mod tests {
         MutationComparisonResult as StudyMutationComparisonResult,
         MutationFrequencyResult as StudyMutationFrequencyResult,
         MutationGroupStats as StudyMutationGroupStats,
-        SampleUniverseBasis as StudySampleUniverseBasis, StudyInfo, StudyQueryResult,
-        SurvivalEndpoint as StudySurvivalEndpoint, SurvivalGroupResult as StudySurvivalGroupResult,
-        SurvivalResult as StudySurvivalResult,
+        SampleUniverseBasis as StudySampleUniverseBasis, StudyDownloadCatalog, StudyDownloadResult,
+        StudyInfo, StudyQueryResult, SurvivalEndpoint as StudySurvivalEndpoint,
+        SurvivalGroupResult as StudySurvivalGroupResult, SurvivalResult as StudySurvivalResult,
     };
     use crate::entities::variant::{TreatmentImplication, Variant, VariantOncoKbResult};
 
@@ -3009,7 +3078,10 @@ mod tests {
                     n_patients: 340,
                     n_events: 48,
                     n_censored: 292,
-                    median_months: Some(85.2),
+                    km_median_months: Some(85.2),
+                    survival_1yr: Some(0.91),
+                    survival_3yr: Some(0.72),
+                    survival_5yr: None,
                     event_rate: 0.141176,
                 },
                 StudySurvivalGroupResult {
@@ -3017,18 +3089,54 @@ mod tests {
                     n_patients: 720,
                     n_events: 64,
                     n_censored: 656,
-                    median_months: Some(112.7),
+                    km_median_months: None,
+                    survival_1yr: Some(0.97),
+                    survival_3yr: Some(0.88),
+                    survival_5yr: Some(0.74),
                     event_rate: 0.088889,
                 },
             ],
+            log_rank_p: Some(0.0042),
         });
 
         assert!(markdown.contains("# Study Survival: TP53 (brca_tcga_pan_can_atlas_2018)"));
         assert!(markdown.contains("Endpoint: Overall Survival (OS)"));
+        assert!(markdown.contains(
+            "| Group | N | Events | Censored | Event Rate | KM Median | 1yr | 3yr | 5yr |"
+        ));
         assert!(
-            markdown.contains("| Group | N | Events | Censored | Event Rate | Median Months |")
+            markdown
+                .contains("| TP53-mutant | 340 | 48 | 292 | 0.141176 | 85.2 | 0.910 | 0.720 | - |")
         );
-        assert!(markdown.contains("| TP53-mutant | 340 | 48 | 292 | 0.141176 | 85.2 |"));
+        assert!(markdown.contains("Log-rank p-value: 0.004"));
+    }
+
+    #[test]
+    fn study_download_markdown_renders_result_table() {
+        let markdown = study_download_markdown(&StudyDownloadResult {
+            study_id: "msk_impact_2017".to_string(),
+            path: "/tmp/studies/msk_impact_2017".to_string(),
+            downloaded: true,
+        });
+
+        assert!(markdown.contains("# Study Download: msk_impact_2017"));
+        assert!(markdown.contains("| Study ID | msk_impact_2017 |"));
+        assert!(markdown.contains("| Downloaded | yes |"));
+    }
+
+    #[test]
+    fn study_download_catalog_markdown_renders_remote_ids() {
+        let markdown = study_download_catalog_markdown(&StudyDownloadCatalog {
+            study_ids: vec![
+                "msk_impact_2017".to_string(),
+                "brca_tcga_pan_can_atlas_2018".to_string(),
+            ],
+        });
+
+        assert!(markdown.contains("# Downloadable cBioPortal Studies"));
+        assert!(markdown.contains("| Study ID |"));
+        assert!(markdown.contains("| msk_impact_2017 |"));
+        assert!(markdown.contains("| brca_tcga_pan_can_atlas_2018 |"));
     }
 
     #[test]
@@ -3059,6 +3167,8 @@ mod tests {
                     q3: 0.34,
                 },
             ],
+            mann_whitney_u: Some(9821.0),
+            mann_whitney_p: Some(0.003),
         });
 
         assert!(markdown.contains("# Study Group Comparison: Expression"));
@@ -3066,6 +3176,8 @@ mod tests {
             "Stratify gene: TP53 | Target gene: ERBB2 | Study: brca_tcga_pan_can_atlas_2018"
         ));
         assert!(markdown.contains("| Group | N | Mean | Median | Q1 | Q3 | Min | Max |"));
+        assert!(markdown.contains("Mann-Whitney U: 9821.000"));
+        assert!(markdown.contains("Mann-Whitney p-value: 0.003"));
         assert!(markdown.contains(
             "| TP53-wildtype | 730 | -0.089 | -0.156 | -0.670 | 0.340 | -3.200 | 5.100 |"
         ));

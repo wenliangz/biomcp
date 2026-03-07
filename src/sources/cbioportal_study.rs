@@ -124,9 +124,18 @@ pub enum SurvivalStatus {
 
 #[derive(Debug, Clone)]
 pub struct PatientSurvivalRecord {
+    #[allow(dead_code)]
     pub patient_id: String,
     pub status: SurvivalStatus,
     pub months: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct KmEstimate {
+    pub km_median_months: Option<f64>,
+    pub survival_1yr: Option<f64>,
+    pub survival_3yr: Option<f64>,
+    pub survival_5yr: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -135,7 +144,10 @@ pub struct SurvivalGroupStats {
     pub n_patients: usize,
     pub n_events: usize,
     pub n_censored: usize,
-    pub median_months: Option<f64>,
+    pub km_median_months: Option<f64>,
+    pub survival_1yr: Option<f64>,
+    pub survival_3yr: Option<f64>,
+    pub survival_5yr: Option<f64>,
     pub event_rate: f64,
 }
 
@@ -145,6 +157,7 @@ pub struct SurvivalByMutationResult {
     pub gene: String,
     pub endpoint: String,
     pub groups: Vec<SurvivalGroupStats>,
+    pub log_rank_p: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +178,14 @@ pub struct ExpressionComparisonByMutationResult {
     pub stratify_gene: String,
     pub target_gene: String,
     pub groups: Vec<ExpressionGroupStats>,
+    pub mann_whitney_u: Option<f64>,
+    pub mann_whitney_p: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MannWhitneyResult {
+    pub u_statistic: f64,
+    pub p_value: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -941,23 +962,18 @@ pub fn survival_by_mutation(
     let cohort = build_cohort_split(study_dir, gene)?;
     let endpoint = normalize_survival_endpoint(endpoint)?;
     let survival = patient_survival_data(study_dir, &endpoint)?;
+    let mutant_records = survival_records_for_patients(&cohort.mutant_patients, &survival);
+    let wildtype_records = survival_records_for_patients(&cohort.wildtype_patients, &survival);
 
     Ok(SurvivalByMutationResult {
         study_id: cohort.study_id.clone(),
         gene: cohort.gene.clone(),
         endpoint,
         groups: vec![
-            survival_group_stats(
-                format!("{}-mutant", cohort.gene),
-                &cohort.mutant_patients,
-                &survival,
-            ),
-            survival_group_stats(
-                format!("{}-wildtype", cohort.gene),
-                &cohort.wildtype_patients,
-                &survival,
-            ),
+            survival_group_stats(format!("{}-mutant", cohort.gene), &mutant_records),
+            survival_group_stats(format!("{}-wildtype", cohort.gene), &wildtype_records),
         ],
+        log_rank_p: log_rank_two_group(&mutant_records, &wildtype_records),
     })
 }
 
@@ -969,23 +985,21 @@ pub fn compare_expression_by_mutation(
     let cohort = build_cohort_split(study_dir, stratify_gene)?;
     let target_gene = normalize_gene(target_gene)?;
     let values_by_sample = expression_values_by_sample(study_dir, &target_gene)?;
+    let mutant_values = expression_values_for_samples(&cohort.mutant_samples, &values_by_sample);
+    let wildtype_values =
+        expression_values_for_samples(&cohort.wildtype_samples, &values_by_sample);
+    let mann_whitney = mann_whitney_u_test(&mutant_values, &wildtype_values);
 
     Ok(ExpressionComparisonByMutationResult {
         study_id: cohort.study_id.clone(),
         stratify_gene: cohort.gene.clone(),
         target_gene,
         groups: vec![
-            expression_group_stats(
-                format!("{}-mutant", cohort.gene),
-                &cohort.mutant_samples,
-                &values_by_sample,
-            ),
-            expression_group_stats(
-                format!("{}-wildtype", cohort.gene),
-                &cohort.wildtype_samples,
-                &values_by_sample,
-            ),
+            expression_group_stats(format!("{}-mutant", cohort.gene), &mutant_values),
+            expression_group_stats(format!("{}-wildtype", cohort.gene), &wildtype_values),
         ],
+        mann_whitney_u: mann_whitney.as_ref().map(|result| result.u_statistic),
+        mann_whitney_p: mann_whitney.map(|result| result.p_value),
     })
 }
 
@@ -1292,16 +1306,178 @@ fn parse_survival_status(value: &str) -> Option<SurvivalStatus> {
     }
 }
 
-fn survival_group_stats(
-    group_name: String,
+fn erfc_approx(x: f64) -> f64 {
+    let z = x.abs();
+    let t = 1.0 / (1.0 + 0.5 * z);
+    let poly = -z * z - 1.265_512_23
+        + t * (1.000_023_68
+            + t * (0.374_091_96
+                + t * (0.096_784_18
+                    + t * (-0.186_288_06
+                        + t * (0.278_868_07
+                            + t * (-1.135_203_98
+                                + t * (1.488_515_87 + t * (-0.822_152_23 + t * 0.170_872_77))))))));
+    let approx = t * poly.exp();
+    if x >= 0.0 { approx } else { 2.0 - approx }
+}
+
+fn two_sided_normal_tail(z: f64) -> f64 {
+    erfc_approx(z.abs() / std::f64::consts::SQRT_2).clamp(0.0, 1.0)
+}
+
+fn chi_square_1df_tail(chi2: f64) -> f64 {
+    if !chi2.is_finite() || chi2 < 0.0 {
+        return 1.0;
+    }
+    erfc_approx((chi2 / 2.0).sqrt()).clamp(0.0, 1.0)
+}
+
+fn survival_records_for_patients<'a>(
     patients: &HashSet<String>,
-    survival: &HashMap<String, PatientSurvivalRecord>,
-) -> SurvivalGroupStats {
-    let records = patients
+    survival: &'a HashMap<String, PatientSurvivalRecord>,
+) -> Vec<&'a PatientSurvivalRecord> {
+    patients
         .iter()
         .filter_map(|patient| survival.get(patient))
-        .filter(|record| patients.contains(&record.patient_id))
+        .collect::<Vec<_>>()
+}
+
+fn event_times(records: &[&PatientSurvivalRecord]) -> Vec<f64> {
+    let mut times = records
+        .iter()
+        .filter(|record| matches!(record.status, SurvivalStatus::Event))
+        .map(|record| record.months)
         .collect::<Vec<_>>();
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    times.dedup_by(|a, b| a == b);
+    times
+}
+
+fn kaplan_meier(records: &[&PatientSurvivalRecord]) -> KmEstimate {
+    if records.is_empty() {
+        return KmEstimate {
+            km_median_months: None,
+            survival_1yr: None,
+            survival_3yr: None,
+            survival_5yr: None,
+        };
+    }
+
+    let mut survival = 1.0;
+    let mut km_median_months = None;
+    let mut survival_1yr = Some(1.0);
+    let mut survival_3yr = Some(1.0);
+    let mut survival_5yr = Some(1.0);
+
+    for time in event_times(records) {
+        let at_risk = records
+            .iter()
+            .filter(|record| record.months >= time)
+            .count();
+        if at_risk == 0 {
+            continue;
+        }
+        let event_count = records
+            .iter()
+            .filter(|record| {
+                matches!(record.status, SurvivalStatus::Event) && record.months == time
+            })
+            .count();
+        if event_count == 0 {
+            continue;
+        }
+        survival *= 1.0 - event_count as f64 / at_risk as f64;
+        if km_median_months.is_none() && survival <= 0.5 {
+            km_median_months = Some(time);
+        }
+        if time <= 12.0 {
+            survival_1yr = Some(survival);
+        }
+        if time <= 36.0 {
+            survival_3yr = Some(survival);
+        }
+        if time <= 60.0 {
+            survival_5yr = Some(survival);
+        }
+    }
+
+    KmEstimate {
+        km_median_months,
+        survival_1yr,
+        survival_3yr,
+        survival_5yr,
+    }
+}
+
+fn log_rank_two_group(
+    group_a: &[&PatientSurvivalRecord],
+    group_b: &[&PatientSurvivalRecord],
+) -> Option<f64> {
+    if group_a.is_empty() || group_b.is_empty() {
+        return None;
+    }
+
+    let mut observed_minus_expected = 0.0;
+    let mut variance = 0.0;
+    let mut total_events = 0_usize;
+
+    let mut pooled = Vec::with_capacity(group_a.len() + group_b.len());
+    pooled.extend_from_slice(group_a);
+    pooled.extend_from_slice(group_b);
+
+    for time in event_times(&pooled) {
+        let n_a = group_a
+            .iter()
+            .filter(|record| record.months >= time)
+            .count();
+        let n_b = group_b
+            .iter()
+            .filter(|record| record.months >= time)
+            .count();
+        let n = n_a + n_b;
+        if n == 0 {
+            continue;
+        }
+
+        let d_a = group_a
+            .iter()
+            .filter(|record| {
+                matches!(record.status, SurvivalStatus::Event) && record.months == time
+            })
+            .count();
+        let d_b = group_b
+            .iter()
+            .filter(|record| {
+                matches!(record.status, SurvivalStatus::Event) && record.months == time
+            })
+            .count();
+        let d = d_a + d_b;
+        if d == 0 {
+            continue;
+        }
+
+        total_events += d;
+        let n_a_fraction = n_a as f64 / n as f64;
+        observed_minus_expected += d_a as f64 - d as f64 * n_a_fraction;
+        if n > 1 {
+            variance +=
+                d as f64 * n_a_fraction * (1.0 - n_a_fraction) * ((n - d) as f64 / (n - 1) as f64);
+        }
+    }
+
+    if total_events == 0 || variance <= 0.0 {
+        return None;
+    }
+
+    Some(chi_square_1df_tail(
+        observed_minus_expected * observed_minus_expected / variance,
+    ))
+}
+
+fn survival_group_stats(
+    group_name: String,
+    records: &[&PatientSurvivalRecord],
+) -> SurvivalGroupStats {
     let mut months = records
         .iter()
         .map(|record| record.months)
@@ -1313,32 +1489,90 @@ fn survival_group_stats(
         .filter(|record| matches!(record.status, SurvivalStatus::Event))
         .count();
     let n_censored = n_patients.saturating_sub(n_events);
-    let median_months = (!months.is_empty()).then(|| quantile_inclusive(&months, 0.5));
     let event_rate = if n_patients > 0 {
         n_events as f64 / n_patients as f64
     } else {
         0.0
     };
+    let km = kaplan_meier(records);
 
     SurvivalGroupStats {
         group_name,
         n_patients,
         n_events,
         n_censored,
-        median_months,
+        km_median_months: km.km_median_months,
+        survival_1yr: km.survival_1yr,
+        survival_3yr: km.survival_3yr,
+        survival_5yr: km.survival_5yr,
         event_rate,
     }
 }
 
-fn expression_group_stats(
-    group_name: String,
+fn expression_values_for_samples(
     sample_set: &HashSet<String>,
     values_by_sample: &HashMap<String, f64>,
-) -> ExpressionGroupStats {
-    let mut values = sample_set
+) -> Vec<f64> {
+    sample_set
         .iter()
         .filter_map(|sample| values_by_sample.get(sample).copied())
+        .collect::<Vec<_>>()
+}
+
+fn mann_whitney_u_test(group_a: &[f64], group_b: &[f64]) -> Option<MannWhitneyResult> {
+    if group_a.is_empty() || group_b.is_empty() {
+        return None;
+    }
+
+    let mut pooled = group_a
+        .iter()
+        .map(|value| (*value, 0_u8))
+        .chain(group_b.iter().map(|value| (*value, 1_u8)))
         .collect::<Vec<_>>();
+    pooled.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut rank_sum_a = 0.0;
+    let mut tie_correction_sum = 0.0;
+    let mut idx = 0_usize;
+    while idx < pooled.len() {
+        let mut end = idx + 1;
+        while end < pooled.len() && pooled[end].0 == pooled[idx].0 {
+            end += 1;
+        }
+        let rank_start = idx as f64 + 1.0;
+        let rank_end = end as f64;
+        let midrank = (rank_start + rank_end) / 2.0;
+        let count_a = pooled[idx..end]
+            .iter()
+            .filter(|(_, group)| *group == 0)
+            .count();
+        rank_sum_a += midrank * count_a as f64;
+        let tie_size = (end - idx) as f64;
+        tie_correction_sum += tie_size.powi(3) - tie_size;
+        idx = end;
+    }
+
+    let n1 = group_a.len() as f64;
+    let n2 = group_b.len() as f64;
+    let n = n1 + n2;
+    let u_a = rank_sum_a - n1 * (n1 + 1.0) / 2.0;
+    let u_b = n1 * n2 - u_a;
+    let u_statistic = u_a.min(u_b);
+    let variance = n1 * n2 / 12.0 * ((n + 1.0) - tie_correction_sum / (n * (n - 1.0)));
+    if variance <= 0.0 {
+        return None;
+    }
+
+    let mean = n1 * n2 / 2.0;
+    let z = ((mean - u_statistic).abs() - 0.5).max(0.0) / variance.sqrt();
+    Some(MannWhitneyResult {
+        u_statistic,
+        p_value: two_sided_normal_tail(z),
+    })
+}
+
+fn expression_group_stats(group_name: String, values: &[f64]) -> ExpressionGroupStats {
+    let mut values = values.to_vec();
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     if values.is_empty() {
         return ExpressionGroupStats {
@@ -2165,6 +2399,95 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
     }
 
     #[test]
+    fn kaplan_meier_estimate_uses_event_times_and_landmarks() {
+        let records = [
+            PatientSurvivalRecord {
+                patient_id: "P1".to_string(),
+                status: SurvivalStatus::Event,
+                months: 10.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "P2".to_string(),
+                status: SurvivalStatus::Censored,
+                months: 12.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "P3".to_string(),
+                status: SurvivalStatus::Event,
+                months: 20.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "P4".to_string(),
+                status: SurvivalStatus::Censored,
+                months: 30.0,
+            },
+        ];
+        let record_refs = records.iter().collect::<Vec<_>>();
+
+        let estimate = kaplan_meier(&record_refs);
+        assert_eq!(estimate.km_median_months, Some(20.0));
+        assert_eq!(estimate.survival_1yr, Some(0.75));
+        assert_eq!(estimate.survival_3yr, Some(0.375));
+        assert_eq!(estimate.survival_5yr, Some(0.375));
+    }
+
+    #[test]
+    fn log_rank_two_group_is_defined_when_only_one_group_has_events() {
+        let group_a = [
+            PatientSurvivalRecord {
+                patient_id: "A1".to_string(),
+                status: SurvivalStatus::Event,
+                months: 5.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "A2".to_string(),
+                status: SurvivalStatus::Event,
+                months: 10.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "A3".to_string(),
+                status: SurvivalStatus::Event,
+                months: 15.0,
+            },
+        ];
+        let group_b = [
+            PatientSurvivalRecord {
+                patient_id: "B1".to_string(),
+                status: SurvivalStatus::Censored,
+                months: 5.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "B2".to_string(),
+                status: SurvivalStatus::Censored,
+                months: 10.0,
+            },
+            PatientSurvivalRecord {
+                patient_id: "B3".to_string(),
+                status: SurvivalStatus::Censored,
+                months: 15.0,
+            },
+        ];
+        let group_a_refs = group_a.iter().collect::<Vec<_>>();
+        let group_b_refs = group_b.iter().collect::<Vec<_>>();
+
+        let p_value = log_rank_two_group(&group_a_refs, &group_b_refs).expect("log-rank p-value");
+        assert!((p_value - 0.08326451666355043).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mann_whitney_u_test_handles_ties_and_smaller_u_statistic() {
+        let result =
+            mann_whitney_u_test(&[1.0, 2.0, 2.0, 5.0], &[2.0, 3.0, 4.0]).expect("mw result");
+        assert!((result.u_statistic - 4.0).abs() < 1e-9);
+        assert!((result.p_value - 0.5820796519295022).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mann_whitney_u_test_returns_none_when_all_values_are_identical() {
+        assert!(mann_whitney_u_test(&[1.0, 1.0, 1.0], &[1.0, 1.0]).is_none());
+    }
+
+    #[test]
     fn survival_by_mutation_returns_group_aggregates_for_analyzable_patients() {
         let fixture = TestStudyDir::new("survival-by-mutation");
         let study_dir = fixture.study_path("survival_study");
@@ -2199,12 +2522,19 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
         assert_eq!(result.groups[0].n_patients, 1);
         assert_eq!(result.groups[0].n_events, 1);
         assert_eq!(result.groups[0].n_censored, 0);
-        assert_eq!(result.groups[0].median_months, Some(12.0));
+        assert_eq!(result.groups[0].km_median_months, Some(12.0));
+        assert_eq!(result.groups[0].survival_1yr, Some(0.0));
+        assert_eq!(result.groups[0].survival_3yr, Some(0.0));
+        assert_eq!(result.groups[0].survival_5yr, Some(0.0));
         assert_eq!(result.groups[1].group_name, "TP53-wildtype");
         assert_eq!(result.groups[1].n_patients, 1);
         assert_eq!(result.groups[1].n_events, 0);
         assert_eq!(result.groups[1].n_censored, 1);
-        assert_eq!(result.groups[1].median_months, Some(20.0));
+        assert_eq!(result.groups[1].km_median_months, None);
+        assert_eq!(result.groups[1].survival_1yr, Some(1.0));
+        assert_eq!(result.groups[1].survival_3yr, Some(1.0));
+        assert_eq!(result.groups[1].survival_5yr, Some(1.0));
+        assert!((result.log_rank_p.expect("log-rank p-value") - 0.31731050786291415).abs() < 1e-6);
     }
 
     #[test]
@@ -2241,6 +2571,11 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
         assert_eq!(result.groups[1].group_name, "TP53-wildtype");
         assert_eq!(result.groups[1].sample_count, 1);
         assert!((result.groups[1].mean - 1.0).abs() < 1e-9);
+        assert_eq!(result.mann_whitney_u, Some(0.0));
+        assert!(
+            (result.mann_whitney_p.expect("mann-whitney p-value") - 0.5402913746074199).abs()
+                < 1e-6
+        );
     }
 
     #[test]

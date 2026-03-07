@@ -1342,6 +1342,22 @@ EXAMPLES:
 
 See also: biomcp list study")]
     List,
+    /// Download a cBioPortal study into the local study directory
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study download --list
+  biomcp study download msk_impact_2017
+  biomcp study download brca_tcga_pan_can_atlas_2018
+
+See also: biomcp list study")]
+    Download {
+        /// List downloadable remote study IDs
+        #[arg(long, conflicts_with = "study_id")]
+        list: bool,
+        /// Study identifier (e.g., msk_impact_2017)
+        #[arg(value_name = "STUDY_ID", required_unless_present = "list")]
+        study_id: Option<String>,
+    },
     /// Run a study-scoped query for one gene
     #[command(after_help = "\
 EXAMPLES:
@@ -3240,6 +3256,26 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         Ok(crate::render::json::to_pretty(&studies)?)
                     } else {
                         Ok(crate::render::markdown::study_list_markdown(&studies))
+                    }
+                }
+                StudyCommand::Download { list, study_id } => {
+                    if list {
+                        let result = crate::entities::study::list_downloadable_studies().await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_download_catalog_markdown(
+                                &result,
+                            ))
+                        }
+                    } else {
+                        let study_id = study_id.expect("clap should require study_id");
+                        let result = crate::entities::study::download_study(&study_id).await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_download_markdown(&result))
+                        }
                     }
                 }
                 StudyCommand::Query {
@@ -5359,6 +5395,36 @@ mod tests {
             Commands::Study {
                 cmd: StudyCommand::List,
             } => {}
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_download_parses_positional_study_id() {
+        let cli = Cli::try_parse_from(["biomcp", "study", "download", "msk_impact_2017"])
+            .expect("study download should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::Download { list, study_id },
+            } => {
+                assert!(!list);
+                assert_eq!(study_id.as_deref(), Some("msk_impact_2017"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_download_parses_list_flag() {
+        let cli = Cli::try_parse_from(["biomcp", "study", "download", "--list"])
+            .expect("study download list should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::Download { list, study_id },
+            } => {
+                assert!(list);
+                assert_eq!(study_id, None);
+            }
             other => panic!("unexpected command: {other:?}"),
         }
     }
