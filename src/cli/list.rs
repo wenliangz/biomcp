@@ -555,12 +555,17 @@ fn list_study() -> String {
 
 - `study list` - list locally available cBioPortal studies from `BIOMCP_STUDY_DIR`
 - `study query --study <id> --gene <symbol> --type <mutations|cna|expression>` - run per-study gene query
+- `study cohort --study <id> --gene <symbol>` - split the cohort into `<gene>-mutant` vs `<gene>-wildtype`
+- `study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]` - summarize survival aggregates by mutation group
+- `study compare --study <id> --gene <symbol> --type <expression|mutations> --target <symbol>` - compare expression or mutation rate across mutation groups
 - `study co-occurrence --study <id> --genes <g1,g2,...>` - pairwise mutation co-occurrence (2-10 genes)
 
 ## Setup
 
 - `BIOMCP_STUDY_DIR` should point to a directory containing per-study folders (for example `msk_impact_2017/`).
-- Each study folder should include `meta_study.txt` and one or more matrices such as `data_mutations.txt`, `data_cna.txt`, and expression files.
+- `study cohort`, `study survival`, and `study compare` require `data_mutations.txt` and `data_clinical_sample.txt`.
+- `study survival` also requires `data_clinical_patient.txt` with canonical `{ENDPOINT}_STATUS` and `{ENDPOINT}_MONTHS` columns.
+- Expression comparison also requires a supported expression matrix file.
 
 ## Examples
 
@@ -568,6 +573,10 @@ fn list_study() -> String {
 - `study query --study msk_impact_2017 --gene TP53 --type mutations`
 - `study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type cna`
 - `study query --study paad_qcmg_uq_2016 --gene KRAS --type expression`
+- `study cohort --study brca_tcga_pan_can_atlas_2018 --gene TP53`
+- `study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53 --endpoint os`
+- `study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2`
+- `study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type mutations --target PIK3CA`
 - `study co-occurrence --study msk_impact_2017 --genes TP53,KRAS`
 "#
     .to_string()
@@ -676,6 +685,15 @@ mod tests {
         assert!(out.contains("# study"));
         assert!(out.contains(
             "study query --study <id> --gene <symbol> --type <mutations|cna|expression>"
+        ));
+        assert!(out.contains("study cohort --study <id> --gene <symbol>"));
+        assert!(
+            out.contains(
+                "study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]"
+            )
+        );
+        assert!(out.contains(
+            "study compare --study <id> --gene <symbol> --type <expression|mutations> --target <symbol>"
         ));
     }
 

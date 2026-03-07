@@ -9,6 +9,7 @@ const SOURCE_NAME: &str = "cbioportal-study";
 const META_STUDY_FILE: &str = "meta_study.txt";
 const MUTATIONS_FILE: &str = "data_mutations.txt";
 const CLINICAL_SAMPLE_FILE: &str = "data_clinical_sample.txt";
+const CLINICAL_PATIENT_FILE: &str = "data_clinical_patient.txt";
 const CNA_FILE: &str = "data_cna.txt";
 const EXPRESSION_FILES: &[&str] = &[
     "data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt",
@@ -101,6 +102,85 @@ pub struct CoOccurrenceResult {
     pub total_samples: usize,
     pub sample_universe_basis: SampleUniverseBasis,
     pub pairs: Vec<CoOccurrencePair>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CohortSplit {
+    pub study_id: String,
+    pub gene: String,
+    pub mutant_samples: HashSet<String>,
+    pub wildtype_samples: HashSet<String>,
+    pub mutant_patients: HashSet<String>,
+    pub wildtype_patients: HashSet<String>,
+    pub total_samples: usize,
+    pub total_patients: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurvivalStatus {
+    Event,
+    Censored,
+}
+
+#[derive(Debug, Clone)]
+pub struct PatientSurvivalRecord {
+    pub patient_id: String,
+    pub status: SurvivalStatus,
+    pub months: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SurvivalGroupStats {
+    pub group_name: String,
+    pub n_patients: usize,
+    pub n_events: usize,
+    pub n_censored: usize,
+    pub median_months: Option<f64>,
+    pub event_rate: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SurvivalByMutationResult {
+    pub study_id: String,
+    pub gene: String,
+    pub endpoint: String,
+    pub groups: Vec<SurvivalGroupStats>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpressionGroupStats {
+    pub group_name: String,
+    pub sample_count: usize,
+    pub mean: f64,
+    pub median: f64,
+    pub min: f64,
+    pub max: f64,
+    pub q1: f64,
+    pub q3: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpressionComparisonByMutationResult {
+    pub study_id: String,
+    pub stratify_gene: String,
+    pub target_gene: String,
+    pub groups: Vec<ExpressionGroupStats>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MutationGroupStats {
+    pub group_name: String,
+    pub sample_count: usize,
+    pub mutated_count: usize,
+    pub mutation_rate: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct MutationComparisonByMutationResult {
+    pub study_id: String,
+    pub stratify_gene: String,
+    pub target_gene: String,
+    pub groups: Vec<MutationGroupStats>,
 }
 
 pub fn resolve_study_root() -> PathBuf {
@@ -500,6 +580,308 @@ pub fn co_occurrence(
     })
 }
 
+pub fn mutated_sample_ids(study_dir: &Path, gene: &str) -> Result<HashSet<String>, BioMcpError> {
+    let gene = normalize_gene(gene)?;
+    let path = study_dir.join(MUTATIONS_FILE);
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let gene_idx = require_column(&header, "HUGO_SYMBOL", &path)?;
+    let sample_idx =
+        column_index(&header, &["TUMOR_SAMPLE_BARCODE", "SAMPLE_ID"]).ok_or_else(|| {
+            BioMcpError::SourceUnavailable {
+                source_name: SOURCE_NAME.to_string(),
+                reason: format!(
+                    "Missing SAMPLE_ID/Tumor_Sample_Barcode column in {}",
+                    path.display()
+                ),
+                suggestion: "Use a valid cBioPortal mutation file.".to_string(),
+            }
+        })?;
+
+    let mut samples = HashSet::new();
+    while let Some(row) = reader.next_row()? {
+        if !row_field(&row, gene_idx).eq_ignore_ascii_case(&gene) {
+            continue;
+        }
+        let sample = row_field(&row, sample_idx);
+        if !sample.is_empty() {
+            samples.insert(sample.to_string());
+        }
+    }
+
+    Ok(samples)
+}
+
+pub fn sample_to_patient_map(study_dir: &Path) -> Result<HashMap<String, String>, BioMcpError> {
+    let path = study_dir.join(CLINICAL_SAMPLE_FILE);
+    if !path.exists() {
+        return Err(BioMcpError::SourceUnavailable {
+            source_name: SOURCE_NAME.to_string(),
+            reason: format!("Missing required file: {}", path.display()),
+            suggestion:
+                "Use a study with data_clinical_sample.txt for cohort, survival, and compare queries."
+                    .to_string(),
+        });
+    }
+
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let sample_idx = require_column(&header, "SAMPLE_ID", &path)?;
+    let patient_idx = require_column(&header, "PATIENT_ID", &path)?;
+
+    let mut sample_to_patient = HashMap::new();
+    while let Some(row) = reader.next_row()? {
+        let sample = row_field(&row, sample_idx);
+        let patient = row_field(&row, patient_idx);
+        if sample.is_empty() || patient.is_empty() {
+            continue;
+        }
+        sample_to_patient.insert(sample.to_string(), patient.to_string());
+    }
+
+    Ok(sample_to_patient)
+}
+
+pub fn build_cohort_split(study_dir: &Path, gene: &str) -> Result<CohortSplit, BioMcpError> {
+    let gene = normalize_gene(gene)?;
+    let study_id = study_id_from_dir(study_dir);
+    let direct_mutant_samples = mutated_sample_ids(study_dir, &gene)?;
+    let sample_to_patient = sample_to_patient_map(study_dir)?;
+
+    let all_patients = sample_to_patient
+        .values()
+        .cloned()
+        .collect::<HashSet<String>>();
+    let mutant_patients = direct_mutant_samples
+        .iter()
+        .filter_map(|sample| sample_to_patient.get(sample))
+        .cloned()
+        .collect::<HashSet<String>>();
+
+    let mut mutant_samples = HashSet::new();
+    let mut wildtype_samples = HashSet::new();
+    for (sample, patient) in &sample_to_patient {
+        if mutant_patients.contains(patient) {
+            mutant_samples.insert(sample.clone());
+        } else {
+            wildtype_samples.insert(sample.clone());
+        }
+    }
+
+    let wildtype_patients = all_patients
+        .difference(&mutant_patients)
+        .cloned()
+        .collect::<HashSet<_>>();
+
+    Ok(CohortSplit {
+        study_id,
+        gene,
+        mutant_samples,
+        wildtype_samples,
+        mutant_patients,
+        wildtype_patients,
+        total_samples: sample_to_patient.len(),
+        total_patients: all_patients.len(),
+    })
+}
+
+pub fn cohort_by_mutation(study_dir: &Path, gene: &str) -> Result<CohortSplit, BioMcpError> {
+    build_cohort_split(study_dir, gene)
+}
+
+pub fn patient_survival_data(
+    study_dir: &Path,
+    endpoint: &str,
+) -> Result<HashMap<String, PatientSurvivalRecord>, BioMcpError> {
+    let endpoint = normalize_survival_endpoint(endpoint)?;
+    let path = study_dir.join(CLINICAL_PATIENT_FILE);
+    if !path.exists() {
+        return Err(BioMcpError::SourceUnavailable {
+            source_name: SOURCE_NAME.to_string(),
+            reason: format!("Missing required file: {}", path.display()),
+            suggestion:
+                "Use a study with data_clinical_patient.txt and canonical survival columns."
+                    .to_string(),
+        });
+    }
+
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let patient_idx = require_column(&header, "PATIENT_ID", &path)?;
+    let (status_col, months_col) = survival_columns(&endpoint);
+    let status_idx = require_column(&header, status_col, &path)?;
+    let months_idx = require_column(&header, months_col, &path)?;
+
+    let mut records = HashMap::new();
+    while let Some(row) = reader.next_row()? {
+        let patient_id = row_field(&row, patient_idx);
+        if patient_id.is_empty() {
+            continue;
+        }
+        let Some(status) = parse_survival_status(row_field(&row, status_idx)) else {
+            continue;
+        };
+        let Some(months) = parse_f64(row_field(&row, months_idx)) else {
+            continue;
+        };
+
+        records.insert(
+            patient_id.to_string(),
+            PatientSurvivalRecord {
+                patient_id: patient_id.to_string(),
+                status,
+                months,
+            },
+        );
+    }
+
+    Ok(records)
+}
+
+pub fn expression_values_by_sample(
+    study_dir: &Path,
+    gene: &str,
+) -> Result<HashMap<String, f64>, BioMcpError> {
+    let gene = normalize_gene(gene)?;
+    let study_id = study_id_from_dir(study_dir);
+    let path = find_expression_file(study_dir).ok_or_else(|| BioMcpError::SourceUnavailable {
+        source_name: SOURCE_NAME.to_string(),
+        reason: format!(
+            "No supported expression matrix found under {}",
+            study_dir.display()
+        ),
+        suggestion: "Use a study with expression data or query type mutations/cna.".to_string(),
+    })?;
+
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let gene_idx = require_column(&header, "HUGO_SYMBOL", &path)?;
+    let sample_start = matrix_sample_start(&header, &reader.headers, &path)?;
+
+    while let Some(row) = reader.next_row()? {
+        if !row_field(&row, gene_idx).eq_ignore_ascii_case(&gene) {
+            continue;
+        }
+
+        let mut values = HashMap::new();
+        for (offset, sample_id) in reader.headers.iter().skip(sample_start).enumerate() {
+            let sample_id = sample_id.trim();
+            if sample_id.is_empty() {
+                continue;
+            }
+            let value = row
+                .get(sample_start + offset)
+                .map(String::as_str)
+                .unwrap_or("");
+            if let Some(value) = parse_f64(value) {
+                values.insert(sample_id.to_string(), value);
+            }
+        }
+        return Ok(values);
+    }
+
+    Err(BioMcpError::NotFound {
+        entity: "gene".to_string(),
+        id: gene,
+        suggestion: format!("Try a different gene symbol in study '{study_id}'."),
+    })
+}
+
+pub fn mutation_count_in_samples(
+    study_dir: &Path,
+    gene: &str,
+    sample_set: &HashSet<String>,
+) -> Result<usize, BioMcpError> {
+    let mutated_samples = mutated_sample_ids(study_dir, gene)?;
+    Ok(mutated_samples.intersection(sample_set).count())
+}
+
+pub fn survival_by_mutation(
+    study_dir: &Path,
+    gene: &str,
+    endpoint: &str,
+) -> Result<SurvivalByMutationResult, BioMcpError> {
+    let cohort = build_cohort_split(study_dir, gene)?;
+    let endpoint = normalize_survival_endpoint(endpoint)?;
+    let survival = patient_survival_data(study_dir, &endpoint)?;
+
+    Ok(SurvivalByMutationResult {
+        study_id: cohort.study_id.clone(),
+        gene: cohort.gene.clone(),
+        endpoint,
+        groups: vec![
+            survival_group_stats(
+                format!("{}-mutant", cohort.gene),
+                &cohort.mutant_patients,
+                &survival,
+            ),
+            survival_group_stats(
+                format!("{}-wildtype", cohort.gene),
+                &cohort.wildtype_patients,
+                &survival,
+            ),
+        ],
+    })
+}
+
+pub fn compare_expression_by_mutation(
+    study_dir: &Path,
+    stratify_gene: &str,
+    target_gene: &str,
+) -> Result<ExpressionComparisonByMutationResult, BioMcpError> {
+    let cohort = build_cohort_split(study_dir, stratify_gene)?;
+    let target_gene = normalize_gene(target_gene)?;
+    let values_by_sample = expression_values_by_sample(study_dir, &target_gene)?;
+
+    Ok(ExpressionComparisonByMutationResult {
+        study_id: cohort.study_id.clone(),
+        stratify_gene: cohort.gene.clone(),
+        target_gene,
+        groups: vec![
+            expression_group_stats(
+                format!("{}-mutant", cohort.gene),
+                &cohort.mutant_samples,
+                &values_by_sample,
+            ),
+            expression_group_stats(
+                format!("{}-wildtype", cohort.gene),
+                &cohort.wildtype_samples,
+                &values_by_sample,
+            ),
+        ],
+    })
+}
+
+pub fn compare_mutations_by_mutation(
+    study_dir: &Path,
+    stratify_gene: &str,
+    target_gene: &str,
+) -> Result<MutationComparisonByMutationResult, BioMcpError> {
+    let cohort = build_cohort_split(study_dir, stratify_gene)?;
+    let target_gene = normalize_gene(target_gene)?;
+    let mutant_count = mutation_count_in_samples(study_dir, &target_gene, &cohort.mutant_samples)?;
+    let wildtype_count =
+        mutation_count_in_samples(study_dir, &target_gene, &cohort.wildtype_samples)?;
+
+    Ok(MutationComparisonByMutationResult {
+        study_id: cohort.study_id.clone(),
+        stratify_gene: cohort.gene.clone(),
+        target_gene,
+        groups: vec![
+            mutation_group_stats(
+                format!("{}-mutant", cohort.gene),
+                cohort.mutant_samples.len(),
+                mutant_count,
+            ),
+            mutation_group_stats(
+                format!("{}-wildtype", cohort.gene),
+                cohort.wildtype_samples.len(),
+                wildtype_count,
+            ),
+        ],
+    })
+}
+
 fn parse_meta_study(path: &Path, fallback_study_id: &str) -> Result<StudyMeta, BioMcpError> {
     let file = File::open(path).map_err(|_| BioMcpError::SourceUnavailable {
         source_name: SOURCE_NAME.to_string(),
@@ -658,6 +1040,132 @@ fn quantile_inclusive(sorted: &[f64], p: f64) -> f64 {
     }
     let weight = position - lower as f64;
     sorted[lower] * (1.0 - weight) + sorted[upper] * weight
+}
+
+fn normalize_survival_endpoint(endpoint: &str) -> Result<String, BioMcpError> {
+    let endpoint = endpoint.trim().to_ascii_uppercase();
+    match endpoint.as_str() {
+        "OS" | "DFS" | "PFS" | "DSS" => Ok(endpoint),
+        other => Err(BioMcpError::InvalidArgument(format!(
+            "Unknown survival endpoint '{other}'. Expected: os, dfs, pfs, dss."
+        ))),
+    }
+}
+
+fn survival_columns(endpoint: &str) -> (&'static str, &'static str) {
+    match endpoint {
+        "OS" => ("OS_STATUS", "OS_MONTHS"),
+        "DFS" => ("DFS_STATUS", "DFS_MONTHS"),
+        "PFS" => ("PFS_STATUS", "PFS_MONTHS"),
+        "DSS" => ("DSS_STATUS", "DSS_MONTHS"),
+        _ => unreachable!("endpoint validated before column lookup"),
+    }
+}
+
+fn parse_survival_status(value: &str) -> Option<SurvivalStatus> {
+    let prefix = value
+        .trim()
+        .split_once(':')
+        .map(|(head, _)| head)
+        .unwrap_or(value);
+    match prefix.trim() {
+        "1" => Some(SurvivalStatus::Event),
+        "0" => Some(SurvivalStatus::Censored),
+        _ => None,
+    }
+}
+
+fn survival_group_stats(
+    group_name: String,
+    patients: &HashSet<String>,
+    survival: &HashMap<String, PatientSurvivalRecord>,
+) -> SurvivalGroupStats {
+    let records = patients
+        .iter()
+        .filter_map(|patient| survival.get(patient))
+        .filter(|record| patients.contains(&record.patient_id))
+        .collect::<Vec<_>>();
+    let mut months = records
+        .iter()
+        .map(|record| record.months)
+        .collect::<Vec<_>>();
+    months.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n_patients = months.len();
+    let n_events = records
+        .iter()
+        .filter(|record| matches!(record.status, SurvivalStatus::Event))
+        .count();
+    let n_censored = n_patients.saturating_sub(n_events);
+    let median_months = (!months.is_empty()).then(|| quantile_inclusive(&months, 0.5));
+    let event_rate = if n_patients > 0 {
+        n_events as f64 / n_patients as f64
+    } else {
+        0.0
+    };
+
+    SurvivalGroupStats {
+        group_name,
+        n_patients,
+        n_events,
+        n_censored,
+        median_months,
+        event_rate,
+    }
+}
+
+fn expression_group_stats(
+    group_name: String,
+    sample_set: &HashSet<String>,
+    values_by_sample: &HashMap<String, f64>,
+) -> ExpressionGroupStats {
+    let mut values = sample_set
+        .iter()
+        .filter_map(|sample| values_by_sample.get(sample).copied())
+        .collect::<Vec<_>>();
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if values.is_empty() {
+        return ExpressionGroupStats {
+            group_name,
+            sample_count: 0,
+            mean: 0.0,
+            median: 0.0,
+            min: 0.0,
+            max: 0.0,
+            q1: 0.0,
+            q3: 0.0,
+        };
+    }
+
+    let sample_count = values.len();
+    let sum: f64 = values.iter().sum();
+    ExpressionGroupStats {
+        group_name,
+        sample_count,
+        mean: sum / sample_count as f64,
+        median: quantile_inclusive(&values, 0.5),
+        min: *values.first().unwrap_or(&0.0),
+        max: *values.last().unwrap_or(&0.0),
+        q1: quantile_inclusive(&values, 0.25),
+        q3: quantile_inclusive(&values, 0.75),
+    }
+}
+
+fn mutation_group_stats(
+    group_name: String,
+    sample_count: usize,
+    mutated_count: usize,
+) -> MutationGroupStats {
+    let mutation_rate = if sample_count > 0 {
+        mutated_count as f64 / sample_count as f64
+    } else {
+        0.0
+    };
+    MutationGroupStats {
+        group_name,
+        sample_count,
+        mutated_count,
+        mutation_rate,
+    }
 }
 
 fn log_odds_ratio(both: usize, a_only: usize, b_only: usize, neither: usize) -> Option<f64> {
@@ -875,6 +1383,18 @@ mod tests {
             .expect("write clinical sample");
     }
 
+    fn write_clinical_patients(study_dir: &Path, rows: &[&str]) {
+        let mut content = String::from(
+            "# comment 1\n# comment 2\nPATIENT_ID\tOS_STATUS\tOS_MONTHS\tDFS_STATUS\tDFS_MONTHS\tPFS_STATUS\tPFS_MONTHS\tDSS_STATUS\tDSS_MONTHS\n",
+        );
+        for row in rows {
+            content.push_str(row);
+            content.push('\n');
+        }
+        fs::write(study_dir.join("data_clinical_patient.txt"), content)
+            .expect("write clinical patient");
+    }
+
     #[test]
     fn list_studies_reads_meta_and_data_flags() {
         let fixture = TestStudyDir::new("list-studies");
@@ -1069,5 +1589,191 @@ mod tests {
         let study_dir = fixture.study_path("missing_study");
         let err = mutation_frequency(&study_dir, "TP53").expect_err("missing file should fail");
         assert!(matches!(err, BioMcpError::SourceUnavailable { .. }));
+    }
+
+    #[test]
+    fn cohort_by_mutation_classifies_patients_and_samples() {
+        let fixture = TestStudyDir::new("cohort-split");
+        let study_dir = fixture.study_path("cohort_study");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\nEGFR\tS3\tMissense_Mutation\tp.L858R\n",
+        );
+        write_minimal_clinical_samples(
+            &study_dir,
+            &[
+                "P1\tS1\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+                "P1\tS2\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+                "P2\tS3\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+            ],
+        );
+
+        let result = cohort_by_mutation(&study_dir, "tp53").expect("cohort split");
+        assert_eq!(result.study_id, "cohort_study");
+        assert_eq!(result.gene, "TP53");
+        assert_eq!(result.total_samples, 3);
+        assert_eq!(result.total_patients, 2);
+        assert_eq!(result.mutant_patients.len(), 1);
+        assert!(result.mutant_patients.contains("P1"));
+        assert_eq!(result.wildtype_patients.len(), 1);
+        assert!(result.wildtype_patients.contains("P2"));
+        assert_eq!(result.mutant_samples.len(), 2);
+        assert!(result.mutant_samples.contains("S1"));
+        assert!(result.mutant_samples.contains("S2"));
+        assert_eq!(result.wildtype_samples.len(), 1);
+        assert!(result.wildtype_samples.contains("S3"));
+    }
+
+    #[test]
+    fn patient_survival_data_requires_canonical_columns_and_filters_invalid_rows() {
+        let fixture = TestStudyDir::new("patient-survival");
+        let study_dir = fixture.study_path("survival_study");
+        write_clinical_patients(
+            &study_dir,
+            &[
+                "P1\t1:DECEASED\t10\t1:Recurred\t8\t1:Progressed\t7\t1:Died of disease\t10",
+                "P2\t0:LIVING\t24\t0:DiseaseFree\t22\t0:No progression\t20\t0:Alive\t24",
+                "P3\t0:LIVING\tNA\t0:DiseaseFree\t14\t0:No progression\t12\t0:Alive\t18",
+                "P4\tUNKNOWN\t12\t0:DiseaseFree\t16\t0:No progression\t15\t0:Alive\t12",
+            ],
+        );
+
+        let result = patient_survival_data(&study_dir, "os").expect("survival records");
+        assert_eq!(result.len(), 2);
+        assert!(matches!(
+            result.get("P1").map(|row| row.status),
+            Some(SurvivalStatus::Event)
+        ));
+        assert_eq!(result.get("P1").map(|row| row.months), Some(10.0));
+        assert!(matches!(
+            result.get("P2").map(|row| row.status),
+            Some(SurvivalStatus::Censored)
+        ));
+        assert!(!result.contains_key("P3"));
+        assert!(!result.contains_key("P4"));
+    }
+
+    #[test]
+    fn survival_by_mutation_returns_group_aggregates_for_analyzable_patients() {
+        let fixture = TestStudyDir::new("survival-by-mutation");
+        let study_dir = fixture.study_path("survival_study");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        );
+        write_minimal_clinical_samples(
+            &study_dir,
+            &[
+                "P1\tS1\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P1\tS2\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P2\tS3\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P3\tS4\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+            ],
+        );
+        write_clinical_patients(
+            &study_dir,
+            &[
+                "P1\t1:DECEASED\t12\t1:Recurred\t8\t1:Progressed\t7\t1:Died of disease\t12",
+                "P2\t0:LIVING\t20\t0:DiseaseFree\t18\t0:No progression\t15\t0:Alive\t20",
+                "P3\t1:DECEASED\tNA\t1:Recurred\t10\t1:Progressed\t8\t1:Died of disease\t11",
+            ],
+        );
+
+        let result = survival_by_mutation(&study_dir, "TP53", "OS").expect("survival summary");
+        assert_eq!(result.study_id, "survival_study");
+        assert_eq!(result.gene, "TP53");
+        assert_eq!(result.endpoint, "OS");
+        assert_eq!(result.groups.len(), 2);
+        assert_eq!(result.groups[0].group_name, "TP53-mutant");
+        assert_eq!(result.groups[0].n_patients, 1);
+        assert_eq!(result.groups[0].n_events, 1);
+        assert_eq!(result.groups[0].n_censored, 0);
+        assert_eq!(result.groups[0].median_months, Some(12.0));
+        assert_eq!(result.groups[1].group_name, "TP53-wildtype");
+        assert_eq!(result.groups[1].n_patients, 1);
+        assert_eq!(result.groups[1].n_events, 0);
+        assert_eq!(result.groups[1].n_censored, 1);
+        assert_eq!(result.groups[1].median_months, Some(20.0));
+    }
+
+    #[test]
+    fn compare_expression_by_mutation_summarizes_group_distributions() {
+        let fixture = TestStudyDir::new("compare-expression");
+        let study_dir = fixture.study_path("compare_expr_study");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        );
+        write_minimal_clinical_samples(
+            &study_dir,
+            &[
+                "P1\tS1\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P1\tS2\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P2\tS3\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+            ],
+        );
+        fixture.write_file(
+            &study_dir.join("data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt"),
+            "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\tS3\nERBB2\t2064\t2.0\t4.0\t1.0\n",
+        );
+
+        let result = compare_expression_by_mutation(&study_dir, "TP53", "ERBB2")
+            .expect("expression compare");
+        assert_eq!(result.study_id, "compare_expr_study");
+        assert_eq!(result.stratify_gene, "TP53");
+        assert_eq!(result.target_gene, "ERBB2");
+        assert_eq!(result.groups.len(), 2);
+        assert_eq!(result.groups[0].group_name, "TP53-mutant");
+        assert_eq!(result.groups[0].sample_count, 2);
+        assert!((result.groups[0].mean - 3.0).abs() < 1e-9);
+        assert!((result.groups[0].median - 3.0).abs() < 1e-9);
+        assert_eq!(result.groups[1].group_name, "TP53-wildtype");
+        assert_eq!(result.groups[1].sample_count, 1);
+        assert!((result.groups[1].mean - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compare_mutations_by_mutation_counts_unique_samples_in_each_group() {
+        let fixture = TestStudyDir::new("compare-mutations");
+        let study_dir = fixture.study_path("compare_mut_study");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\nPIK3CA\tS2\tMissense_Mutation\tp.H1047R\nPIK3CA\tS3\tMissense_Mutation\tp.E545K\n",
+        );
+        write_minimal_clinical_samples(
+            &study_dir,
+            &[
+                "P1\tS1\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P1\tS2\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+                "P2\tS3\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA",
+            ],
+        );
+
+        let result =
+            compare_mutations_by_mutation(&study_dir, "TP53", "PIK3CA").expect("mutation compare");
+        assert_eq!(result.study_id, "compare_mut_study");
+        assert_eq!(result.groups.len(), 2);
+        assert_eq!(result.groups[0].group_name, "TP53-mutant");
+        assert_eq!(result.groups[0].sample_count, 2);
+        assert_eq!(result.groups[0].mutated_count, 1);
+        assert!((result.groups[0].mutation_rate - 0.5).abs() < 1e-9);
+        assert_eq!(result.groups[1].group_name, "TP53-wildtype");
+        assert_eq!(result.groups[1].sample_count, 1);
+        assert_eq!(result.groups[1].mutated_count, 1);
+        assert!((result.groups[1].mutation_rate - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cohort_commands_require_clinical_sample_file_instead_of_falling_back() {
+        let fixture = TestStudyDir::new("cohort-requires-clinical-sample");
+        let study_dir = fixture.study_path("missing_clinical_sample");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        );
+
+        let err = cohort_by_mutation(&study_dir, "TP53").expect_err("missing clinical file");
+        assert!(matches!(err, BioMcpError::SourceUnavailable { .. }));
+        assert!(err.to_string().contains("data_clinical_sample.txt"));
     }
 }

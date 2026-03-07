@@ -96,6 +96,82 @@ pub enum StudyQueryType {
     Expression,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CohortResult {
+    pub study_id: String,
+    pub gene: String,
+    pub stratification: String,
+    pub mutant_samples: usize,
+    pub wildtype_samples: usize,
+    pub mutant_patients: usize,
+    pub wildtype_patients: usize,
+    pub total_samples: usize,
+    pub total_patients: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurvivalEndpoint {
+    Os,
+    Dfs,
+    Pfs,
+    Dss,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SurvivalGroupResult {
+    pub group_name: String,
+    pub n_patients: usize,
+    pub n_events: usize,
+    pub n_censored: usize,
+    pub median_months: Option<f64>,
+    pub event_rate: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SurvivalResult {
+    pub study_id: String,
+    pub gene: String,
+    pub endpoint: SurvivalEndpoint,
+    pub groups: Vec<SurvivalGroupResult>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExpressionGroupStats {
+    pub group_name: String,
+    pub sample_count: usize,
+    pub mean: f64,
+    pub median: f64,
+    pub min: f64,
+    pub max: f64,
+    pub q1: f64,
+    pub q3: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExpressionComparisonResult {
+    pub study_id: String,
+    pub stratify_gene: String,
+    pub target_gene: String,
+    pub groups: Vec<ExpressionGroupStats>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MutationGroupStats {
+    pub group_name: String,
+    pub sample_count: usize,
+    pub mutated_count: usize,
+    pub mutation_rate: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MutationComparisonResult {
+    pub study_id: String,
+    pub stratify_gene: String,
+    pub target_gene: String,
+    pub groups: Vec<MutationGroupStats>,
+}
+
 impl StudyQueryType {
     pub fn from_flag(value: &str) -> Result<Self, BioMcpError> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -105,6 +181,56 @@ impl StudyQueryType {
             other => Err(BioMcpError::InvalidArgument(format!(
                 "Unknown study query type '{other}'. Expected: mutations, cna, expression."
             ))),
+        }
+    }
+}
+
+impl SurvivalEndpoint {
+    pub fn from_flag(value: &str) -> Result<Self, BioMcpError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "os" | "overall" | "overall_survival" => Ok(Self::Os),
+            "dfs" | "disease_free" => Ok(Self::Dfs),
+            "pfs" | "progression_free" => Ok(Self::Pfs),
+            "dss" | "disease_specific" => Ok(Self::Dss),
+            other => Err(BioMcpError::InvalidArgument(format!(
+                "Unknown survival endpoint '{other}'. Expected: os, dfs, pfs, dss."
+            ))),
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Os => "OS",
+            Self::Dfs => "DFS",
+            Self::Pfs => "PFS",
+            Self::Dss => "DSS",
+        }
+    }
+
+    pub fn status_column(&self) -> &'static str {
+        match self {
+            Self::Os => "OS_STATUS",
+            Self::Dfs => "DFS_STATUS",
+            Self::Pfs => "PFS_STATUS",
+            Self::Dss => "DSS_STATUS",
+        }
+    }
+
+    pub fn months_column(&self) -> &'static str {
+        match self {
+            Self::Os => "OS_MONTHS",
+            Self::Dfs => "DFS_MONTHS",
+            Self::Pfs => "PFS_MONTHS",
+            Self::Dss => "DSS_MONTHS",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Os => "Overall Survival",
+            Self::Dfs => "Disease-Free Survival",
+            Self::Pfs => "Progression-Free Survival",
+            Self::Dss => "Disease-Specific Survival",
         }
     }
 }
@@ -191,6 +317,88 @@ pub async fn co_occurrence(
     .await
 }
 
+pub async fn cohort(study_id: &str, gene: &str) -> Result<CohortResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let gene = normalize_gene(gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        Ok(crate::sources::cbioportal_study::cohort_by_mutation(&study_dir, &gene)?.into())
+    })
+    .await
+}
+
+pub async fn survival(
+    study_id: &str,
+    gene: &str,
+    endpoint: SurvivalEndpoint,
+) -> Result<SurvivalResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let gene = normalize_gene(gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+    let _required_columns = (endpoint.status_column(), endpoint.months_column());
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        Ok(crate::sources::cbioportal_study::survival_by_mutation(
+            &study_dir,
+            &gene,
+            endpoint.code(),
+        )?
+        .into())
+    })
+    .await
+}
+
+pub async fn compare_expression(
+    study_id: &str,
+    stratify_gene: &str,
+    target_gene: &str,
+) -> Result<ExpressionComparisonResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let stratify_gene = normalize_gene(stratify_gene)?;
+    let target_gene = normalize_gene(target_gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        Ok(
+            crate::sources::cbioportal_study::compare_expression_by_mutation(
+                &study_dir,
+                &stratify_gene,
+                &target_gene,
+            )?
+            .into(),
+        )
+    })
+    .await
+}
+
+pub async fn compare_mutations(
+    study_id: &str,
+    stratify_gene: &str,
+    target_gene: &str,
+) -> Result<MutationComparisonResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let stratify_gene = normalize_gene(stratify_gene)?;
+    let target_gene = normalize_gene(target_gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        Ok(
+            crate::sources::cbioportal_study::compare_mutations_by_mutation(
+                &study_dir,
+                &stratify_gene,
+                &target_gene,
+            )?
+            .into(),
+        )
+    })
+    .await
+}
+
 impl From<crate::sources::cbioportal_study::MutationFrequencyResult> for MutationFrequencyResult {
     fn from(value: crate::sources::cbioportal_study::MutationFrequencyResult) -> Self {
         Self {
@@ -267,6 +475,22 @@ impl From<crate::sources::cbioportal_study::CoOccurrenceResult> for CoOccurrence
     }
 }
 
+impl From<crate::sources::cbioportal_study::CohortSplit> for CohortResult {
+    fn from(value: crate::sources::cbioportal_study::CohortSplit) -> Self {
+        Self {
+            study_id: value.study_id,
+            gene: value.gene,
+            stratification: "mutation".to_string(),
+            mutant_samples: value.mutant_samples.len(),
+            wildtype_samples: value.wildtype_samples.len(),
+            mutant_patients: value.mutant_patients.len(),
+            wildtype_patients: value.wildtype_patients.len(),
+            total_samples: value.total_samples,
+            total_patients: value.total_patients,
+        }
+    }
+}
+
 impl From<crate::sources::cbioportal_study::SampleUniverseBasis> for SampleUniverseBasis {
     fn from(value: crate::sources::cbioportal_study::SampleUniverseBasis) -> Self {
         match value {
@@ -276,6 +500,83 @@ impl From<crate::sources::cbioportal_study::SampleUniverseBasis> for SampleUnive
             crate::sources::cbioportal_study::SampleUniverseBasis::MutationObserved => {
                 Self::MutationObserved
             }
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::SurvivalGroupStats> for SurvivalGroupResult {
+    fn from(value: crate::sources::cbioportal_study::SurvivalGroupStats) -> Self {
+        Self {
+            group_name: value.group_name,
+            n_patients: value.n_patients,
+            n_events: value.n_events,
+            n_censored: value.n_censored,
+            median_months: value.median_months,
+            event_rate: value.event_rate,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::SurvivalByMutationResult> for SurvivalResult {
+    fn from(value: crate::sources::cbioportal_study::SurvivalByMutationResult) -> Self {
+        Self {
+            study_id: value.study_id,
+            gene: value.gene,
+            endpoint: SurvivalEndpoint::from_flag(&value.endpoint)
+                .expect("source survival endpoint should be valid"),
+            groups: value.groups.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::ExpressionGroupStats> for ExpressionGroupStats {
+    fn from(value: crate::sources::cbioportal_study::ExpressionGroupStats) -> Self {
+        Self {
+            group_name: value.group_name,
+            sample_count: value.sample_count,
+            mean: value.mean,
+            median: value.median,
+            min: value.min,
+            max: value.max,
+            q1: value.q1,
+            q3: value.q3,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::ExpressionComparisonByMutationResult>
+    for ExpressionComparisonResult
+{
+    fn from(value: crate::sources::cbioportal_study::ExpressionComparisonByMutationResult) -> Self {
+        Self {
+            study_id: value.study_id,
+            stratify_gene: value.stratify_gene,
+            target_gene: value.target_gene,
+            groups: value.groups.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::MutationGroupStats> for MutationGroupStats {
+    fn from(value: crate::sources::cbioportal_study::MutationGroupStats) -> Self {
+        Self {
+            group_name: value.group_name,
+            sample_count: value.sample_count,
+            mutated_count: value.mutated_count,
+            mutation_rate: value.mutation_rate,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::MutationComparisonByMutationResult>
+    for MutationComparisonResult
+{
+    fn from(value: crate::sources::cbioportal_study::MutationComparisonByMutationResult) -> Self {
+        Self {
+            study_id: value.study_id,
+            stratify_gene: value.stratify_gene,
+            target_gene: value.target_gene,
+            groups: value.groups.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -449,7 +750,11 @@ mod tests {
         );
         write_file(
             &study.join("data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt"),
-            "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\tS3\nTP53\t7157\t1.0\t2.0\t3.0\n",
+            "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\tS3\nTP53\t7157\t1.0\t2.0\t3.0\nERBB2\t2064\t2.0\t4.0\t1.0\n",
+        );
+        write_file(
+            &study.join("data_clinical_patient.txt"),
+            "# comment\nPATIENT_ID\tOS_STATUS\tOS_MONTHS\tDFS_STATUS\tDFS_MONTHS\tPFS_STATUS\tPFS_MONTHS\tDSS_STATUS\tDSS_MONTHS\nP1\t1:DECEASED\t12\t1:Recurred\t8\t1:Progressed\t7\t1:Died of disease\t12\nP2\t0:LIVING\t24\t0:DiseaseFree\t20\t0:No progression\t18\t0:Alive\t24\nP3\t1:DECEASED\tNA\t1:Recurred\t10\t1:Progressed\t8\t1:Died of disease\t10\n",
         );
     }
 
@@ -472,6 +777,34 @@ mod tests {
     #[test]
     fn query_type_from_flag_rejects_unknown_type() {
         let err = StudyQueryType::from_flag("foo").expect_err("unknown type should fail");
+        assert!(matches!(err, BioMcpError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn survival_endpoint_from_flag_parses_supported_values() {
+        assert!(matches!(
+            SurvivalEndpoint::from_flag("os").expect("os should parse"),
+            SurvivalEndpoint::Os
+        ));
+        assert!(matches!(
+            SurvivalEndpoint::from_flag("DFS").expect("dfs should parse"),
+            SurvivalEndpoint::Dfs
+        ));
+        assert!(matches!(
+            SurvivalEndpoint::from_flag("progression_free")
+                .expect("progression free synonym should parse"),
+            SurvivalEndpoint::Pfs
+        ));
+        assert!(matches!(
+            SurvivalEndpoint::from_flag("disease_specific")
+                .expect("disease specific synonym should parse"),
+            SurvivalEndpoint::Dss
+        ));
+    }
+
+    #[test]
+    fn survival_endpoint_rejects_unknown_value() {
+        let err = SurvivalEndpoint::from_flag("foo").expect_err("unknown endpoint should fail");
         assert!(matches!(err, BioMcpError::InvalidArgument(_)));
     }
 
@@ -561,5 +894,101 @@ mod tests {
             .await
             .expect_err("one gene should fail");
         assert!(matches!(err, BioMcpError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn cohort_round_trips_source_result() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = TestStudyDir::new("cohort");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let result = cohort("demo_study", "TP53")
+            .await
+            .expect("cohort should pass");
+        assert_eq!(result.study_id, "demo_study");
+        assert_eq!(result.gene, "TP53");
+        assert_eq!(result.stratification, "mutation");
+        assert_eq!(result.mutant_samples, 2);
+        assert_eq!(result.wildtype_samples, 1);
+        assert_eq!(result.mutant_patients, 2);
+        assert_eq!(result.wildtype_patients, 1);
+    }
+
+    #[tokio::test]
+    async fn survival_round_trips_source_result() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = TestStudyDir::new("survival");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let result = survival("demo_study", "TP53", SurvivalEndpoint::Os)
+            .await
+            .expect("survival should pass");
+        assert_eq!(result.study_id, "demo_study");
+        assert_eq!(result.gene, "TP53");
+        assert_eq!(result.endpoint, SurvivalEndpoint::Os);
+        assert_eq!(result.groups.len(), 2);
+        assert_eq!(result.groups[0].group_name, "TP53-mutant");
+        assert_eq!(result.groups[0].n_patients, 2);
+        assert_eq!(result.groups[0].n_events, 1);
+        assert_eq!(result.groups[1].group_name, "TP53-wildtype");
+        assert_eq!(result.groups[1].n_patients, 0);
+    }
+
+    #[tokio::test]
+    async fn compare_expression_round_trips_source_result() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = TestStudyDir::new("compare-expression");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let result = compare_expression("demo_study", "TP53", "ERBB2")
+            .await
+            .expect("expression compare should pass");
+        assert_eq!(result.study_id, "demo_study");
+        assert_eq!(result.stratify_gene, "TP53");
+        assert_eq!(result.target_gene, "ERBB2");
+        assert_eq!(result.groups[0].group_name, "TP53-mutant");
+        assert_eq!(result.groups[0].sample_count, 2);
+        assert_eq!(result.groups[1].group_name, "TP53-wildtype");
+        assert_eq!(result.groups[1].sample_count, 1);
+    }
+
+    #[tokio::test]
+    async fn compare_mutations_round_trips_source_result() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = TestStudyDir::new("compare-mutations");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let result = compare_mutations("demo_study", "TP53", "KRAS")
+            .await
+            .expect("mutation compare should pass");
+        assert_eq!(result.study_id, "demo_study");
+        assert_eq!(result.stratify_gene, "TP53");
+        assert_eq!(result.target_gene, "KRAS");
+        assert_eq!(result.groups[0].group_name, "TP53-mutant");
+        assert_eq!(result.groups[0].sample_count, 2);
+        assert_eq!(result.groups[0].mutated_count, 1);
+        assert_eq!(result.groups[1].group_name, "TP53-wildtype");
+        assert_eq!(result.groups[1].sample_count, 1);
+        assert_eq!(result.groups[1].mutated_count, 0);
     }
 }

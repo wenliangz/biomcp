@@ -1361,6 +1361,59 @@ See also: biomcp list study")]
         #[arg(short = 't', long = "type")]
         query_type: String,
     },
+    /// Define a cohort split by mutation status
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study cohort --study brca_tcga_pan_can_atlas_2018 --gene TP53
+
+See also: biomcp list study")]
+    Cohort {
+        /// Study identifier (e.g., brca_tcga_pan_can_atlas_2018)
+        #[arg(short, long)]
+        study: String,
+        /// HGNC gene symbol (e.g., TP53)
+        #[arg(short, long)]
+        gene: String,
+    },
+    /// Compare mutation-stratified groups on survival outcomes
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53
+  biomcp study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53 --endpoint DFS
+
+See also: biomcp list study")]
+    Survival {
+        /// Study identifier (e.g., brca_tcga_pan_can_atlas_2018)
+        #[arg(short, long)]
+        study: String,
+        /// HGNC gene symbol (e.g., TP53)
+        #[arg(short, long)]
+        gene: String,
+        /// Survival endpoint (os, dfs, pfs, dss). Default: os
+        #[arg(short, long, default_value = "os")]
+        endpoint: String,
+    },
+    /// Compare mutation-stratified groups on expression or mutation rates
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2
+  biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type mutations --target PIK3CA
+
+See also: biomcp list study")]
+    Compare {
+        /// Study identifier (e.g., brca_tcga_pan_can_atlas_2018)
+        #[arg(short, long)]
+        study: String,
+        /// Gene for cohort stratification (e.g., TP53)
+        #[arg(short, long)]
+        gene: String,
+        /// Comparison type (expression or mutations)
+        #[arg(short = 't', long = "type")]
+        compare_type: String,
+        /// Target gene to compare across groups
+        #[arg(long)]
+        target: String,
+    },
     /// Compute pairwise mutation co-occurrence across genes
     #[command(after_help = "\
 EXAMPLES:
@@ -3149,6 +3202,62 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         Ok(crate::render::markdown::study_query_markdown(&result))
                     }
                 }
+                StudyCommand::Cohort { study, gene } => {
+                    let result = crate::entities::study::cohort(&study, &gene).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&result)?)
+                    } else {
+                        Ok(crate::render::markdown::study_cohort_markdown(&result))
+                    }
+                }
+                StudyCommand::Survival {
+                    study,
+                    gene,
+                    endpoint,
+                } => {
+                    let endpoint = crate::entities::study::SurvivalEndpoint::from_flag(&endpoint)?;
+                    let result = crate::entities::study::survival(&study, &gene, endpoint).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&result)?)
+                    } else {
+                        Ok(crate::render::markdown::study_survival_markdown(&result))
+                    }
+                }
+                StudyCommand::Compare {
+                    study,
+                    gene,
+                    compare_type,
+                    target,
+                } => match compare_type.trim().to_ascii_lowercase().as_str() {
+                    "expression" | "expr" => {
+                        let result =
+                            crate::entities::study::compare_expression(&study, &gene, &target)
+                                .await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_compare_expression_markdown(
+                                &result,
+                            ))
+                        }
+                    }
+                    "mutations" | "mutation" => {
+                        let result =
+                            crate::entities::study::compare_mutations(&study, &gene, &target)
+                                .await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_compare_mutations_markdown(
+                                &result,
+                            ))
+                        }
+                    }
+                    other => Err(crate::error::BioMcpError::InvalidArgument(format!(
+                        "Unknown comparison type '{other}'. Expected: expression, mutations."
+                    ))
+                    .into()),
+                },
                 StudyCommand::CoOccurrence { study, genes } => {
                     let genes = genes
                         .split(',')
@@ -5152,6 +5261,29 @@ mod tests {
     }
 
     #[test]
+    fn study_cohort_parses_required_flags() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "cohort",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--gene",
+            "TP53",
+        ])
+        .expect("study cohort should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::Cohort { study, gene },
+            } => {
+                assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
+                assert_eq!(gene, "TP53");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn study_query_parses_required_flags() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -5177,6 +5309,72 @@ mod tests {
                 assert_eq!(study, "msk_impact_2017");
                 assert_eq!(gene, "TP53");
                 assert_eq!(query_type, "mutations");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_survival_parses_endpoint_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "survival",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--gene",
+            "TP53",
+            "--endpoint",
+            "dfs",
+        ])
+        .expect("study survival should parse");
+        match cli.command {
+            Commands::Study {
+                cmd:
+                    StudyCommand::Survival {
+                        study,
+                        gene,
+                        endpoint,
+                    },
+            } => {
+                assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
+                assert_eq!(gene, "TP53");
+                assert_eq!(endpoint, "dfs");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_compare_parses_type_and_target() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "compare",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--gene",
+            "TP53",
+            "--type",
+            "expression",
+            "--target",
+            "ERBB2",
+        ])
+        .expect("study compare should parse");
+        match cli.command {
+            Commands::Study {
+                cmd:
+                    StudyCommand::Compare {
+                        study,
+                        gene,
+                        compare_type,
+                        target,
+                    },
+            } => {
+                assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
+                assert_eq!(gene, "TP53");
+                assert_eq!(compare_type, "expression");
+                assert_eq!(target, "ERBB2");
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -5615,5 +5813,43 @@ mod tests {
         .await
         .expect_err("study co-occurrence should validate gene count");
         assert!(err.to_string().contains("--genes must contain 2 to 10"));
+    }
+
+    #[tokio::test]
+    async fn study_survival_rejects_unknown_endpoint() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "survival".to_string(),
+            "--study".to_string(),
+            "msk_impact_2017".to_string(),
+            "--gene".to_string(),
+            "TP53".to_string(),
+            "--endpoint".to_string(),
+            "foo".to_string(),
+        ])
+        .await
+        .expect_err("study survival should validate endpoint");
+        assert!(err.to_string().contains("Unknown survival endpoint"));
+    }
+
+    #[tokio::test]
+    async fn study_compare_rejects_unknown_type() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "compare".to_string(),
+            "--study".to_string(),
+            "msk_impact_2017".to_string(),
+            "--gene".to_string(),
+            "TP53".to_string(),
+            "--type".to_string(),
+            "foo".to_string(),
+            "--target".to_string(),
+            "ERBB2".to_string(),
+        ])
+        .await
+        .expect_err("study compare should validate type");
+        assert!(err.to_string().contains("Unknown comparison type"));
     }
 }
