@@ -22,6 +22,8 @@ This spec validates the local cBioPortal study command family. Assertions stay a
 
 These commands require local study files. This spec provisions a minimal local fixture dataset, then exports `BIOMCP_STUDY_DIR` from a cached env file that later sections can source.
 
+For real datasets, `biomcp study download --list` and `biomcp study download <study_id>` install studies into the same directory, but the spec stays fixture-backed and offline.
+
 ```bash
 bash fixtures/setup-study-spec-fixture.sh "$PWD"
 . "$PWD/.cache/spec-study-env"
@@ -97,27 +99,30 @@ echo "$out" | mustmatch like "| Total |"
 
 ## Survival Aggregates
 
-The survival command should return aggregate-only group summaries rather than record-level data. The stable contract is the endpoint label plus the event/censor/follow-up columns.
+The survival command should return KM-derived group summaries rather than raw follow-up medians. The stable contract is the endpoint label, per-group KM/landmark columns, and the log-rank line.
 
 ```bash
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53)"
 echo "$out" | mustmatch like "# Study Survival: TP53"
 echo "$out" | mustmatch like "Endpoint: Overall Survival"
-echo "$out" | mustmatch like "| Group | N | Events | Censored | Event Rate | Median Months |"
+echo "$out" | mustmatch like "| Group | N | Events | Censored | Event Rate | KM Median | 1yr | 3yr | 5yr |"
+echo "$out" | mustmatch like "Log-rank p-value:"
 echo "$out" | mustmatch like "TP53-mutant"
 echo "$out" | mustmatch like "TP53-wildtype"
 ```
 
 ## Expression Comparison
 
-Expression comparison should summarize the target gene distribution across mutation-defined groups. The spec asserts the structural columns, not numeric values.
+Expression comparison should summarize the target gene distribution across mutation-defined groups and report the Mann-Whitney test lines. The spec asserts the structural columns, not numeric values.
 
 ```bash
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2)"
 echo "$out" | mustmatch like "# Study Group Comparison: Expression"
 echo "$out" | mustmatch like "| Group | N | Mean | Median |"
+echo "$out" | mustmatch like "Mann-Whitney U:"
+echo "$out" | mustmatch like "Mann-Whitney p-value:"
 echo "$out" | mustmatch like "TP53-mutant"
 echo "$out" | mustmatch like "TP53-wildtype"
 ```

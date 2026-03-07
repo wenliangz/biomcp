@@ -16,6 +16,18 @@ pub struct StudyInfo {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StudyDownloadCatalog {
+    pub study_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StudyDownloadResult {
+    pub study_id: String,
+    pub path: String,
+    pub downloaded: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MutationFrequencyResult {
     pub study_id: String,
     pub gene: String,
@@ -124,7 +136,10 @@ pub struct SurvivalGroupResult {
     pub n_patients: usize,
     pub n_events: usize,
     pub n_censored: usize,
-    pub median_months: Option<f64>,
+    pub km_median_months: Option<f64>,
+    pub survival_1yr: Option<f64>,
+    pub survival_3yr: Option<f64>,
+    pub survival_5yr: Option<f64>,
     pub event_rate: f64,
 }
 
@@ -134,6 +149,7 @@ pub struct SurvivalResult {
     pub gene: String,
     pub endpoint: SurvivalEndpoint,
     pub groups: Vec<SurvivalGroupResult>,
+    pub log_rank_p: Option<f64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -154,6 +170,8 @@ pub struct ExpressionComparisonResult {
     pub stratify_gene: String,
     pub target_gene: String,
     pub groups: Vec<ExpressionGroupStats>,
+    pub mann_whitney_u: Option<f64>,
+    pub mann_whitney_p: Option<f64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -292,6 +310,24 @@ pub async fn list_studies() -> Result<Vec<StudyInfo>, BioMcpError> {
         Ok(out)
     })
     .await
+}
+
+pub async fn list_downloadable_studies() -> Result<StudyDownloadCatalog, BioMcpError> {
+    let client = crate::sources::cbioportal_download::CBioPortalDownloadClient::new()?;
+    let study_ids = client.list_study_ids().await?;
+    Ok(StudyDownloadCatalog { study_ids })
+}
+
+pub async fn download_study(study_id: &str) -> Result<StudyDownloadResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let client = crate::sources::cbioportal_download::CBioPortalDownloadClient::new()?;
+    Ok(client
+        .download_study(
+            &study_id,
+            &crate::sources::cbioportal_study::resolve_study_root(),
+        )
+        .await?
+        .into())
 }
 
 pub async fn query_study(
@@ -559,7 +595,10 @@ impl From<crate::sources::cbioportal_study::SurvivalGroupStats> for SurvivalGrou
             n_patients: value.n_patients,
             n_events: value.n_events,
             n_censored: value.n_censored,
-            median_months: value.median_months,
+            km_median_months: value.km_median_months,
+            survival_1yr: value.survival_1yr,
+            survival_3yr: value.survival_3yr,
+            survival_5yr: value.survival_5yr,
             event_rate: value.event_rate,
         }
     }
@@ -573,6 +612,7 @@ impl From<crate::sources::cbioportal_study::SurvivalByMutationResult> for Surviv
             endpoint: SurvivalEndpoint::from_flag(&value.endpoint)
                 .expect("source survival endpoint should be valid"),
             groups: value.groups.into_iter().map(Into::into).collect(),
+            log_rank_p: value.log_rank_p,
         }
     }
 }
@@ -601,6 +641,18 @@ impl From<crate::sources::cbioportal_study::ExpressionComparisonByMutationResult
             stratify_gene: value.stratify_gene,
             target_gene: value.target_gene,
             groups: value.groups.into_iter().map(Into::into).collect(),
+            mann_whitney_u: value.mann_whitney_u,
+            mann_whitney_p: value.mann_whitney_p,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_download::StudyInstallResult> for StudyDownloadResult {
+    fn from(value: crate::sources::cbioportal_download::StudyInstallResult) -> Self {
+        Self {
+            study_id: value.study_id,
+            path: value.path.display().to_string(),
+            downloaded: value.downloaded,
         }
     }
 }
@@ -713,6 +765,21 @@ fn normalize_study_id(study_id: &str) -> Result<String, BioMcpError> {
             "Study ID is required.".to_string(),
         ));
     }
+    let mut components = Path::new(study_id).components();
+    let is_single_segment = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    );
+    if !is_single_segment
+        || study_id.contains('\\')
+        || study_id
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "Invalid study ID '{study_id}'. Expected a single identifier such as 'msk_impact_2017'."
+        )));
+    }
     Ok(study_id.to_string())
 }
 
@@ -812,8 +879,9 @@ mod tests {
 
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::Mutex;
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -933,11 +1001,16 @@ mod tests {
         assert!(matches!(err, BioMcpError::InvalidArgument(_)));
     }
 
+    #[test]
+    fn normalize_study_id_rejects_path_like_input() {
+        let err = normalize_study_id("../demo_study").expect_err("path-like study ID should fail");
+        assert!(matches!(err, BioMcpError::InvalidArgument(_)));
+        assert!(err.to_string().contains("Invalid study ID"));
+    }
+
     #[tokio::test]
     async fn list_studies_returns_available_data() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("list");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -960,9 +1033,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_study_mutations_round_trips_source_result() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("query-mutations");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -987,9 +1058,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_study_unknown_study_returns_not_found() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("unknown-study");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -1005,9 +1074,7 @@ mod tests {
 
     #[tokio::test]
     async fn co_occurrence_validates_gene_count() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("co-occur-count");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -1023,9 +1090,7 @@ mod tests {
 
     #[tokio::test]
     async fn cohort_round_trips_source_result() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("cohort");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1046,9 +1111,7 @@ mod tests {
 
     #[tokio::test]
     async fn survival_round_trips_source_result() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("survival");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1065,15 +1128,19 @@ mod tests {
         assert_eq!(result.groups[0].group_name, "TP53-mutant");
         assert_eq!(result.groups[0].n_patients, 2);
         assert_eq!(result.groups[0].n_events, 1);
+        assert_eq!(result.groups[0].km_median_months, Some(12.0));
+        assert_eq!(result.groups[0].survival_1yr, Some(0.5));
+        assert_eq!(result.groups[0].survival_3yr, Some(0.5));
+        assert_eq!(result.groups[0].survival_5yr, Some(0.5));
         assert_eq!(result.groups[1].group_name, "TP53-wildtype");
         assert_eq!(result.groups[1].n_patients, 0);
+        assert_eq!(result.groups[1].km_median_months, None);
+        assert_eq!(result.log_rank_p, None);
     }
 
     #[tokio::test]
     async fn compare_expression_round_trips_source_result() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("compare-expression");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1090,13 +1157,16 @@ mod tests {
         assert_eq!(result.groups[0].sample_count, 2);
         assert_eq!(result.groups[1].group_name, "TP53-wildtype");
         assert_eq!(result.groups[1].sample_count, 1);
+        assert_eq!(result.mann_whitney_u, Some(0.0));
+        assert!(
+            (result.mann_whitney_p.expect("mann-whitney p-value") - 0.5402913746074199).abs()
+                < 1e-6
+        );
     }
 
     #[tokio::test]
     async fn filter_round_trips_source_result() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("filter");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1138,9 +1208,7 @@ mod tests {
 
     #[tokio::test]
     async fn compare_mutations_round_trips_source_result() {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = env_lock().lock().await;
         let fixture = TestStudyDir::new("compare-mutations");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
