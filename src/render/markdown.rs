@@ -16,8 +16,11 @@ use crate::entities::pathway::{Pathway, PathwaySearchResult};
 use crate::entities::pgx::{Pgx, PgxSearchResult};
 use crate::entities::protein::{Protein, ProteinSearchResult};
 use crate::entities::study::{
-    CoOccurrenceResult as StudyCoOccurrenceResult, SampleUniverseBasis as StudySampleUniverseBasis,
-    StudyInfo, StudyQueryResult,
+    CoOccurrenceResult as StudyCoOccurrenceResult, CohortResult as StudyCohortResult,
+    ExpressionComparisonResult as StudyExpressionComparisonResult,
+    MutationComparisonResult as StudyMutationComparisonResult,
+    SampleUniverseBasis as StudySampleUniverseBasis, StudyInfo, StudyQueryResult,
+    SurvivalResult as StudySurvivalResult,
 };
 use crate::entities::trial::{Trial, TrialSearchResult};
 use crate::entities::variant::{
@@ -2096,6 +2099,108 @@ pub fn study_query_markdown(result: &StudyQueryResult) -> String {
     }
 }
 
+pub fn study_cohort_markdown(result: &StudyCohortResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# Study Cohort: {} ({})\n\n",
+        result.gene, result.study_id
+    ));
+    let stratification = match result.stratification.as_str() {
+        "mutation" => "mutation status",
+        other => other,
+    };
+    out.push_str(&format!("Stratification: {stratification}\n\n"));
+    out.push_str("| Group | Samples | Patients |\n");
+    out.push_str("|---|---|---|\n");
+    out.push_str(&format!(
+        "| {}-mutant | {} | {} |\n",
+        result.gene, result.mutant_samples, result.mutant_patients
+    ));
+    out.push_str(&format!(
+        "| {}-wildtype | {} | {} |\n",
+        result.gene, result.wildtype_samples, result.wildtype_patients
+    ));
+    out.push_str(&format!(
+        "| Total | {} | {} |\n",
+        result.total_samples, result.total_patients
+    ));
+    out
+}
+
+pub fn study_survival_markdown(result: &StudySurvivalResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# Study Survival: {} ({})\n\n",
+        result.gene, result.study_id
+    ));
+    out.push_str(&format!(
+        "Endpoint: {} ({})\n\n",
+        result.endpoint.label(),
+        result.endpoint.code()
+    ));
+    out.push_str("| Group | N | Events | Censored | Event Rate | Median Months |\n");
+    out.push_str("|---|---|---|---|---|---|\n");
+    for group in &result.groups {
+        let median = group
+            .median_months
+            .map(|value| format!("{value:.1}"))
+            .unwrap_or_else(|| "-".to_string());
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {:.6} | {} |\n",
+            group.group_name,
+            group.n_patients,
+            group.n_events,
+            group.n_censored,
+            group.event_rate,
+            median
+        ));
+    }
+    out
+}
+
+pub fn study_compare_expression_markdown(result: &StudyExpressionComparisonResult) -> String {
+    let mut out = String::new();
+    out.push_str("# Study Group Comparison: Expression\n\n");
+    out.push_str(&format!(
+        "Stratify gene: {} | Target gene: {} | Study: {}\n\n",
+        result.stratify_gene, result.target_gene, result.study_id
+    ));
+    out.push_str("| Group | N | Mean | Median | Q1 | Q3 | Min | Max |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|\n");
+    for group in &result.groups {
+        out.push_str(&format!(
+            "| {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
+            group.group_name,
+            group.sample_count,
+            group.mean,
+            group.median,
+            group.q1,
+            group.q3,
+            group.min,
+            group.max
+        ));
+    }
+    out
+}
+
+pub fn study_compare_mutations_markdown(result: &StudyMutationComparisonResult) -> String {
+    let mut out = String::new();
+    out.push_str("# Study Group Comparison: Mutation Rate\n\n");
+    out.push_str(&format!(
+        "Stratify gene: {} | Target gene: {} | Study: {}\n\n",
+        result.stratify_gene, result.target_gene, result.study_id
+    ));
+    out.push_str("| Group | N | Mutated | Mutation Rate |\n");
+    out.push_str("|---|---|---|---|\n");
+    for group in &result.groups {
+        out.push_str(&format!(
+            "| {} | {} | {} | {:.6} |\n",
+            group.group_name, group.sample_count, group.mutated_count, group.mutation_rate
+        ));
+    }
+    out
+}
+
 pub fn study_co_occurrence_markdown(result: &StudyCoOccurrenceResult) -> String {
     let mut out = String::new();
     out.push_str(&format!("# Study Co-occurrence: {}\n\n", result.study_id));
@@ -2209,9 +2314,16 @@ mod tests {
     use crate::entities::study::{
         CnaDistributionResult as StudyCnaDistributionResult,
         CoOccurrencePair as StudyCoOccurrencePair, CoOccurrenceResult as StudyCoOccurrenceResult,
+        CohortResult as StudyCohortResult,
+        ExpressionComparisonResult as StudyExpressionComparisonResult,
         ExpressionDistributionResult as StudyExpressionDistributionResult,
+        ExpressionGroupStats as StudyExpressionGroupStats,
+        MutationComparisonResult as StudyMutationComparisonResult,
         MutationFrequencyResult as StudyMutationFrequencyResult,
+        MutationGroupStats as StudyMutationGroupStats,
         SampleUniverseBasis as StudySampleUniverseBasis, StudyInfo, StudyQueryResult,
+        SurvivalEndpoint as StudySurvivalEndpoint, SurvivalGroupResult as StudySurvivalGroupResult,
+        SurvivalResult as StudySurvivalResult,
     };
     use crate::entities::variant::{TreatmentImplication, Variant, VariantOncoKbResult};
 
@@ -2742,5 +2854,130 @@ mod tests {
         assert!(markdown.contains(
             "Sample universe: mutation-observed samples only (clinical sample file unavailable)"
         ));
+    }
+
+    #[test]
+    fn study_cohort_markdown_renders_group_counts() {
+        let markdown = study_cohort_markdown(&StudyCohortResult {
+            study_id: "brca_tcga_pan_can_atlas_2018".to_string(),
+            gene: "TP53".to_string(),
+            stratification: "mutation".to_string(),
+            mutant_samples: 348,
+            wildtype_samples: 736,
+            mutant_patients: 348,
+            wildtype_patients: 736,
+            total_samples: 1084,
+            total_patients: 1084,
+        });
+
+        assert!(markdown.contains("# Study Cohort: TP53 (brca_tcga_pan_can_atlas_2018)"));
+        assert!(markdown.contains("Stratification: mutation status"));
+        assert!(markdown.contains("| Group | Samples | Patients |"));
+        assert!(markdown.contains("| TP53-mutant | 348 | 348 |"));
+        assert!(markdown.contains("| Total | 1084 | 1084 |"));
+    }
+
+    #[test]
+    fn study_survival_markdown_renders_group_table() {
+        let markdown = study_survival_markdown(&StudySurvivalResult {
+            study_id: "brca_tcga_pan_can_atlas_2018".to_string(),
+            gene: "TP53".to_string(),
+            endpoint: StudySurvivalEndpoint::Os,
+            groups: vec![
+                StudySurvivalGroupResult {
+                    group_name: "TP53-mutant".to_string(),
+                    n_patients: 340,
+                    n_events: 48,
+                    n_censored: 292,
+                    median_months: Some(85.2),
+                    event_rate: 0.141176,
+                },
+                StudySurvivalGroupResult {
+                    group_name: "TP53-wildtype".to_string(),
+                    n_patients: 720,
+                    n_events: 64,
+                    n_censored: 656,
+                    median_months: Some(112.7),
+                    event_rate: 0.088889,
+                },
+            ],
+        });
+
+        assert!(markdown.contains("# Study Survival: TP53 (brca_tcga_pan_can_atlas_2018)"));
+        assert!(markdown.contains("Endpoint: Overall Survival (OS)"));
+        assert!(
+            markdown.contains("| Group | N | Events | Censored | Event Rate | Median Months |")
+        );
+        assert!(markdown.contains("| TP53-mutant | 340 | 48 | 292 | 0.141176 | 85.2 |"));
+    }
+
+    #[test]
+    fn study_compare_expression_markdown_renders_distribution_table() {
+        let markdown = study_compare_expression_markdown(&StudyExpressionComparisonResult {
+            study_id: "brca_tcga_pan_can_atlas_2018".to_string(),
+            stratify_gene: "TP53".to_string(),
+            target_gene: "ERBB2".to_string(),
+            groups: vec![
+                StudyExpressionGroupStats {
+                    group_name: "TP53-mutant".to_string(),
+                    sample_count: 345,
+                    mean: 0.234,
+                    median: 0.112,
+                    min: -2.1,
+                    max: 4.5,
+                    q1: -0.45,
+                    q3: 0.78,
+                },
+                StudyExpressionGroupStats {
+                    group_name: "TP53-wildtype".to_string(),
+                    sample_count: 730,
+                    mean: -0.089,
+                    median: -0.156,
+                    min: -3.2,
+                    max: 5.1,
+                    q1: -0.67,
+                    q3: 0.34,
+                },
+            ],
+        });
+
+        assert!(markdown.contains("# Study Group Comparison: Expression"));
+        assert!(markdown.contains(
+            "Stratify gene: TP53 | Target gene: ERBB2 | Study: brca_tcga_pan_can_atlas_2018"
+        ));
+        assert!(markdown.contains("| Group | N | Mean | Median | Q1 | Q3 | Min | Max |"));
+        assert!(markdown.contains(
+            "| TP53-wildtype | 730 | -0.089 | -0.156 | -0.670 | 0.340 | -3.200 | 5.100 |"
+        ));
+    }
+
+    #[test]
+    fn study_compare_mutations_markdown_renders_rate_table() {
+        let markdown = study_compare_mutations_markdown(&StudyMutationComparisonResult {
+            study_id: "brca_tcga_pan_can_atlas_2018".to_string(),
+            stratify_gene: "TP53".to_string(),
+            target_gene: "PIK3CA".to_string(),
+            groups: vec![
+                StudyMutationGroupStats {
+                    group_name: "TP53-mutant".to_string(),
+                    sample_count: 348,
+                    mutated_count: 120,
+                    mutation_rate: 0.344828,
+                },
+                StudyMutationGroupStats {
+                    group_name: "TP53-wildtype".to_string(),
+                    sample_count: 736,
+                    mutated_count: 220,
+                    mutation_rate: 0.298913,
+                },
+            ],
+        });
+
+        assert!(markdown.contains("# Study Group Comparison: Mutation Rate"));
+        assert!(markdown.contains(
+            "Stratify gene: TP53 | Target gene: PIK3CA | Study: brca_tcga_pan_can_atlas_2018"
+        ));
+        assert!(markdown.contains("| Group | N | Mutated | Mutation Rate |"));
+        assert!(markdown.contains("| TP53-mutant | 348 | 120 | 0.344828 |"));
     }
 }
