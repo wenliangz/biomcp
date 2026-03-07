@@ -2949,7 +2949,7 @@ mod tests {
                 b_only: 15,
                 neither: 55,
                 log_odds_ratio: Some(0.1234),
-                p_value: None,
+                p_value: Some(6.0e-22),
             }],
         });
 
@@ -2958,7 +2958,7 @@ mod tests {
         assert!(markdown.contains(
             "| Gene A | Gene B | Both | A only | B only | Neither | Log Odds Ratio | p-value |"
         ));
-        assert!(markdown.contains("| TP53 | KRAS | 10 | 20 | 15 | 55 |"));
+        assert!(markdown.contains("| TP53 | KRAS | 10 | 20 | 15 | 55 | 0.123400 | 6.000e-22 |"));
     }
 
     #[test]
