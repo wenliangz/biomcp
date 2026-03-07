@@ -65,6 +65,7 @@ New to BioMCP? Try:
 - `pathway drugs|articles|trials <id>`
 - `protein structures <accession> --limit <N> --offset <N>`
 - `study list`
+- `study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]`
 - `study query --study <id> --gene <symbol> --type <mutations|cna|expression>`
 - `study cohort --study <id> --gene <symbol>`
 - `study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]`

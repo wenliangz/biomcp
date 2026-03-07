@@ -18,7 +18,7 @@ use crate::entities::protein::{Protein, ProteinSearchResult};
 use crate::entities::study::{
     CoOccurrenceResult as StudyCoOccurrenceResult, CohortResult as StudyCohortResult,
     ExpressionComparisonResult as StudyExpressionComparisonResult,
-    MutationComparisonResult as StudyMutationComparisonResult,
+    FilterResult as StudyFilterResult, MutationComparisonResult as StudyMutationComparisonResult,
     SampleUniverseBasis as StudySampleUniverseBasis, StudyInfo, StudyQueryResult,
     SurvivalResult as StudySurvivalResult,
 };
@@ -2099,6 +2099,57 @@ pub fn study_query_markdown(result: &StudyQueryResult) -> String {
     }
 }
 
+pub fn study_filter_markdown(result: &StudyFilterResult) -> String {
+    const SAMPLE_DISPLAY_LIMIT: usize = 50;
+
+    let mut out = String::new();
+    out.push_str(&format!("# Study Filter: {}\n\n", result.study_id));
+    out.push_str("## Criteria\n\n");
+    out.push_str("| Filter | Matching Samples |\n");
+    out.push_str("|---|---|\n");
+    if result.criteria.is_empty() {
+        out.push_str("| - | 0 |\n");
+    } else {
+        for criterion in &result.criteria {
+            out.push_str(&format!(
+                "| {} | {} |\n",
+                criterion.description, criterion.matched_count
+            ));
+        }
+    }
+
+    out.push_str("\n## Result\n\n");
+    out.push_str("| Metric | Value |\n");
+    out.push_str("|---|---|\n");
+    let total = result
+        .total_study_samples
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    out.push_str(&format!("| Study Total Samples | {total} |\n"));
+    out.push_str(&format!("| Intersection | {} |\n", result.matched_count));
+
+    out.push_str("\n## Matched Samples\n\n");
+    if result.matched_sample_ids.is_empty() {
+        out.push_str("None\n");
+        return out;
+    }
+
+    for sample_id in result.matched_sample_ids.iter().take(SAMPLE_DISPLAY_LIMIT) {
+        out.push_str(sample_id);
+        out.push('\n');
+    }
+    let remaining = result
+        .matched_sample_ids
+        .len()
+        .saturating_sub(SAMPLE_DISPLAY_LIMIT);
+    if remaining > 0 {
+        out.push_str(&format!(
+            "... and {remaining} more (use --json for full list)\n"
+        ));
+    }
+    out
+}
+
 pub fn study_cohort_markdown(result: &StudyCohortResult) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -2812,6 +2863,75 @@ mod tests {
         ));
         assert!(expression.contains("# Study Expression Distribution: KRAS (paad_qcmg_uq_2016)"));
         assert!(expression.contains("| Sample count | 50 |"));
+    }
+
+    #[test]
+    fn study_filter_markdown_renders_tables_and_samples() {
+        let markdown = study_filter_markdown(&StudyFilterResult {
+            study_id: "brca_tcga_pan_can_atlas_2018".to_string(),
+            criteria: vec![
+                crate::entities::study::FilterCriterionSummary {
+                    description: "mutated TP53".to_string(),
+                    matched_count: 3,
+                },
+                crate::entities::study::FilterCriterionSummary {
+                    description: "amplified ERBB2".to_string(),
+                    matched_count: 2,
+                },
+            ],
+            total_study_samples: Some(4),
+            matched_count: 2,
+            matched_sample_ids: vec!["S2".to_string(), "S3".to_string()],
+        });
+
+        assert!(markdown.contains("# Study Filter: brca_tcga_pan_can_atlas_2018"));
+        assert!(markdown.contains("## Criteria"));
+        assert!(markdown.contains("| Filter | Matching Samples |"));
+        assert!(markdown.contains("| mutated TP53 | 3 |"));
+        assert!(markdown.contains("## Result"));
+        assert!(markdown.contains("| Study Total Samples | 4 |"));
+        assert!(markdown.contains("| Intersection | 2 |"));
+        assert!(markdown.contains("## Matched Samples"));
+        assert!(markdown.contains("S2"));
+        assert!(markdown.contains("S3"));
+    }
+
+    #[test]
+    fn study_filter_markdown_renders_empty_results_and_unknown_totals() {
+        let markdown = study_filter_markdown(&StudyFilterResult {
+            study_id: "demo_study".to_string(),
+            criteria: vec![crate::entities::study::FilterCriterionSummary {
+                description: "expression > 1.5 for MYC".to_string(),
+                matched_count: 0,
+            }],
+            total_study_samples: None,
+            matched_count: 0,
+            matched_sample_ids: Vec::new(),
+        });
+
+        assert!(markdown.contains("| Study Total Samples | - |"));
+        assert!(markdown.contains("| Intersection | 0 |"));
+        assert!(markdown.contains("## Matched Samples"));
+        assert!(markdown.contains("\nNone\n"));
+    }
+
+    #[test]
+    fn study_filter_markdown_truncates_long_sample_lists() {
+        let markdown = study_filter_markdown(&StudyFilterResult {
+            study_id: "long_study".to_string(),
+            criteria: vec![crate::entities::study::FilterCriterionSummary {
+                description: "mutated TP53".to_string(),
+                matched_count: 55,
+            }],
+            total_study_samples: Some(100),
+            matched_count: 55,
+            matched_sample_ids: (1..=55).map(|idx| format!("S{idx}")).collect(),
+        });
+
+        assert!(markdown.contains("S1"));
+        assert!(markdown.contains("S50"));
+        assert!(!markdown.contains("S51\n"));
+        assert!(markdown.contains("... and 5 more (use --json for full list)"));
     }
 
     #[test]

@@ -14,6 +14,7 @@ This spec validates the local cBioPortal study command family. Assertions stay a
 | Expression comparison | `study compare --type expression` | Confirms per-group expression summary tables |
 | Mutation rate comparison | `study compare --type mutations` | Confirms per-group mutation-rate summary tables |
 | Co-occurrence | `study co-occurrence` | Confirms pairwise table schema |
+| Multi-omics filter | `study filter` | Confirms cross-table intersection output and validation |
 | Missing data handling | missing expression or survival inputs | Confirms actionable source-unavailable messages |
 | Unknown study handling | invalid `--study` | Confirms actionable not-found message |
 
@@ -145,6 +146,39 @@ echo "$out" | mustmatch like "# Study Co-occurrence: msk_impact_2017"
 echo "$out" | mustmatch like "Genes: TP53, KRAS"
 echo "$out" | mustmatch like "Sample universe: clinical sample file"
 echo "$out" | mustmatch like "| Gene A | Gene B | Both | A only | B only | Neither | Log Odds Ratio | p-value |"
+```
+
+## Multi-Omics Filter
+
+The filter command should show the criteria table, intersection summary, and matched sample section for study-level joins across mutation, CNA, expression, and clinical inputs.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53)"
+echo "$out" | mustmatch like "# Study Filter: brca_tcga_pan_can_atlas_2018"
+echo "$out" | mustmatch like "## Criteria"
+echo "$out" | mustmatch like "| Filter | Matching Samples |"
+echo "$out" | mustmatch like "## Result"
+echo "$out" | mustmatch like "| Study Total Samples |"
+```
+
+Multiple criteria should be combined with AND semantics and keep the user-supplied filter labels visible in the criteria table.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --amplified ERBB2 --expression-above ERBB2:1.5)"
+echo "$out" | mustmatch like "mutated TP53"
+echo "$out" | mustmatch like "amplified ERBB2"
+echo "$out" | mustmatch like "expression > 1.5 for ERBB2"
+echo "$out" | mustmatch like "## Matched Samples"
+```
+
+Calling the command without any criteria should fail before looking up study data.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study filter --study brca_tcga_pan_can_atlas_2018 2>&1 || true)"
+echo "$out" | mustmatch like "At least one filter criterion is required"
 ```
 
 ## Missing Expression Data

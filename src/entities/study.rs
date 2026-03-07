@@ -172,6 +172,31 @@ pub struct MutationComparisonResult {
     pub groups: Vec<MutationGroupStats>,
 }
 
+#[derive(Debug, Clone)]
+pub enum FilterCriterion {
+    Mutated(String),
+    Amplified(String),
+    Deleted(String),
+    ExpressionAbove(String, f64),
+    ExpressionBelow(String, f64),
+    CancerType(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FilterCriterionSummary {
+    pub description: String,
+    pub matched_count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FilterResult {
+    pub study_id: String,
+    pub criteria: Vec<FilterCriterionSummary>,
+    pub total_study_samples: Option<usize>,
+    pub matched_count: usize,
+    pub matched_sample_ids: Vec<String>,
+}
+
 impl StudyQueryType {
     pub fn from_flag(value: &str) -> Result<Self, BioMcpError> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -312,6 +337,29 @@ pub async fn co_occurrence(
     run_blocking(move || {
         let study_dir = resolve_study_dir(&root, &study_id)?;
         let result = crate::sources::cbioportal_study::co_occurrence(&study_dir, &genes)?;
+        Ok(result.into())
+    })
+    .await
+}
+
+pub async fn filter(
+    study_id: &str,
+    criteria: Vec<FilterCriterion>,
+) -> Result<FilterResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    if criteria.is_empty() {
+        return Err(BioMcpError::InvalidArgument(
+            filter_required_message().to_string(),
+        ));
+    }
+
+    let source_criteria = normalize_filter_criteria(criteria)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        let result =
+            crate::sources::cbioportal_study::filter_samples(&study_dir, &source_criteria)?;
         Ok(result.into())
     })
     .await
@@ -579,6 +627,83 @@ impl From<crate::sources::cbioportal_study::MutationComparisonByMutationResult>
             groups: value.groups.into_iter().map(Into::into).collect(),
         }
     }
+}
+
+impl From<crate::sources::cbioportal_study::SourceFilterCriterionSummary>
+    for FilterCriterionSummary
+{
+    fn from(value: crate::sources::cbioportal_study::SourceFilterCriterionSummary) -> Self {
+        Self {
+            description: value.description,
+            matched_count: value.matched_count,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::SourceFilterResult> for FilterResult {
+    fn from(value: crate::sources::cbioportal_study::SourceFilterResult) -> Self {
+        Self {
+            study_id: value.study_id,
+            criteria: value.criteria.into_iter().map(Into::into).collect(),
+            total_study_samples: value.total_study_samples,
+            matched_count: value.matched_count,
+            matched_sample_ids: value.matched_sample_ids,
+        }
+    }
+}
+
+fn normalize_filter_criteria(
+    criteria: Vec<FilterCriterion>,
+) -> Result<Vec<crate::sources::cbioportal_study::SourceFilterCriterion>, BioMcpError> {
+    criteria
+        .into_iter()
+        .map(|criterion| match criterion {
+            FilterCriterion::Mutated(gene) => Ok(
+                crate::sources::cbioportal_study::SourceFilterCriterion::Mutated(normalize_gene(
+                    &gene,
+                )?),
+            ),
+            FilterCriterion::Amplified(gene) => Ok(
+                crate::sources::cbioportal_study::SourceFilterCriterion::Amplified(normalize_gene(
+                    &gene,
+                )?),
+            ),
+            FilterCriterion::Deleted(gene) => Ok(
+                crate::sources::cbioportal_study::SourceFilterCriterion::Deleted(normalize_gene(
+                    &gene,
+                )?),
+            ),
+            FilterCriterion::ExpressionAbove(gene, threshold) => Ok(
+                crate::sources::cbioportal_study::SourceFilterCriterion::ExpressionAbove(
+                    normalize_gene(&gene)?,
+                    threshold,
+                ),
+            ),
+            FilterCriterion::ExpressionBelow(gene, threshold) => Ok(
+                crate::sources::cbioportal_study::SourceFilterCriterion::ExpressionBelow(
+                    normalize_gene(&gene)?,
+                    threshold,
+                ),
+            ),
+            FilterCriterion::CancerType(value) => {
+                let cancer_type = value.trim();
+                if cancer_type.is_empty() {
+                    return Err(BioMcpError::InvalidArgument(
+                        "Cancer type is required.".to_string(),
+                    ));
+                }
+                Ok(
+                    crate::sources::cbioportal_study::SourceFilterCriterion::CancerType(
+                        cancer_type.to_string(),
+                    ),
+                )
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn filter_required_message() -> &'static str {
+    "At least one filter criterion is required. Use one or more of --mutated, --amplified, --deleted, --expression-above, --expression-below, --cancer-type."
 }
 
 fn normalize_study_id(study_id: &str) -> Result<String, BioMcpError> {
@@ -965,6 +1090,50 @@ mod tests {
         assert_eq!(result.groups[0].sample_count, 2);
         assert_eq!(result.groups[1].group_name, "TP53-wildtype");
         assert_eq!(result.groups[1].sample_count, 1);
+    }
+
+    #[tokio::test]
+    async fn filter_round_trips_source_result() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = TestStudyDir::new("filter");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let result = filter(
+            "demo_study",
+            vec![
+                FilterCriterion::Mutated("tp53".to_string()),
+                FilterCriterion::CancerType(" lung cancer ".to_string()),
+            ],
+        )
+        .await
+        .expect("filter should pass");
+
+        assert_eq!(result.study_id, "demo_study");
+        assert_eq!(result.criteria.len(), 2);
+        assert_eq!(result.criteria[0].description, "mutated TP53");
+        assert_eq!(result.criteria[0].matched_count, 2);
+        assert_eq!(result.criteria[1].description, "cancer type = lung cancer");
+        assert_eq!(result.criteria[1].matched_count, 3);
+        assert_eq!(result.total_study_samples, Some(3));
+        assert_eq!(result.matched_count, 2);
+        assert_eq!(result.matched_sample_ids, vec!["S1", "S2"]);
+    }
+
+    #[tokio::test]
+    async fn filter_validates_empty_criteria() {
+        let err = filter("demo_study", Vec::new())
+            .await
+            .expect_err("empty criteria should fail");
+        assert!(matches!(err, BioMcpError::InvalidArgument(_)));
+        assert!(
+            err.to_string()
+                .contains("At least one filter criterion is required")
+        );
     }
 
     #[tokio::test]
