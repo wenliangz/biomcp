@@ -870,20 +870,11 @@ fn eligibility_keyword_in_inclusion(
 }
 
 fn collect_eligibility_keywords(filters: &TrialSearchFilters) -> Vec<String> {
-    // Note: biomarker is intentionally excluded — it now searches curated
-    // structured fields (Keyword/InterventionName/Condition) rather than
-    // EligibilityCriteria, so post-filtering eligibility text is not needed.
+    // Note: biomarker and mutation are intentionally excluded — they search
+    // broader discovery fields rather than relying on EligibilityCriteria
+    // alone, so post-filtering eligibility text would incorrectly narrow
+    // relevant trials back down to inclusion-oriented mentions.
     let mut keywords = Vec::new();
-
-    if let Some(mutation) = filters
-        .mutation
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        && !has_boolean_operators(mutation)
-    {
-        keywords.push(mutation.to_string());
-    }
 
     if let Some(criteria) = filters
         .criteria
@@ -1167,7 +1158,14 @@ fn ctgov_query_term(
         .filter(|v| !v.is_empty())
     {
         let mutation = essie_escape_boolean_expression(mutation);
-        terms.push(format!("AREA[EligibilityCriteria]({mutation})"));
+        // Search eligibility criteria, titles, summary, and keywords so
+        // mutation-centric discovery does not miss trials that omit the
+        // term from eligibility text but do mention it elsewhere.
+        terms.push(format!(
+            "(AREA[EligibilityCriteria]({mutation}) OR AREA[BriefTitle]({mutation}) \
+             OR AREA[OfficialTitle]({mutation}) OR AREA[BriefSummary]({mutation}) \
+             OR AREA[Keyword]({mutation}))"
+        ));
     }
     if let Some(criteria) = filters
         .criteria
@@ -1832,12 +1830,7 @@ mod tests {
 
         assert_eq!(
             collect_eligibility_keywords(&filters),
-            vec![
-                "MSI-H",
-                "mismatch repair deficient",
-                "osimertinib",
-                "pembrolizumab"
-            ]
+            vec!["mismatch repair deficient", "osimertinib", "pembrolizumab"]
         );
     }
 
@@ -1888,7 +1881,7 @@ mod tests {
     }
 
     #[test]
-    fn ctgov_query_term_supports_mutation_and_criteria_clauses() {
+    fn ctgov_query_term_broadens_mutation_across_discovery_fields() {
         let filters = TrialSearchFilters {
             mutation: Some("dMMR OR MSI-H".into()),
             criteria: Some("mismatch repair deficient".into()),
@@ -1898,8 +1891,30 @@ mod tests {
         let query = ctgov_query_term(&filters, None)
             .expect("query term should build")
             .expect("query term should not be empty");
-        assert!(query.contains("AREA[EligibilityCriteria](\"dMMR\" OR \"MSI\\-H\")"));
+        assert!(query.contains(
+            "(AREA[EligibilityCriteria](\"dMMR\" OR \"MSI\\-H\") OR \
+AREA[BriefTitle](\"dMMR\" OR \"MSI\\-H\") OR \
+AREA[OfficialTitle](\"dMMR\" OR \"MSI\\-H\") OR \
+AREA[BriefSummary](\"dMMR\" OR \"MSI\\-H\") OR \
+AREA[Keyword](\"dMMR\" OR \"MSI\\-H\"))"
+        ));
         assert!(query.contains("AREA[EligibilityCriteria](\"mismatch repair deficient\")"));
+    }
+
+    #[test]
+    fn ctgov_query_term_broadens_simple_mutation_across_discovery_fields() {
+        let filters = TrialSearchFilters {
+            mutation: Some("G12D".into()),
+            ..Default::default()
+        };
+
+        let query = ctgov_query_term(&filters, None)
+            .expect("query term should build")
+            .expect("query term should not be empty");
+        assert!(query.contains(
+            "(AREA[EligibilityCriteria](\"G12D\") OR AREA[BriefTitle](\"G12D\") OR \
+AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\"G12D\"))"
+        ));
     }
 
     #[test]

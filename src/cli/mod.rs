@@ -477,7 +477,7 @@ See also: biomcp list trial")]
         #[arg(short = 's', long)]
         status: Option<String>,
 
-        /// Search eligibility criteria for mutation (best-effort)
+        /// Search mutation-related ClinicalTrials.gov text fields (best-effort)
         #[arg(long, num_args = 1..)]
         mutation: Vec<String>,
 
@@ -972,14 +972,14 @@ See also: biomcp list adverse-event")]
 
 #[derive(Subcommand, Debug)]
 pub enum VariantCommand {
-    /// Search trials mentioning the variant in eligibility criteria (best-effort)
+    /// Search trials mentioning the variant in mutation-related text fields (best-effort)
     #[command(after_help = "\
 EXAMPLES:
   biomcp variant trials \"BRAF V600E\" --limit 5
   biomcp variant trials \"BRAF V600E\" --source nci --limit 5
   biomcp variant trials rs113488022 --limit 5
 
-Note: Searches free-text fields (e.g., eligibility criteria). Results depend on source document wording.
+Note: Searches ClinicalTrials.gov mutation-related free-text fields, including eligibility, title, summary, and keywords. Results depend on source document wording.
 See also: biomcp list variant")]
     Trials {
         /// Variant identifier (rsID, HGVS, or "GENE CHANGE")

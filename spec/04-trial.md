@@ -1,12 +1,13 @@
 # Trial Queries
 
-Trial search in BioMCP supports condition-first exploration with clinical filters for status and phase. This file validates search cards plus sectioned trial retrieval for one known NCT record. Assertions remain structural so they are resilient to changing trial inventories.
+Trial search in BioMCP supports condition-first exploration with clinical filters for status, phase, and mutation-centric discovery. This file validates search cards plus sectioned trial retrieval for one known NCT record. Assertions remain structural so they are resilient to changing trial inventories.
 
 | Section | Command focus | Why it matters |
 |---|---|---|
 | Condition search | `search trial -c melanoma` | Confirms baseline trial retrieval |
 | Status filter | `search trial ... -s recruiting` | Confirms recruitment filtering |
 | Phase filter | `search trial ... -p 3` | Confirms phase filtering |
+| Mutation search | `search trial ... --mutation G12D` | Confirms mutation search query echo and table shape |
 | Trial detail | `get trial NCT02576665` | Confirms trial card structure |
 | Eligibility section | `get trial ... eligibility` | Confirms criteria expansion |
 | Locations section | `get trial ... locations` | Confirms site listing expansion |
@@ -38,6 +39,16 @@ Trial phase helps separate exploratory from confirmatory evidence. The phase-spe
 ```bash
 out="$(biomcp search trial -c melanoma -p 3 --limit 3)"
 echo "$out" | mustmatch like "phase=3"
+echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
+```
+
+## Mutation Search
+
+Mutation-centric search must surface trials where the mutation term appears in title, summary, or keywords, not only in eligibility criteria text. This regression guards against the G12D undercounting bug.
+
+```bash
+out="$(biomcp search trial -c "pancreatic cancer" --mutation "G12D" --phase 3)"
+echo "$out" | mustmatch like "mutation=G12D"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 
