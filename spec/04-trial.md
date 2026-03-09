@@ -42,6 +42,16 @@ echo "$out" | mustmatch like "phase=3"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 
+## Combined Phase 1 and 2 Search
+
+The `1/2` shorthand should preserve the raw query echo while broadening to the combined ClinicalTrials.gov phase bucket. This regression guards the overly narrow early-phase mapping bug.
+
+```bash
+out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search trial -c melanoma --phase 1/2 --limit 3)"
+echo "$out" | mustmatch like "phase=1/2"
+echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
+```
+
 ## Mutation Search
 
 Mutation-centric search must surface trials where the mutation term appears in title, summary, or keywords, not only in eligibility criteria text. This regression guards against the G12D undercounting bug.
@@ -49,6 +59,16 @@ Mutation-centric search must surface trials where the mutation term appears in t
 ```bash
 out="$(biomcp search trial -c "pancreatic cancer" --mutation "G12D" --phase 3)"
 echo "$out" | mustmatch like "mutation=G12D"
+echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
+```
+
+## Intervention Code Punctuation Normalization
+
+Intervention code searches should normalize the confirmed space-delimited drug-code pattern before dispatch. The CLI should still echo the user query while returning the standard trial table.
+
+```bash
+out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search trial -c "pancreatic cancer" --intervention "HRS 4642" --limit 1)"
+echo "$out" | mustmatch like "intervention=HRS 4642"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 

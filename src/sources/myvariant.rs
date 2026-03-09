@@ -72,6 +72,8 @@ pub struct MyVariantClient {
 pub struct VariantSearchParams {
     pub gene: Option<String>,
     pub hgvsp: Option<String>,
+    pub hgvsc: Option<String>,
+    pub rsid: Option<String>,
     pub significance: Option<String>,
     pub max_frequency: Option<f64>,
     pub min_cadd: Option<f64>,
@@ -384,6 +386,36 @@ impl MyVariantClient {
                 v = format!("p.{v}");
             }
             terms.push(format!("dbnsfp.hgvsp:\"{}\"", Self::escape_query_value(&v)));
+        }
+
+        if let Some(hgvsc) = params
+            .hgvsc
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            let value = if hgvsc.starts_with("c.") || hgvsc.starts_with("C.") {
+                hgvsc.to_string()
+            } else {
+                format!("c.{hgvsc}")
+            };
+            terms.push(format!(
+                "dbnsfp.hgvsc:\"{}\"",
+                Self::escape_query_value(&value)
+            ));
+        }
+
+        if let Some(rsid) = params
+            .rsid
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            let normalized = rsid.to_ascii_lowercase();
+            terms.push(format!(
+                "dbsnp.rsid:\"{}\"",
+                Self::escape_query_value(&normalized)
+            ));
         }
 
         if let Some(sig) = params
@@ -995,6 +1027,8 @@ mod tests {
         let params = VariantSearchParams {
             gene: Some("BRAF:V600E".into()),
             hgvsp: None,
+            hgvsc: None,
+            rsid: None,
             significance: None,
             max_frequency: None,
             min_cadd: None,
@@ -1025,6 +1059,8 @@ mod tests {
         let params = VariantSearchParams {
             gene: Some("BRAF".into()),
             hgvsp: None,
+            hgvsc: None,
+            rsid: None,
             significance: None,
             max_frequency: None,
             min_cadd: None,
@@ -1055,6 +1091,8 @@ mod tests {
         let params = VariantSearchParams {
             gene: Some("BRAF".into()),
             hgvsp: None,
+            hgvsc: None,
+            rsid: None,
             significance: None,
             max_frequency: None,
             min_cadd: None,
@@ -1080,5 +1118,97 @@ mod tests {
             err.to_string()
                 .contains("--offset + --limit must be <= 10000")
         );
+    }
+
+    #[tokio::test]
+    async fn search_builds_exact_hgvsc_clause() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/query"))
+            .and(query_param("q", "dbnsfp.hgvsc:\"c.1799T>A\""))
+            .and(query_param("size", "5"))
+            .and(query_param("from", "0"))
+            .and(query_param("fields", MYVARIANT_FIELDS_SEARCH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total": 0,
+                "hits": []
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MyVariantClient::new_for_test(server.uri()).unwrap();
+        let _ = client
+            .search(&VariantSearchParams {
+                gene: None,
+                hgvsp: None,
+                hgvsc: Some("1799T>A".into()),
+                rsid: None,
+                significance: None,
+                max_frequency: None,
+                min_cadd: None,
+                consequence: None,
+                review_status: None,
+                population: None,
+                revel_min: None,
+                gerp_min: None,
+                tumor_site: None,
+                condition: None,
+                impact: None,
+                lof: false,
+                has: None,
+                missing: None,
+                therapy: None,
+                limit: 5,
+                offset: 0,
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_builds_exact_rsid_clause() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/query"))
+            .and(query_param("q", "dbsnp.rsid:\"rs113488022\""))
+            .and(query_param("size", "5"))
+            .and(query_param("from", "0"))
+            .and(query_param("fields", MYVARIANT_FIELDS_SEARCH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total": 0,
+                "hits": []
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MyVariantClient::new_for_test(server.uri()).unwrap();
+        let _ = client
+            .search(&VariantSearchParams {
+                gene: None,
+                hgvsp: None,
+                hgvsc: None,
+                rsid: Some("RS113488022".into()),
+                significance: None,
+                max_frequency: None,
+                min_cadd: None,
+                consequence: None,
+                review_status: None,
+                population: None,
+                revel_min: None,
+                gerp_min: None,
+                tumor_site: None,
+                condition: None,
+                impact: None,
+                lof: false,
+                has: None,
+                missing: None,
+                therapy: None,
+                limit: 5,
+                offset: 0,
+            })
+            .await
+            .unwrap();
     }
 }

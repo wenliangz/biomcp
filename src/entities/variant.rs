@@ -243,6 +243,8 @@ pub struct VariantOncoKbResult {
 pub struct VariantSearchFilters {
     pub gene: Option<String>,
     pub hgvsp: Option<String>,
+    pub hgvsc: Option<String>,
+    pub rsid: Option<String>,
     pub significance: Option<String>,
     pub max_frequency: Option<f64>,
     pub min_cadd: Option<f64>,
@@ -635,6 +637,63 @@ fn search_result_quality_score(row: &VariantSearchResult) -> i32 {
     score
 }
 
+fn should_retry_exon_deletion_with_gene_only(filters: &VariantSearchFilters) -> bool {
+    filters
+        .gene
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|v| !v.is_empty())
+        && filters
+            .consequence
+            .as_deref()
+            .is_some_and(|v| v.eq_ignore_ascii_case("inframe_deletion"))
+        && filters
+            .hgvsp
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(|v| v.is_empty())
+        && filters
+            .hgvsc
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(|v| v.is_empty())
+        && filters
+            .rsid
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(|v| v.is_empty())
+}
+
+fn exon_deletion_fallback_params(
+    filters: &VariantSearchFilters,
+    limit: usize,
+    offset: usize,
+) -> VariantSearchParams {
+    VariantSearchParams {
+        gene: filters.gene.clone(),
+        hgvsp: None,
+        hgvsc: None,
+        rsid: None,
+        significance: filters.significance.clone(),
+        max_frequency: filters.max_frequency,
+        min_cadd: filters.min_cadd,
+        consequence: None,
+        review_status: filters.review_status.clone(),
+        population: filters.population.clone(),
+        revel_min: filters.revel_min,
+        gerp_min: filters.gerp_min,
+        tumor_site: filters.tumor_site.clone(),
+        condition: filters.condition.clone(),
+        impact: filters.impact.clone(),
+        lof: filters.lof,
+        has: filters.has.clone(),
+        missing: filters.missing.clone(),
+        therapy: filters.therapy.clone(),
+        limit,
+        offset,
+    }
+}
+
 pub fn search_query_summary(filters: &VariantSearchFilters) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(v) = filters
@@ -652,6 +711,22 @@ pub fn search_query_summary(filters: &VariantSearchFilters) -> String {
         .filter(|v| !v.is_empty())
     {
         parts.push(format!("hgvsp={v}"));
+    }
+    if let Some(v) = filters
+        .hgvsc
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        parts.push(format!("hgvsc={v}"));
+    }
+    if let Some(v) = filters
+        .rsid
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        parts.push(format!("rsid={v}"));
     }
     if let Some(v) = filters
         .significance
@@ -778,6 +853,16 @@ pub async fn search_page(
         .map(str::trim)
         .is_some_and(|v| !v.is_empty())
         || filters
+            .hgvsc
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        || filters
+            .rsid
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        || filters
             .significance
             .as_deref()
             .map(str::trim)
@@ -841,6 +926,8 @@ pub async fn search_page(
     let params = VariantSearchParams {
         gene: filters.gene.clone(),
         hgvsp: filters.hgvsp.clone(),
+        hgvsc: filters.hgvsc.clone(),
+        rsid: filters.rsid.clone(),
         significance: filters.significance.clone(),
         max_frequency: filters.max_frequency,
         min_cadd: filters.min_cadd,
@@ -867,13 +954,26 @@ pub async fn search_page(
         .iter()
         .map(transform::variant::from_myvariant_search_hit)
         .collect::<Vec<_>>();
+    let total = if out.is_empty() && should_retry_exon_deletion_with_gene_only(filters) {
+        let fallback_resp = client
+            .search(&exon_deletion_fallback_params(filters, fetch_limit, offset))
+            .await?;
+        out = fallback_resp
+            .hits
+            .iter()
+            .map(transform::variant::from_myvariant_search_hit)
+            .collect::<Vec<_>>();
+        fallback_resp.total
+    } else {
+        resp.total
+    };
     out.sort_by(|a, b| {
         search_result_quality_score(b)
             .cmp(&search_result_quality_score(a))
             .then_with(|| a.id.cmp(&b.id))
     });
     out.truncate(limit);
-    Ok(SearchPage::offset(out, resp.total))
+    Ok(SearchPage::offset(out, total))
 }
 
 #[allow(dead_code)]
@@ -1722,6 +1822,66 @@ mod tests {
         };
         assert!(message.contains("search phrase or alteration description"));
         assert!(message.contains("biomcp search variant \"EGFR Exon 19 Deletion\""));
+    }
+
+    #[test]
+    fn search_query_summary_includes_hgvsc_and_rsid() {
+        let summary = search_query_summary(&VariantSearchFilters {
+            gene: Some("BRAF".into()),
+            hgvsc: Some("c.1799T>A".into()),
+            rsid: Some("rs113488022".into()),
+            ..Default::default()
+        });
+        assert_eq!(summary, "gene=BRAF, hgvsc=c.1799T>A, rsid=rs113488022");
+    }
+
+    #[test]
+    fn exon_deletion_fallback_preserves_non_exon_filters() {
+        let filters = VariantSearchFilters {
+            gene: Some("EGFR".into()),
+            significance: Some("pathogenic".into()),
+            max_frequency: Some(0.01),
+            min_cadd: Some(20.0),
+            consequence: Some("inframe_deletion".into()),
+            review_status: Some("reviewed_by_expert_panel".into()),
+            population: Some("eas".into()),
+            revel_min: Some(0.7),
+            gerp_min: Some(2.5),
+            tumor_site: Some("lung".into()),
+            condition: Some("nsclc".into()),
+            impact: Some("moderate".into()),
+            lof: true,
+            has: Some("clinvar".into()),
+            missing: Some("cosmic".into()),
+            therapy: Some("osimertinib".into()),
+            ..Default::default()
+        };
+
+        let params = exon_deletion_fallback_params(&filters, 25, 10);
+        assert_eq!(params.gene.as_deref(), Some("EGFR"));
+        assert!(params.hgvsp.is_none());
+        assert!(params.hgvsc.is_none());
+        assert!(params.rsid.is_none());
+        assert!(params.consequence.is_none());
+        assert_eq!(params.significance.as_deref(), Some("pathogenic"));
+        assert_eq!(params.max_frequency, Some(0.01));
+        assert_eq!(params.min_cadd, Some(20.0));
+        assert_eq!(
+            params.review_status.as_deref(),
+            Some("reviewed_by_expert_panel")
+        );
+        assert_eq!(params.population.as_deref(), Some("eas"));
+        assert_eq!(params.revel_min, Some(0.7));
+        assert_eq!(params.gerp_min, Some(2.5));
+        assert_eq!(params.tumor_site.as_deref(), Some("lung"));
+        assert_eq!(params.condition.as_deref(), Some("nsclc"));
+        assert_eq!(params.impact.as_deref(), Some("moderate"));
+        assert!(params.lof);
+        assert_eq!(params.has.as_deref(), Some("clinvar"));
+        assert_eq!(params.missing.as_deref(), Some("cosmic"));
+        assert_eq!(params.therapy.as_deref(), Some("osimertinib"));
+        assert_eq!(params.limit, 25);
+        assert_eq!(params.offset, 10);
     }
 
     #[test]

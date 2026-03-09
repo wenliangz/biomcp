@@ -1658,16 +1658,61 @@ fn parse_simple_gene_change(query: &str) -> Option<(String, String)> {
     }
 }
 
-type VariantQueryResolution = (Option<String>, Option<String>, Option<String>);
+fn parse_gene_c_hgvs(query: &str) -> Option<(String, String)> {
+    let parts = query.split_whitespace().collect::<Vec<_>>();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let gene = parts[0].trim();
+    let change = parts[1].trim();
+    if gene.is_empty() || change.is_empty() || !crate::sources::is_valid_gene_symbol(gene) {
+        return None;
+    }
+    if !change.starts_with("c.") && !change.starts_with("C.") {
+        return None;
+    }
+    Some((gene.to_string(), format!("c.{}", change[2..].trim())))
+}
+
+fn parse_exon_deletion_phrase(query: &str) -> Option<(String, String)> {
+    let parts = query.split_whitespace().collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return None;
+    }
+
+    let gene = parts[0].trim();
+    if !crate::sources::is_valid_gene_symbol(gene)
+        || !parts[1].eq_ignore_ascii_case("exon")
+        || parts[2].parse::<u32>().ok().is_none()
+        || !parts[3].eq_ignore_ascii_case("deletion")
+    {
+        return None;
+    }
+
+    Some((gene.to_string(), "inframe_deletion".to_string()))
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ResolvedVariantQuery {
+    gene: Option<String>,
+    hgvsp: Option<String>,
+    hgvsc: Option<String>,
+    rsid: Option<String>,
+    consequence: Option<String>,
+    condition: Option<String>,
+}
 
 fn resolve_variant_query(
     gene_flag: Option<String>,
     hgvsp_flag: Option<String>,
+    consequence_flag: Option<String>,
     condition_flag: Option<String>,
     positional_tokens: Vec<String>,
-) -> Result<VariantQueryResolution, crate::error::BioMcpError> {
+) -> Result<ResolvedVariantQuery, crate::error::BioMcpError> {
     let gene_flag = normalize_cli_query(gene_flag);
     let hgvsp_flag = normalize_cli_query(hgvsp_flag);
+    let consequence_flag = normalize_cli_query(consequence_flag);
     let condition_flag = normalize_cli_query(condition_flag);
 
     let positional = positional_tokens
@@ -1679,7 +1724,13 @@ fn resolve_variant_query(
     let positional = normalize_cli_query(Some(positional));
 
     let Some(query) = positional else {
-        return Ok((gene_flag, hgvsp_flag, condition_flag));
+        return Ok(ResolvedVariantQuery {
+            gene: gene_flag,
+            hgvsp: hgvsp_flag,
+            consequence: consequence_flag,
+            condition: condition_flag,
+            ..Default::default()
+        });
     };
 
     let token_count = query.split_whitespace().count();
@@ -1689,7 +1740,24 @@ fn resolve_variant_query(
                 "Use either positional QUERY or --gene, not both".into(),
             ));
         }
-        return Ok((Some(query), hgvsp_flag, condition_flag));
+        if let Ok(crate::entities::variant::VariantIdFormat::RsId(rsid)) =
+            crate::entities::variant::parse_variant_id(&query)
+        {
+            return Ok(ResolvedVariantQuery {
+                rsid: Some(rsid),
+                hgvsp: hgvsp_flag,
+                consequence: consequence_flag,
+                condition: condition_flag,
+                ..Default::default()
+            });
+        }
+        return Ok(ResolvedVariantQuery {
+            gene: Some(query),
+            hgvsp: hgvsp_flag,
+            consequence: consequence_flag,
+            condition: condition_flag,
+            ..Default::default()
+        });
     }
 
     if let Some((gene, change)) = parse_simple_gene_change(&query) {
@@ -1703,7 +1771,49 @@ fn resolve_variant_query(
                 "Positional \"GENE CHANGE\" conflicts with --hgvsp".into(),
             ));
         }
-        return Ok((Some(gene), Some(change), condition_flag));
+        return Ok(ResolvedVariantQuery {
+            gene: Some(gene),
+            hgvsp: Some(change),
+            consequence: consequence_flag,
+            condition: condition_flag,
+            ..Default::default()
+        });
+    }
+
+    if let Some((gene, hgvsc)) = parse_gene_c_hgvs(&query) {
+        if gene_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional \"GENE c.HGVS\" conflicts with --gene".into(),
+            ));
+        }
+        return Ok(ResolvedVariantQuery {
+            gene: Some(gene),
+            hgvsp: hgvsp_flag,
+            hgvsc: Some(hgvsc),
+            consequence: consequence_flag,
+            condition: condition_flag,
+            ..Default::default()
+        });
+    }
+
+    if let Some((gene, consequence)) = parse_exon_deletion_phrase(&query) {
+        if gene_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional exon-deletion query conflicts with --gene".into(),
+            ));
+        }
+        if consequence_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional exon-deletion query conflicts with --consequence".into(),
+            ));
+        }
+        return Ok(ResolvedVariantQuery {
+            gene: Some(gene),
+            hgvsp: hgvsp_flag,
+            consequence: Some(consequence),
+            condition: condition_flag,
+            ..Default::default()
+        });
     }
 
     if condition_flag.is_some() {
@@ -1711,7 +1821,13 @@ fn resolve_variant_query(
             "Use either positional QUERY or --condition, not both".into(),
         ));
     }
-    Ok((gene_flag, hgvsp_flag, Some(query)))
+    Ok(ResolvedVariantQuery {
+        gene: gene_flag,
+        hgvsp: hgvsp_flag,
+        consequence: consequence_flag,
+        condition: Some(query),
+        ..Default::default()
+    })
 }
 
 async fn render_gene_card(
@@ -4166,21 +4282,23 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     limit,
                     offset,
                 } => {
-                    let (gene, hgvsp, condition) =
-                        resolve_variant_query(gene, hgvsp, condition, positional_query)?;
+                    let resolved =
+                        resolve_variant_query(gene, hgvsp, consequence, condition, positional_query)?;
                     let filters = crate::entities::variant::VariantSearchFilters {
-                        gene,
-                        hgvsp,
+                        gene: resolved.gene,
+                        hgvsp: resolved.hgvsp,
+                        hgvsc: resolved.hgvsc,
+                        rsid: resolved.rsid,
                         significance,
                         max_frequency,
                         min_cadd,
-                        consequence,
+                        consequence: resolved.consequence,
                         review_status,
                         population,
                         revel_min,
                         gerp_min,
                         tumor_site,
-                        condition,
+                        condition: resolved.condition,
                         impact,
                         lof,
                         has,
@@ -4994,40 +5112,77 @@ mod tests {
 
     #[test]
     fn resolve_variant_query_maps_single_token_to_gene() {
-        let (gene, hgvsp, condition) =
-            resolve_variant_query(None, None, None, vec!["BRAF".into()]).unwrap();
-        assert_eq!(gene.as_deref(), Some("BRAF"));
-        assert!(hgvsp.is_none());
-        assert!(condition.is_none());
+        let resolved = resolve_variant_query(None, None, None, None, vec!["BRAF".into()]).unwrap();
+        assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
+        assert!(resolved.hgvsp.is_none());
+        assert!(resolved.hgvsc.is_none());
+        assert!(resolved.rsid.is_none());
+        assert!(resolved.condition.is_none());
     }
 
     #[test]
     fn resolve_variant_query_maps_simple_gene_change_to_gene_and_hgvsp() {
-        let (gene, hgvsp, condition) =
-            resolve_variant_query(None, None, None, vec!["BRAF".into(), "V600E".into()]).unwrap();
-        assert_eq!(gene.as_deref(), Some("BRAF"));
-        assert_eq!(hgvsp.as_deref(), Some("V600E"));
-        assert!(condition.is_none());
+        let resolved =
+            resolve_variant_query(None, None, None, None, vec!["BRAF".into(), "V600E".into()])
+                .unwrap();
+        assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
+        assert_eq!(resolved.hgvsp.as_deref(), Some("V600E"));
+        assert!(resolved.hgvsc.is_none());
+        assert!(resolved.rsid.is_none());
+        assert!(resolved.condition.is_none());
     }
 
     #[test]
-    fn resolve_variant_query_maps_complex_text_to_condition() {
-        let (gene, hgvsp, condition) = resolve_variant_query(
+    fn resolve_variant_query_maps_rsid_to_rsid_filter() {
+        let resolved =
+            resolve_variant_query(None, None, None, None, vec!["rs113488022".into()]).unwrap();
+        assert_eq!(resolved.rsid.as_deref(), Some("rs113488022"));
+        assert!(resolved.gene.is_none());
+        assert!(resolved.hgvsp.is_none());
+        assert!(resolved.hgvsc.is_none());
+        assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_gene_hgvsc_text_to_gene_and_hgvsc() {
+        let resolved = resolve_variant_query(
+            None,
+            None,
+            None,
+            None,
+            vec!["BRAF".into(), "c.1799T>A".into()],
+        )
+        .unwrap();
+        assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
+        assert_eq!(resolved.hgvsc.as_deref(), Some("c.1799T>A"));
+        assert!(resolved.hgvsp.is_none());
+        assert!(resolved.rsid.is_none());
+        assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_exon_deletion_phrase_to_gene_and_consequence() {
+        let resolved = resolve_variant_query(
+            None,
             None,
             None,
             None,
             vec!["EGFR".into(), "Exon".into(), "19".into(), "Deletion".into()],
         )
         .unwrap();
-        assert!(gene.is_none());
-        assert!(hgvsp.is_none());
-        assert_eq!(condition.as_deref(), Some("EGFR Exon 19 Deletion"));
+        assert_eq!(resolved.gene.as_deref(), Some("EGFR"));
+        assert_eq!(resolved.consequence.as_deref(), Some("inframe_deletion"));
+        assert!(resolved.hgvsp.is_none());
+        assert!(resolved.hgvsc.is_none());
+        assert!(resolved.rsid.is_none());
+        assert!(resolved.condition.is_none());
     }
 
     #[test]
     fn resolve_variant_query_rejects_conflicts_with_positional_mapping() {
         let gene_conflict = resolve_variant_query(
             Some("TP53".into()),
+            None,
             None,
             None,
             vec!["BRAF".into(), "V600E".into()],
@@ -5039,21 +5194,23 @@ mod tests {
             None,
             Some("G12D".into()),
             None,
+            None,
             vec!["KRAS".into(), "G12C".into()],
         )
         .unwrap_err();
         assert!(format!("{hgvsp_conflict}").contains("conflicts with --hgvsp"));
 
-        let condition_conflict = resolve_variant_query(
+        let consequence_conflict = resolve_variant_query(
             None,
             None,
-            Some("lung cancer".into()),
+            Some("missense_variant".into()),
+            None,
             vec!["EGFR".into(), "Exon".into(), "19".into(), "Deletion".into()],
         )
         .unwrap_err();
         assert!(
-            format!("{condition_conflict}")
-                .contains("Use either positional QUERY or --condition, not both")
+            format!("{consequence_conflict}")
+                .contains("Positional exon-deletion query conflicts with --consequence")
         );
     }
 
