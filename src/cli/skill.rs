@@ -15,12 +15,13 @@ struct EmbeddedSkills;
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// List available BioMCP skill use-cases
+    /// Legacy compatibility command for the removed embedded skill catalog
+    #[command(hide = true)]
     List,
     /// Show a specific use-case by number or name
     #[command(external_subcommand)]
     Show(Vec<String>),
-    /// Install BioMCP skills to an agent directory
+    /// Install BioMCP skill guidance to an agent directory
     Install {
         /// Agent root or skills directory (e.g. ~/.claude, ~/.claude/skills, ~/.claude/skills/biomcp)
         dir: Option<String>,
@@ -50,7 +51,7 @@ fn embedded_text(path: &str) -> Result<String, BioMcpError> {
         return Err(BioMcpError::NotFound {
             entity: "skill".into(),
             id: path.to_string(),
-            suggestion: "Try: biomcp skill list".into(),
+            suggestion: "Try: biomcp skill".into(),
         });
     };
 
@@ -208,7 +209,7 @@ pub fn show_use_case(name: &str) -> Result<String, BioMcpError> {
         return Err(BioMcpError::NotFound {
             entity: "skill".into(),
             id: name.to_string(),
-            suggestion: "Try: biomcp skill list".into(),
+            suggestion: "Try: biomcp skill".into(),
         });
     };
 
@@ -647,6 +648,16 @@ mod tests {
         assert_eq!(list_use_cases()?, "No skills found");
         assert!(show_use_case("01").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn missing_skill_suggests_skill_overview() {
+        let err = show_use_case("01").expect_err("missing skill should error");
+        let msg = err.to_string();
+
+        assert!(msg.contains("skill '01' not found"));
+        assert!(msg.contains("Try: biomcp skill"));
+        assert!(!msg.contains("Try: biomcp skill list"));
     }
 
     #[test]

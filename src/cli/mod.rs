@@ -105,13 +105,11 @@ pub enum Commands {
         #[arg(long, default_value = "8080")]
         port: u16,
     },
-    /// Embedded BioMCP skills (use-cases) for agents
+    /// BioMCP skill overview and installer for agents
     #[command(after_help = "\
 EXAMPLES:
-  biomcp skill <name|number>
-  biomcp skill 03
-  biomcp skill variant-to-treatment
-  biomcp skill list")]
+  biomcp skill            # show skill overview
+  biomcp skill install    # install skill to your agent config")]
     Skill {
         #[command(subcommand)]
         command: Option<skill::SkillCommand>,
@@ -4761,7 +4759,7 @@ mod tests {
         resolve_variant_query, should_try_pathway_trial_fallback, trial_locations_json,
         trial_search_query_summary, truncate_article_annotations,
     };
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     #[test]
     fn extract_json_from_sections_detects_trailing_long_flag() {
@@ -4785,6 +4783,26 @@ mod tests {
         let (cleaned, json_override) = extract_json_from_sections(&sections);
         assert_eq!(cleaned, sections);
         assert!(!json_override);
+    }
+
+    #[test]
+    fn skill_help_examples_match_installed_surface() {
+        let mut command = Cli::command();
+        let skill = command
+            .find_subcommand_mut("skill")
+            .expect("skill subcommand should exist");
+        let mut help = Vec::new();
+        skill
+            .write_long_help(&mut help)
+            .expect("skill help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("biomcp skill            # show skill overview"));
+        assert!(help.contains("biomcp skill install    # install skill to your agent config"));
+        assert!(!help.contains("biomcp skill list"));
+        assert!(!help.contains("biomcp skill 03"));
+        assert!(!help.contains("variant-to-treatment"));
+        assert!(!help.contains("Commands:\n  list"));
     }
 
     #[test]

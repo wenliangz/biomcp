@@ -26,7 +26,7 @@ Numeric addressing previously selected embedded use-cases. With the catalog remo
 ```bash
 out="$(biomcp skill 01 2>&1 || true)"
 echo "$out" | mustmatch like "skill '01' not found"
-echo "$out" | mustmatch like "Try: biomcp skill list"
+echo "$out" | mustmatch like "Try: biomcp skill"
 ```
 
 ## Viewing a Skill by Slug
@@ -36,7 +36,7 @@ Slug addressing for legacy use-cases should also fail with a clear not-found mes
 ```bash
 out="$(biomcp skill variant-to-treatment 2>&1 || true)"
 echo "$out" | mustmatch like "skill 'variant-to-treatment' not found"
-echo "$out" | mustmatch like "Try: biomcp skill list"
+echo "$out" | mustmatch like "Try: biomcp skill"
 ```
 
 ## Workflow Step: Variant Interpretation
