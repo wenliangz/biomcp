@@ -1,41 +1,27 @@
 use crate::error::BioMcpError;
 
 const LIST_REFERENCE: &str = include_str!("list_reference.md");
-const SKILLS_TIP: &str =
-    "Use skills to find out more about how to use BioMCP and for a variety of different use cases.";
-
-fn with_skills_tip(mut content: String) -> String {
-    content.push_str("\n## Skills\n\n");
-    content.push_str(SKILLS_TIP);
-    content.push('\n');
-    content.push_str(
-        "Run `biomcp skill list` to browse, or `biomcp skill <name-or-number>` to open one.\n",
-    );
-    content
-}
 
 pub fn render(entity: Option<&str>) -> Result<String, BioMcpError> {
     match entity.map(str::trim).filter(|v| !v.is_empty()) {
         None => Ok(list_all()),
         Some(raw) => match raw.to_ascii_lowercase().as_str() {
-            "gene" => Ok(with_skills_tip(list_gene())),
-            "variant" => Ok(with_skills_tip(list_variant())),
-            "article" => Ok(with_skills_tip(list_article())),
-            "trial" => Ok(with_skills_tip(list_trial())),
-            "drug" => Ok(with_skills_tip(list_drug())),
-            "disease" => Ok(with_skills_tip(list_disease())),
-            "phenotype" => Ok(with_skills_tip(list_phenotype())),
-            "pgx" => Ok(with_skills_tip(list_pgx())),
-            "gwas" => Ok(with_skills_tip(list_gwas())),
-            "pathway" => Ok(with_skills_tip(list_pathway())),
-            "protein" => Ok(with_skills_tip(list_protein())),
-            "study" => Ok(with_skills_tip(list_study())),
-            "adverse-event" | "adverse_event" | "adverseevent" => {
-                Ok(with_skills_tip(list_adverse_event()))
-            }
-            "search-all" | "search_all" | "searchall" => Ok(with_skills_tip(list_search_all())),
-            "batch" => Ok(with_skills_tip(list_batch())),
-            "enrich" => Ok(with_skills_tip(list_enrich())),
+            "gene" => Ok(list_gene()),
+            "variant" => Ok(list_variant()),
+            "article" => Ok(list_article()),
+            "trial" => Ok(list_trial()),
+            "drug" => Ok(list_drug()),
+            "disease" => Ok(list_disease()),
+            "phenotype" => Ok(list_phenotype()),
+            "pgx" => Ok(list_pgx()),
+            "gwas" => Ok(list_gwas()),
+            "pathway" => Ok(list_pathway()),
+            "protein" => Ok(list_protein()),
+            "study" => Ok(list_study()),
+            "adverse-event" | "adverse_event" | "adverseevent" => Ok(list_adverse_event()),
+            "search-all" | "search_all" | "searchall" => Ok(list_search_all()),
+            "batch" => Ok(list_batch()),
+            "enrich" => Ok(list_enrich()),
             "skill" | "skills" => Ok(crate::cli::skill::list_use_cases()?),
             other => Err(BioMcpError::InvalidArgument(format!(
                 "Unknown entity: {other}\n\nValid entities:\n- gene\n- variant\n- article\n- trial\n- drug\n- disease\n- phenotype\n- pgx\n- gwas\n- pathway\n- protein\n- study\n- adverse-event\n- search-all\n- batch\n- enrich\n- skill"
@@ -102,11 +88,6 @@ fn list_gene() -> String {
 - `gene drugs <symbol>`
 - `gene articles <symbol>`
 - `gene pathways <symbol> --limit <N> --offset <N>`
-
-## Recommended skills
-
-- `biomcp skill 09` - gene-function-lookup workflow
-- `biomcp skill 01` - variant triage from a gene anchor
 "#
     .to_string()
 }
@@ -169,11 +150,6 @@ Supported formats:
 
 - `variant trials <id> --source <ctgov|nci> --limit <N> --offset <N>`
 - `variant articles <id>`
-
-## Recommended skills
-
-- `biomcp skill 01` - variant evidence triage
-- `biomcp skill 03` - variant-to-treatment pathway
 "#
     .to_string();
 
@@ -294,11 +270,6 @@ fn list_drug() -> String {
 
 - `drug trials <name>`
 - `drug adverse-events <name>`
-
-## Recommended skills
-
-- `biomcp skill 02` - drug-investigation workflow
-- `biomcp skill 06` - safety and label deep-dive
 "#
     .to_string()
 }
@@ -663,9 +634,28 @@ mod tests {
     fn list_root_includes_quickstart_and_skills_tip() {
         let out = render(None).expect("list root should render");
         assert!(out.contains("## Quickstart"));
-        assert!(out.contains(
-            "Use skills to find out more about how to use BioMCP and for a variety of different use cases."
-        ));
+        assert!(out.contains("`skill install` - install BioMCP skill guidance to your agent"));
+        assert!(!out.contains("`skill list`"));
+        assert!(!out.contains("Run `biomcp skill list` to browse all skills."));
+    }
+
+    #[test]
+    fn list_entity_pages_drop_stale_skill_sections() {
+        for entity in ["gene", "variant", "drug"] {
+            let out = render(Some(entity)).expect("entity page should render");
+            assert!(
+                !out.contains("## Recommended skills"),
+                "{entity} page should not advertise removed use-case skills"
+            );
+            assert!(
+                !out.contains("## Skills"),
+                "{entity} page should not append the generic skills section"
+            );
+            assert!(
+                !out.contains("biomcp skill "),
+                "{entity} page should not reference stale skill commands"
+            );
+        }
     }
 
     #[test]
