@@ -268,6 +268,20 @@ fn normalize_disease_text(value: &str) -> String {
     out.trim().to_string()
 }
 
+fn disease_exact_rank(name: &str, query: &str) -> u8 {
+    let name = name.trim().to_ascii_lowercase();
+    let query = query.trim().to_ascii_lowercase();
+    if name == query {
+        3
+    } else if name.starts_with(&query) {
+        2
+    } else if name.contains(&query) {
+        1
+    } else {
+        0
+    }
+}
+
 fn has_subtype_marker(value: &str) -> bool {
     let normalized = normalize_disease_text(value);
     if normalized.is_empty() {
@@ -1318,11 +1332,17 @@ pub async fn search_page(
         .filter(|v| !v.is_empty());
 
     let client = MyDiseaseClient::new()?;
+    let needed = limit.saturating_add(offset).max(limit);
+    let fetch_size = if needed >= 50 {
+        needed
+    } else {
+        (needed.saturating_mul(5)).clamp(needed, 50)
+    };
     let resp = client
         .query(
             query,
-            limit,
-            offset,
+            fetch_size,
+            0,
             filters.source.as_deref(),
             inheritance,
             phenotype,
@@ -1334,22 +1354,31 @@ pub async fn search_page(
         .as_deref()
         .map(str::trim)
         .is_some_and(|s| s.eq_ignore_ascii_case("doid"));
+    let mut ranked = resp
+        .hits
+        .iter()
+        .enumerate()
+        .filter(|(_, hit)| {
+            inheritance.is_none_or(|value| inheritance_matches(hit, value))
+                && phenotype.is_none_or(|value| phenotype_matches(hit, value))
+                && onset.is_none_or(|value| onset_matches(hit, value))
+        })
+        .map(|(idx, hit)| {
+            let mut row = transform::disease::from_mydisease_search_hit(hit);
+            if prefer_doid && let Some(doid) = transform::disease::doid_from_mydisease_hit(hit) {
+                row.id = doid;
+            }
+            (disease_exact_rank(&row.name, query), idx, row)
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
     Ok(SearchPage::offset(
-        resp.hits
-            .iter()
-            .filter(|hit| {
-                inheritance.is_none_or(|value| inheritance_matches(hit, value))
-                    && phenotype.is_none_or(|value| phenotype_matches(hit, value))
-                    && onset.is_none_or(|value| onset_matches(hit, value))
-            })
-            .map(|hit| {
-                let mut row = transform::disease::from_mydisease_search_hit(hit);
-                if prefer_doid && let Some(doid) = transform::disease::doid_from_mydisease_hit(hit)
-                {
-                    row.id = doid;
-                }
-                row
-            })
+        ranked
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(_, _, row)| row)
             .collect(),
         Some(resp.total),
     ))
@@ -1603,6 +1632,18 @@ mod tests {
         let broad = disease_candidate_score("breast cancer", "breast carcinoma");
         let subtype = disease_candidate_score("breast cancer", "sporadic breast carcinoma");
         assert!(broad > subtype);
+    }
+
+    #[test]
+    fn disease_exact_rank_prefers_exact_then_prefix_then_contains() {
+        assert!(
+            disease_exact_rank("colorectal cancer", "colorectal cancer")
+                > disease_exact_rank("colorectal cancer syndrome", "colorectal cancer")
+        );
+        assert!(
+            disease_exact_rank("colorectal cancer syndrome", "colorectal cancer")
+                > disease_exact_rank("metastatic colorectal cancer", "colorectal cancer")
+        );
     }
 
     #[test]

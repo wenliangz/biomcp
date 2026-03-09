@@ -501,6 +501,26 @@ pub async fn search_page(
         }
     }
 
+    if out.is_empty()
+        && filters.target.is_none()
+        && filters.indication.is_none()
+        && filters.mechanism.is_none()
+        && filters.drug_type.is_none()
+        && filters.atc.is_none()
+        && filters.pharm_class.is_none()
+        && filters.interactions.is_none()
+        && let Some(query) = filters
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        && let Ok(client) = OpenFdaClient::new()
+        && let Ok(Some(label_response)) = client.label_search(query).await
+        && let Some(row) = search_result_from_openfda_label_response(&label_response)
+    {
+        out.push(row);
+    }
+
     Ok(SearchPage::offset(out, Some(resp.total)))
 }
 
@@ -760,6 +780,24 @@ fn extract_openfda_values(label_response: &serde_json::Value, key: &str) -> Vec<
         }
     }
     out
+}
+
+fn search_result_from_openfda_label_response(
+    label_response: &serde_json::Value,
+) -> Option<DrugSearchResult> {
+    let generic_names = extract_openfda_values(label_response, "generic_name");
+    let brand_names = extract_openfda_values(label_response, "brand_name");
+    let name = generic_names
+        .first()
+        .cloned()
+        .or_else(|| brand_names.first().cloned())?;
+    Some(DrugSearchResult {
+        name: name.trim().to_ascii_lowercase(),
+        drugbank_id: None,
+        drug_type: None,
+        mechanism: None,
+        target: None,
+    })
 }
 
 fn normalize_route(route: &str) -> String {
@@ -1435,6 +1473,21 @@ mod tests {
         let q = build_mychem_query(&filters).unwrap();
         assert!(q.contains(r"EGFR\:inhibitor"));
         assert!(q.contains(r"\(3rd\-gen\)"));
+    }
+
+    #[test]
+    fn search_result_from_openfda_label_response_prefers_generic_name() {
+        let response = serde_json::json!({
+            "results": [{
+                "openfda": {
+                    "brand_name": ["Keytruda"],
+                    "generic_name": ["Pembrolizumab"]
+                }
+            }]
+        });
+
+        let row = search_result_from_openfda_label_response(&response).expect("row");
+        assert_eq!(row.name, "pembrolizumab");
     }
 
     #[test]

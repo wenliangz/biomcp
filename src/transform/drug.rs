@@ -67,9 +67,19 @@ fn unii_id(hit: &MyChemHit) -> Option<&str> {
     hit.unii.as_ref().and_then(|u| u.unii())
 }
 
+fn openfda_generic_name(hit: &MyChemHit) -> Option<&str> {
+    hit.openfda.as_ref().and_then(|o| o.generic_name.first())
+}
+
+fn openfda_brand_name(hit: &MyChemHit) -> Option<&str> {
+    hit.openfda.as_ref().and_then(|o| o.brand_name.first())
+}
+
 fn best_name_from_hit(hit: &MyChemHit) -> Option<String> {
-    let candidates: [Option<&str>; 6] = [
+    let candidates: [Option<&str>; 8] = [
         ndc_nonproprietaryname(hit),
+        openfda_generic_name(hit),
+        openfda_brand_name(hit),
         hit.drugbank.as_ref().and_then(|d| d.name.as_deref()),
         hit.chembl.as_ref().and_then(|c| c.pref_name.as_deref()),
         hit.gtopdb.as_ref().and_then(|g| g.name.as_deref()),
@@ -88,6 +98,12 @@ fn best_name_from_hit(hit: &MyChemHit) -> Option<String> {
 fn hit_all_names(hit: &MyChemHit) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     if let Some(v) = ndc_nonproprietaryname(hit) {
+        out.push(normalize_name(v));
+    }
+    if let Some(v) = openfda_generic_name(hit) {
+        out.push(normalize_name(v));
+    }
+    if let Some(v) = openfda_brand_name(hit) {
         out.push(normalize_name(v));
     }
     if let Some(v) = hit.drugbank.as_ref().and_then(|d| d.name.as_deref()) {
@@ -716,5 +732,46 @@ mod tests {
                 .as_deref()
                 .is_some_and(|v| v.to_ascii_lowercase().contains("inhibitor"))
         );
+    }
+
+    #[test]
+    fn from_mychem_search_hit_uses_openfda_names_when_other_sources_are_missing() {
+        let hit: MyChemHit = serde_json::from_value(serde_json::json!({
+            "_id": "openfda-only",
+            "_score": 42.0,
+            "openfda": {
+                "brand_name": "Keytruda",
+                "generic_name": "pembrolizumab"
+            }
+        }))
+        .expect("valid openfda-only hit");
+
+        let row = from_mychem_search_hit(&hit).expect("openfda names should produce a row");
+        assert_eq!(row.name, "pembrolizumab");
+    }
+
+    #[test]
+    fn select_hits_for_name_matches_openfda_brand_name() {
+        let keytruda: MyChemHit = serde_json::from_value(serde_json::json!({
+            "_id": "brand-hit",
+            "_score": 10.0,
+            "openfda": {
+                "brand_name": "Keytruda",
+                "generic_name": "pembrolizumab"
+            }
+        }))
+        .expect("valid brand hit");
+
+        let unrelated: MyChemHit = serde_json::from_value(serde_json::json!({
+            "_id": "other-hit",
+            "_score": 1.0,
+            "drugbank": {"name": "nivolumab"}
+        }))
+        .expect("valid unrelated hit");
+
+        let hits = [keytruda, unrelated];
+        let selected = select_hits_for_name(&hits, "keytruda");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "brand-hit");
     }
 }

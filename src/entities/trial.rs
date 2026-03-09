@@ -558,7 +558,7 @@ fn normalize_sponsor_type(value: &str) -> Result<&'static str, BioMcpError> {
     }
 }
 
-fn normalize_phase(value: &str) -> Result<String, BioMcpError> {
+fn normalize_phase(value: &str) -> Result<Vec<String>, BioMcpError> {
     let v = value.trim();
     if v.is_empty() {
         return Err(BioMcpError::InvalidArgument(
@@ -571,33 +571,33 @@ fn normalize_phase(value: &str) -> Result<String, BioMcpError> {
         .filter(|c| !c.is_ascii_whitespace())
         .collect::<String>()
         .to_ascii_uppercase();
-    if matches!(
-        compact.as_str(),
-        "1/2" | "EARLY_PHASE1" | "EARLYPHASE1" | "EARLY1"
-    ) {
-        return Ok("EARLY_PHASE1".to_string());
+    if compact == "1/2" {
+        return Ok(vec!["PHASE1".to_string(), "PHASE2".to_string()]);
+    }
+    if matches!(compact.as_str(), "EARLY_PHASE1" | "EARLYPHASE1" | "EARLY1") {
+        return Ok(vec!["EARLY_PHASE1".to_string()]);
     }
     if matches!(compact.as_str(), "NA" | "N/A") {
-        return Ok("NA".to_string());
+        return Ok(vec!["NA".to_string()]);
     }
     if compact.chars().all(|c| c.is_ascii_digit()) {
         return match compact.as_str() {
-            "1" => Ok("PHASE1".to_string()),
-            "2" => Ok("PHASE2".to_string()),
-            "3" => Ok("PHASE3".to_string()),
-            "4" => Ok("PHASE4".to_string()),
+            "1" => Ok(vec!["PHASE1".to_string()]),
+            "2" => Ok(vec!["PHASE2".to_string()]),
+            "3" => Ok(vec!["PHASE3".to_string()]),
+            "4" => Ok(vec!["PHASE4".to_string()]),
             _ => Err(invalid_phase_error(v)),
         };
     }
 
     let key = normalize_enum_key(v);
     match key.as_str() {
-        "PHASE1" => Ok("PHASE1".to_string()),
-        "PHASE2" => Ok("PHASE2".to_string()),
-        "PHASE3" => Ok("PHASE3".to_string()),
-        "PHASE4" => Ok("PHASE4".to_string()),
-        "EARLY_PHASE1" | "EARLY1" => Ok("EARLY_PHASE1".to_string()),
-        "NA" => Ok("NA".to_string()),
+        "PHASE1" => Ok(vec!["PHASE1".to_string()]),
+        "PHASE2" => Ok(vec!["PHASE2".to_string()]),
+        "PHASE3" => Ok(vec!["PHASE3".to_string()]),
+        "PHASE4" => Ok(vec!["PHASE4".to_string()]),
+        "EARLY_PHASE1" | "EARLY1" => Ok(vec!["EARLY_PHASE1".to_string()]),
+        "NA" => Ok(vec!["NA".to_string()]),
         _ => Err(invalid_phase_error(v)),
     }
 }
@@ -612,7 +612,9 @@ fn normalized_status_filter(filters: &TrialSearchFilters) -> Result<Option<Strin
         .transpose()
 }
 
-fn normalized_phase_filter(filters: &TrialSearchFilters) -> Result<Option<String>, BioMcpError> {
+fn normalized_phase_filter(
+    filters: &TrialSearchFilters,
+) -> Result<Option<Vec<String>>, BioMcpError> {
     filters
         .phase
         .as_deref()
@@ -620,6 +622,12 @@ fn normalized_phase_filter(filters: &TrialSearchFilters) -> Result<Option<String
         .filter(|v| !v.is_empty())
         .map(normalize_phase)
         .transpose()
+}
+
+fn normalize_intervention_query(value: &str) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"([A-Za-z]{2,})\s+(\d{2,})").expect("valid regex"));
+    re.replace_all(value.trim(), "$1-$2").into_owned()
 }
 
 fn normalized_facility_filter(filters: &TrialSearchFilters) -> Option<String> {
@@ -1135,12 +1143,21 @@ fn normalize_nct_id(value: &str) -> String {
 
 fn ctgov_query_term(
     filters: &TrialSearchFilters,
-    normalized_phase: Option<&str>,
+    normalized_phase: Option<&[String]>,
 ) -> Result<Option<String>, BioMcpError> {
     let mut terms: Vec<String> = Vec::new();
 
-    if let Some(phase) = normalized_phase {
-        terms.push(format!("AREA[Phase]{phase}"));
+    if let Some(phases) = normalized_phase {
+        if phases.len() == 1 {
+            terms.push(format!("AREA[Phase]{}", phases[0]));
+        } else if !phases.is_empty() {
+            let inner = phases
+                .iter()
+                .map(|phase| format!("AREA[Phase]{phase}"))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            terms.push(format!("({inner})"));
+        }
     }
     if let Some(sponsor) = filters
         .sponsor
@@ -1454,7 +1471,10 @@ pub async fn search_page(
                 let resp = client
                     .search(&CtGovSearchParams {
                         condition: filters.condition.clone(),
-                        intervention: filters.intervention.clone(),
+                        intervention: filters
+                            .intervention
+                            .as_deref()
+                            .map(normalize_intervention_query),
                         facility: facility.clone(),
                         status: normalized_status.clone(),
                         agg_filters: agg_filters.clone(),
@@ -1572,7 +1592,7 @@ pub async fn search_page(
                 interventions: filters.intervention.clone(),
                 sites_org_name: normalized_facility_filter(filters),
                 recruitment_status: normalized_status,
-                phase: normalized_phase,
+                phase: normalized_phase.and_then(|phases| phases.into_iter().next()),
                 latitude: filters.lat,
                 longitude: filters.lon,
                 distance: filters.distance,
@@ -1972,12 +1992,24 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
 
     #[test]
     fn normalize_phase_accepts_aliases() {
-        assert_eq!(normalize_phase("1").unwrap(), "PHASE1");
-        assert_eq!(normalize_phase("PHASE2").unwrap(), "PHASE2");
-        assert_eq!(normalize_phase("1/2").unwrap(), "EARLY_PHASE1");
-        assert_eq!(normalize_phase("early_phase1").unwrap(), "EARLY_PHASE1");
-        assert_eq!(normalize_phase("early1").unwrap(), "EARLY_PHASE1");
-        assert_eq!(normalize_phase("n/a").unwrap(), "NA");
+        assert_eq!(normalize_phase("1").unwrap(), vec!["PHASE1".to_string()]);
+        assert_eq!(
+            normalize_phase("PHASE2").unwrap(),
+            vec!["PHASE2".to_string()]
+        );
+        assert_eq!(
+            normalize_phase("1/2").unwrap(),
+            vec!["PHASE1".to_string(), "PHASE2".to_string()]
+        );
+        assert_eq!(
+            normalize_phase("early_phase1").unwrap(),
+            vec!["EARLY_PHASE1".to_string()]
+        );
+        assert_eq!(
+            normalize_phase("early1").unwrap(),
+            vec!["EARLY_PHASE1".to_string()]
+        );
+        assert_eq!(normalize_phase("n/a").unwrap(), vec!["NA".to_string()]);
     }
 
     #[test]
@@ -1986,6 +2018,36 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
         let msg = err.to_string();
         assert!(msg.contains("Unrecognized --phase value"));
         assert!(msg.contains("EARLY_PHASE1"));
+    }
+
+    #[test]
+    fn ctgov_query_term_joins_multi_phase_filters_with_and() {
+        let filters = TrialSearchFilters {
+            condition: Some("melanoma".into()),
+            ..Default::default()
+        };
+
+        let query = ctgov_query_term(&filters, Some(&["PHASE1".into(), "PHASE2".into()]))
+            .expect("query term should build")
+            .expect("query term should not be empty");
+        assert!(query.contains("(AREA[Phase]PHASE1 AND AREA[Phase]PHASE2)"));
+    }
+
+    #[test]
+    fn normalize_intervention_query_canonicalizes_confirmed_drug_code_pattern() {
+        assert_eq!(normalize_intervention_query("HRS 4642"), "HRS-4642");
+    }
+
+    #[test]
+    fn normalize_intervention_query_preserves_generic_multiword_names() {
+        assert_eq!(
+            normalize_intervention_query("pembrolizumab"),
+            "pembrolizumab"
+        );
+        assert_eq!(
+            normalize_intervention_query("immune checkpoint inhibitor"),
+            "immune checkpoint inhibitor"
+        );
     }
 
     #[test]

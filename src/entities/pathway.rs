@@ -195,6 +195,17 @@ fn extract_gene_symbols(lines: &[String], limit: usize) -> Vec<String> {
     out
 }
 
+fn normalize_pathway_query(query: &str) -> String {
+    let normalized = query.trim().to_ascii_lowercase().replace(['-', '_'], " ");
+
+    match normalized.as_str() {
+        "mitogen activated protein kinase" | "mapk pathway" | "mapk signaling" => {
+            "MAPK".to_string()
+        }
+        _ => query.trim().to_string(),
+    }
+}
+
 pub fn search_query_summary(filters: &PathwaySearchFilters) -> String {
     let mut parts = Vec::new();
     if let Some(query) = filters
@@ -261,8 +272,9 @@ pub async fn search_with_filters(
         ));
     }
 
+    let effective_query = normalize_pathway_query(query.unwrap_or_default());
     let (hits, total) = client
-        .search_pathways(query.unwrap_or_default(), limit.clamp(1, 25))
+        .search_pathways(&effective_query, limit.clamp(1, 25))
         .await?;
     Ok((
         hits.into_iter()
@@ -383,5 +395,18 @@ mod tests {
         assert!(!looks_like_gene_symbol("V600E"));
         assert!(!looks_like_gene_symbol("S338"));
         assert!(looks_like_gene_symbol("MAP2K1"));
+    }
+
+    #[test]
+    fn normalize_pathway_query_maps_confirmed_mapk_aliases() {
+        assert_eq!(
+            normalize_pathway_query("mitogen activated protein kinase"),
+            "MAPK"
+        );
+        assert_eq!(normalize_pathway_query("mapk signaling"), "MAPK");
+        assert_eq!(
+            normalize_pathway_query("oxidative phosphorylation"),
+            "oxidative phosphorylation"
+        );
     }
 }

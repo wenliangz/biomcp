@@ -218,7 +218,8 @@ fn looks_like_symbol(query: &str) -> bool {
 
 fn mygene_query_term(query: &str) -> String {
     if looks_like_symbol(query) {
-        format!("symbol:{query}")
+        let escaped = MyGeneClient::escape_query_value(query);
+        format!("(symbol:{escaped} OR alias:{escaped})")
     } else {
         MyGeneClient::escape_query_value(query)
     }
@@ -1167,6 +1168,12 @@ mod tests {
     fn mygene_query_term_escapes_free_text_special_chars() {
         assert_eq!(mygene_query_term("BRAF:V600E"), r"BRAF\:V600E");
         assert_eq!(mygene_query_term("ALK (fusion)"), r"ALK \(fusion\)");
+    }
+
+    #[test]
+    fn mygene_query_term_searches_aliases_for_symbol_like_input() {
+        assert_eq!(mygene_query_term("ERBB1"), "(symbol:ERBB1 OR alias:ERBB1)");
+        assert_eq!(mygene_query_term("P53"), "(symbol:P53 OR alias:P53)");
     }
 
     #[test]
