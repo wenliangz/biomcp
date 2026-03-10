@@ -5,7 +5,18 @@ One command grammar, compact markdown output, 12 entities across 15+ data source
 
 ## Install
 
-### Binary install (recommended)
+### PyPI tool install
+
+```bash
+uv tool install biomcp-cli
+# or, inside an active Python environment:
+# pip install biomcp-cli
+```
+
+Install the `biomcp-cli` package, then use `biomcp` for the commands shown
+throughout the docs.
+
+### Binary install
 
 ```bash
 curl -fsSL https://biomcp.org/install.sh | bash
