@@ -132,7 +132,10 @@ export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction
 
 ## Skills
 
-14 guided investigation workflows are built in. See [Skills](getting-started/skills.md) for details.
+BioMCP ships an embedded guide for agent workflows rather than a built-in
+catalog. Read it with `biomcp skill`, install it with
+`biomcp skill install ~/.claude --force`, and see
+[Skills](getting-started/skills.md) for the current workflow and legacy notes.
 
 ## Documentation
 

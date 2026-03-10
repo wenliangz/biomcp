@@ -1,64 +1,53 @@
-# Skills (Embedded Use Cases)
+# Skills
 
-BioMCP bundles reusable workflow documents as embedded skills.
-
-Skills are available to both CLI users and MCP clients via resources.
-
-## List skills
+BioMCP ships one embedded guide plus supporting reference files for agent
+workflows. The current workflow is:
 
 ```bash
 biomcp skill
-biomcp skill list
+biomcp skill install ~/.claude
 ```
 
-## Open a specific skill
+## Read the guide
 
-By number:
-
-```bash
-biomcp skill 01
-```
-
-By slug:
-
-```bash
-biomcp skill variant-to-treatment
-```
+`biomcp skill` prints the embedded `skills/SKILL.md` overview. Start there if
+you want the current BioMCP workflow guidance without installing anything into
+an agent directory.
 
 ## Install into an agent directory
+
+Install the embedded `skills/` tree into your agent directory:
 
 ```bash
 biomcp skill install ~/.claude
 ```
 
-Force replace existing files:
+Force replacement of an existing install:
 
 ```bash
 biomcp skill install ~/.claude --force
 ```
 
-When no directory is provided, BioMCP attempts supported agent-directory detection.
+The `dir` argument can point at an agent root such as `~/.claude`, an existing
+`skills/` directory, or a `skills/biomcp/` directory. When you omit `dir`,
+BioMCP attempts supported agent-directory detection in your home directory and
+the current working tree, then prompts before installing when stdin is a TTY.
 
-## Skill topics included
+## Install payload
 
-| # | Slug | Focus |
-|---|------|-------|
-| 01 | `variant-to-treatment` | Variant to treatment/evidence workflow |
-| 02 | `drug-investigation` | Drug mechanism, safety, alternatives |
-| 03 | `trial-searching` | Trial discovery + patient matching |
-| 04 | `rare-disease` | Rare disease evidence and trial strategy |
-| 05 | `drug-shortages` | Shortage monitoring and alternatives |
-| 06 | `advanced-therapies` | CAR-T/checkpoint therapy workflows |
-| 07 | `hereditary-cancer` | Hereditary syndrome workflows |
-| 08 | `resistance` | Resistance and next-line options |
-| 09 | `gene-function-lookup` | Gene-centric function and context lookup |
-| 10 | `gene-set-analysis` | Enrichment + pathway + interaction synthesis |
-| 11 | `literature-synthesis` | Evidence synthesis with cross-entity checks |
-| 12 | `pharmacogenomics` | PGx gene-drug interactions and dosing |
-| 13 | `phenotype-triage` | Symptom-first rare disease workup |
-| 14 | `protein-pathway` | Protein structure and pathway deep dive |
+Current builds install the full embedded reference tree into
+`<agent>/skills/biomcp/`, including:
 
-## Relationship to MCP resources
+- `SKILL.md`
+- `jq-examples.md`
+- `examples/`
+- `schemas/`
 
-The same use cases are readable through `resources/list` and `resources/read` with
-`biomcp://skill/<slug>` URIs.
+## Legacy compatibility note
+
+`biomcp skill list` remains as a legacy compatibility alias and currently prints
+`No skills found`.
+
+Numeric and slug lookups are also legacy compatibility paths. Commands such as
+`biomcp skill 03` and `biomcp skill variant-to-treatment` currently fail with a
+clear not-found message and suggest `biomcp skill`.

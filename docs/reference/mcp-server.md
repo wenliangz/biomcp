@@ -1,7 +1,8 @@
 # MCP Server Reference
 
-BioMCP exposes one execution tool (`shell`) and a curated resource catalog for agent guidance.
-This page documents the stable MCP contract and executes lightweight checks against the source tree.
+BioMCP exposes one execution tool (`shell`) and a current resource inventory
+centered on the help guide. This page documents the stable MCP contract and
+executes lightweight checks against the source tree.
 
 ## Capability Advertisement
 
@@ -23,32 +24,33 @@ assert "enable_resources()" in shell
 
 ## Resource Catalog
 
-BioMCP publishes a help resource plus one markdown resource per registered skill use-case.
+Current builds always publish the help resource:
 
-| URI | Name |
-|-----|------|
-| `biomcp://help` | BioMCP Overview |
-| `biomcp://skill/<slug>` | Pattern: `<title>` |
+| URI | Name | Notes |
+|-----|------|-------|
+| `biomcp://help` | BioMCP Overview | Always listed |
+
+No `biomcp://skill/<slug>` resources are currently listed because the embedded
+`skills/` tree ships no `use-cases/*.md` files.
 
 ```python
-import re
 from pathlib import Path
 
 repo_root = Path.cwd()
 shell = (repo_root / "src/mcp/shell.rs").read_text()
+use_cases_dir = repo_root / "skills" / "use-cases"
 assert "RESOURCE_HELP_URI" in shell
 assert 'uri: RESOURCE_HELP_URI.to_string()' in shell
 assert 'name: "BioMCP Overview".to_string()' in shell
 assert "list_use_case_refs()" in shell
-assert 'format!("biomcp://skill/{}", skill.slug)' in shell
-assert 'name = if title.to_ascii_lowercase().starts_with("pattern:")' in shell
-assert len(set(re.findall(r"biomcp://[a-z0-9/-]+", shell))) >= 2
+assert not use_cases_dir.exists() or list(use_cases_dir.glob("*.md")) == []
 ```
 
 ## Resource Read Mapping
 
 - `biomcp://help` maps to `show_overview()`.
-- Skill URIs map to `show_use_case(<slug>)`.
+- Compatibility reads for `biomcp://skill/<slug>` map to `show_use_case(<slug>)`
+  when an embedded use-case exists.
 - All successful reads return `text/markdown`.
 
 ```python
@@ -86,7 +88,7 @@ These tests run a real `biomcp serve` session over stdio and validate:
 
 - initialize handshake,
 - tools inventory,
-- resource inventory,
+- current resource inventory,
 - resource reads,
 - invalid URI error semantics.
 
