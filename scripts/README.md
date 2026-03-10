@@ -1,14 +1,15 @@
 # Source Contract Checks
 
-This folder tracks API contract probes for the 091 expansion scope.
-Each source has three probes:
+This folder is the current BioMCP operator command layer for source-facing contract probes, smoke helpers, and paper-style demo flows.
+
+Each source-facing contract probe has three checks:
 
 - happy path: known-good request that should return useful data
 - edge path: valid request expected to be empty or low-signal
 - invalid path: intentionally bad request expected to fail clearly
 
-These checks are intentionally lightweight and source-facing.
-They are not a replacement for unit tests or VV docs.
+These checks are intentionally lightweight and source-facing. They are not a
+replacement for unit tests, repo docs, or verification notes.
 
 ## Files
 
@@ -21,7 +22,8 @@ They are not a replacement for unit tests or VV docs.
 
 ```bash
 cd biomcp
-./scripts/contract-smoke.sh
+./scripts/contract-smoke.sh --fast
 ```
 
-The script exits non-zero if one or more probes do not match expected HTTP behavior.
+Use `RUN.md` for the release-binary runbook and
+`analysis/technical/staging-demo.md` for the promotion contract.

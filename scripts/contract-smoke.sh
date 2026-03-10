@@ -33,6 +33,7 @@ done
 CURL_BASE=(curl -sS -L --max-time 40)
 PASS=0
 FAIL=0
+ONCOKB_TOKEN_VALUE="${ONCOKB_TOKEN:-${ONCOKB_API_TOKEN:-}}"
 
 probe_get() {
   local name="$1"
@@ -208,10 +209,10 @@ else
   probe_get "OncoKB demo TP53 R175H" '^200$' '"hugoSymbol":"TP53".*"oncogenic":"Oncogenic"' "https://demo.oncokb.org/api/v1/annotate/mutations/byProteinChange?hugoSymbol=TP53&alteration=R175H"
 fi
 
-if [[ -n "${ONCOKB_API_TOKEN:-}" ]]; then
+if [[ -n "$ONCOKB_TOKEN_VALUE" ]]; then
   local_tmp=$(mktemp)
   code=$(
-    "${CURL_BASE[@]}" -H "Authorization: Bearer $ONCOKB_API_TOKEN" \
+    "${CURL_BASE[@]}" -H "Authorization: Bearer $ONCOKB_TOKEN_VALUE" \
       -o "$local_tmp" -w "%{http_code}" \
       "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange?hugoSymbol=BRAF&alteration=V600E" || true
   )
@@ -225,7 +226,7 @@ if [[ -n "${ONCOKB_API_TOKEN:-}" ]]; then
     FAIL=$((FAIL + 1))
   fi
 else
-  echo "[SKIP] OncoKB probes (set ONCOKB_API_TOKEN to enable)"
+  echo "[SKIP] OncoKB probes (set ONCOKB_TOKEN to enable; ONCOKB_API_TOKEN is still accepted)"
 fi
 
 echo

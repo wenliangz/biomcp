@@ -152,7 +152,7 @@ These are the canonical smoke checks for a working release.
 
 ## Operator Notes
 
-No `RUN.md` or staging-demo runbook exists as of T041. If T042 (environment
-contracts) produces runtime operator docs, a `RUN.md` should be created in a
-follow-on ticket. For now, the canonical demo commands are in
-`analysis/ux/cli-reference.md` and `scripts/`.
+Runtime operator docs now live in `analysis/technical/staging-demo.md` and
+`RUN.md`. Use those documents for the shared target, promotion contract, and
+exact release-binary run/smoke commands, then use `scripts/` for the source
+probe inventory and demo helpers.
