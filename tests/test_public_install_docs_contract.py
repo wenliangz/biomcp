@@ -50,3 +50,23 @@ def test_docs_index_lists_pypi_install_before_binary_install() -> None:
     assert "uv tool install biomcp-cli" in docs_index
     assert "pip install biomcp-cli" in docs_index
     assert "Install the `biomcp-cli` package, then use `biomcp`" in docs_index
+
+
+def test_quick_reference_install_block_covers_supported_public_paths() -> None:
+    quick_reference = _read("docs/reference/quick-reference.md")
+
+    install_block = _markdown_section_block(
+        quick_reference,
+        "## Install",
+        "\n## Core command grammar",
+    )
+
+    assert "**PyPI (recommended):**" in install_block
+    assert "**Binary installer:**" in install_block
+    assert install_block.index("**PyPI (recommended):**") < install_block.index(
+        "**Binary installer:**"
+    )
+    assert "uv tool install biomcp-cli" in install_block
+    assert "pip install biomcp-cli" in install_block
+    assert "Install the `biomcp-cli` package, then use the `biomcp` command" in install_block
+    assert "../getting-started/installation.md" in install_block
