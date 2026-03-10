@@ -5,16 +5,24 @@ import shlex
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
-DEFAULT_MCP_CMD = "biomcp serve"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 SessionFactory = Callable[
     [],
     AsyncIterator[tuple[ClientSession, types.InitializeResult]],
 ]
+
+
+def _default_mcp_command() -> str:
+    release_bin = REPO_ROOT / "target" / "release" / "biomcp"
+    if release_bin.exists():
+        return f"{release_bin} serve"
+    return "biomcp serve"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -38,7 +46,7 @@ def _resolve_command(pytestconfig: pytest.Config) -> list[str]:
     command = (
         pytestconfig.getoption("--mcp-cmd")
         or os.environ.get("MCP_TEST_CMD")
-        or DEFAULT_MCP_CMD
+        or _default_mcp_command()
     )
     argv = shlex.split(command)
     if not argv:

@@ -608,7 +608,9 @@ mod tests {
             fs::read_to_string(repo_root().join("pyproject.toml")).expect("read pyproject");
 
         assert!(makefile.contains("validate-skills:"));
-        assert!(makefile.contains("uv run --extra dev ./scripts/validate-skills.sh"));
+        assert!(makefile.contains("uv run --extra dev sh -c"));
+        assert!(makefile.contains("./scripts/validate-skills.sh"));
+        assert!(makefile.contains("PATH=\"$(CURDIR)/target/release:$$PATH\""));
         assert!(pyproject.contains("\"jsonschema>="));
     }
 

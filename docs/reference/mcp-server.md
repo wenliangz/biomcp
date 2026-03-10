@@ -4,6 +4,28 @@ BioMCP exposes one execution tool (`shell`) and a current resource inventory
 centered on the help guide. This page documents the stable MCP contract and
 executes lightweight checks against the source tree.
 
+## Runtime Surface
+
+BioMCP exposes two MCP entrypoints:
+
+- stdio: `biomcp serve`
+- remote Streamable HTTP: `biomcp serve-http`
+
+The canonical remote endpoint is `/mcp`. Lightweight probe routes are `/health`,
+`/readyz`, and `/`.
+
+```python
+from pathlib import Path
+
+repo_root = Path.cwd()
+shell = (repo_root / "src/mcp/shell.rs").read_text()
+assert "StreamableHttpService" in shell
+assert '.nest_service("/mcp", service)' in shell
+assert '.route("/health", get(health_handler))' in shell
+assert '.route("/readyz", get(health_handler))' in shell
+assert '.route("/", get(index_handler))' in shell
+```
+
 ## Capability Advertisement
 
 The server must advertise both tools and resources.
@@ -40,8 +62,7 @@ repo_root = Path.cwd()
 shell = (repo_root / "src/mcp/shell.rs").read_text()
 use_cases_dir = repo_root / "skills" / "use-cases"
 assert "RESOURCE_HELP_URI" in shell
-assert 'uri: RESOURCE_HELP_URI.to_string()' in shell
-assert 'name: "BioMCP Overview".to_string()' in shell
+assert 'RawResource::new(RESOURCE_HELP_URI, "BioMCP Overview")' in shell
 assert "list_use_case_refs()" in shell
 assert not use_cases_dir.exists() or list(use_cases_dir.glob("*.md")) == []
 ```
@@ -61,7 +82,7 @@ shell = (repo_root / "src/mcp/shell.rs").read_text()
 assert "show_overview()" in shell
 assert 'if let Some(slug) = uri.strip_prefix("biomcp://skill/")' in shell
 assert "show_use_case(slug)" in shell
-assert 'mime_type: Some("text/markdown".to_string())' in shell
+assert 'with_mime_type("text/markdown")' in shell
 ```
 
 ## Unknown URI Behavior
@@ -83,13 +104,14 @@ Protocol-level checks are implemented in Python integration tests:
 
 - `tests/conftest.py`
 - `tests/test_mcp_contract.py`
+- `tests/test_mcp_http_surface.py`
+- `tests/test_mcp_http_transport.py`
 
-These tests run a real `biomcp serve` session over stdio and validate:
+These tests validate both transport modes:
 
-- initialize handshake,
-- tools inventory,
-- current resource inventory,
-- resource reads,
+- `biomcp serve` stdio initialize/resource behavior,
+- Streamable HTTP `initialize`/`tools/list`/`tools/call`,
+- `GET /`, `GET /health`, and `GET /readyz`,
 - invalid URI error semantics.
 
 ```python
@@ -98,4 +120,6 @@ from pathlib import Path
 repo_root = Path.cwd()
 assert (repo_root / "tests/conftest.py").exists()
 assert (repo_root / "tests/test_mcp_contract.py").exists()
+assert (repo_root / "tests/test_mcp_http_surface.py").exists()
+assert (repo_root / "tests/test_mcp_http_transport.py").exists()
 ```

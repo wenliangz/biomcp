@@ -142,11 +142,15 @@ export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction
 ## Multi-worker deployment
 
 BioMCP rate limiting is process-local. For many concurrent workers, run one shared
-`biomcp serve-http` endpoint so all workers share a single limiter budget:
+Streamable HTTP `biomcp serve-http` endpoint so all workers share a single
+limiter budget:
 
 ```bash
 biomcp serve-http --host 0.0.0.0 --port 8080
 ```
+
+Remote clients should connect to `http://<host>:8080/mcp`. Lightweight process
+probes are available at `GET /health`, `GET /readyz`, and `GET /`.
 
 ## Skills
 

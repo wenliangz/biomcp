@@ -24,6 +24,8 @@ biomcp list [entity]          → show entities, commands, and filters
 biomcp skill                  → show the embedded BioMCP agent guide
 biomcp skill install <dir>    → install the BioMCP guide into an agent directory
 biomcp skill list             → legacy alias; currently reports no embedded catalog
+biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`
+biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`
 ```
 
 ## Progressive Disclosure Pattern
@@ -183,10 +185,10 @@ Standard MCP client config:
 Multi-worker deployment (shared rate limiter):
 
 ```bash
-# Start shared HTTP relay
+# Start shared Streamable HTTP server
 biomcp serve-http --host 0.0.0.0 --port 8080
 
-# Point agent workers at the relay instead of spawning individual biomcp processes
+# Point agent workers at /mcp instead of spawning individual biomcp processes
 ```
 
 ## Key UX Invariants

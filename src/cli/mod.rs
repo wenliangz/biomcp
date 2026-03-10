@@ -96,7 +96,10 @@ pub enum Commands {
     Mcp,
     /// Alias for `mcp` (Claude Desktop friendly)
     Serve,
-    /// Run MCP server over HTTP (SSE transport)
+    #[command(
+        about = "Run the MCP Streamable HTTP server at /mcp",
+        long_about = "Run the MCP Streamable HTTP server at /mcp.\n\nThis is the canonical remote/server deployment mode.\nHealth routes: GET /health, GET /readyz, GET /."
+    )]
     ServeHttp {
         /// Host address to bind
         #[arg(long, default_value = "127.0.0.1")]
@@ -105,6 +108,11 @@ pub enum Commands {
         #[arg(long, default_value = "8080")]
         port: u16,
     },
+    #[command(
+        about = "removed legacy SSE compatibility command; use `serve-http`",
+        long_about = "removed legacy SSE compatibility command.\n\ndeprecated users should run `biomcp serve-http` and connect remote clients to `/mcp` instead."
+    )]
+    ServeSse,
     /// BioMCP skill overview and installer for agents
     #[command(after_help = "\
 EXAMPLES:
@@ -4820,7 +4828,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
             Commands::List { entity } => {
                 crate::cli::list::render(entity.as_deref()).map_err(Into::into)
             }
-            Commands::Mcp | Commands::Serve | Commands::ServeHttp { .. } => {
+            Commands::Mcp
+            | Commands::Serve
+            | Commands::ServeHttp { .. }
+            | Commands::ServeSse => {
                 anyhow::bail!("MCP/serve commands should not go through CLI run()")
             }
             Commands::Version { verbose } => Ok(version_output(verbose)),
@@ -4895,6 +4906,40 @@ mod tests {
         assert!(!help.contains("biomcp skill 03"));
         assert!(!help.contains("variant-to-treatment"));
         assert!(!help.contains("Commands:\n  list"));
+    }
+
+    #[test]
+    fn serve_http_help_describes_streamable_http() {
+        let mut command = Cli::command();
+        let serve_http = command
+            .find_subcommand_mut("serve-http")
+            .expect("serve-http subcommand should exist");
+        let mut help = Vec::new();
+        serve_http
+            .write_long_help(&mut help)
+            .expect("serve-http help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("Streamable HTTP"));
+        assert!(help.contains("/mcp"));
+        assert!(!help.contains("SSE transport"));
+    }
+
+    #[test]
+    fn serve_sse_help_stays_visible_and_deprecated() {
+        let mut command = Cli::command();
+        let serve_sse = command
+            .find_subcommand_mut("serve-sse")
+            .expect("serve-sse subcommand should exist");
+        let mut help = Vec::new();
+        serve_sse
+            .write_long_help(&mut help)
+            .expect("serve-sse help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("serve-sse"));
+        assert!(help.contains("removed"));
+        assert!(help.contains("serve-http"));
     }
 
     #[test]

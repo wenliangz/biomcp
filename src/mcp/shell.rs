@@ -1,23 +1,49 @@
 use std::future::Future;
 use std::time::Duration;
 
+use axum::{Json, Router, routing::get};
+use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{
-    AnnotateAble, Implementation, ListResourcesResult, PaginatedRequestParam, RawResource,
-    ReadResourceRequestParam, ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo,
+    AnnotateAble, Implementation, ListResourcesResult, PaginatedRequestParams, RawResource,
+    ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
+    ServerInfo,
 };
-use rmcp::service::{RequestContext, RoleServer};
-use rmcp::{Error as McpError, ServerHandler, ServiceExt, tool};
+use rmcp::schemars;
+use rmcp::service::RequestContext;
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+};
+use rmcp::{
+    ErrorData as McpError, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router,
+};
+use serde::Deserialize;
+use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
-pub struct BioMcpServer;
+pub struct BioMcpServer {
+    tool_router: ToolRouter<Self>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ShellCommand {
+    command: String,
+}
 
 const RESOURCE_HELP_URI: &str = "biomcp://help";
-const SHELL_DESCRIPTION_MARKERS: &str = "SEARCH FILTERS:\nAGENT GUIDANCE:\n--lat --lon --distance";
 
-fn shell_description() -> &'static str {
-    let _markers = SHELL_DESCRIPTION_MARKERS;
-    include_str!(concat!(env!("OUT_DIR"), "/mcp_shell_description.txt"))
+impl BioMcpServer {
+    pub fn new() -> Self {
+        Self {
+            tool_router: Self::tool_router(),
+        }
+    }
+}
+
+impl Default for BioMcpServer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn is_allowed_mcp_command(args: &[String]) -> bool {
@@ -43,10 +69,14 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
     }
 }
 
-#[tool(tool_box)]
+#[tool_router]
 impl BioMcpServer {
-    #[tool(description = shell_description())]
-    async fn shell(&self, #[tool(param)] command: String) -> Result<String, String> {
+    #[doc = include_str!(concat!(env!("OUT_DIR"), "/mcp_shell_description.txt"))]
+    #[tool]
+    async fn shell(
+        &self,
+        Parameters(ShellCommand { command }): Parameters<ShellCommand>,
+    ) -> Result<String, String> {
         if command.len() > 1024 {
             return Err("Error: command is too long".to_string());
         }
@@ -76,47 +106,42 @@ impl BioMcpServer {
     }
 }
 
-#[tool(tool_box)]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for BioMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            capabilities: ServerCapabilities::builder()
+        ServerInfo::new(
+            ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
                 .build(),
-            server_info: Implementation {
-                name: "biomcp".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-            instructions: Some(
-                "BioMCP provides biomedical data from 15 sources (PubMed, ClinicalTrials.gov, \
-                 ClinVar, gnomAD, OncoKB, Reactome, UniProt, PharmGKB, OpenFDA, and more). \
-                 Use the `shell` tool to run BioMCP CLI commands. \
-                 Start with `biomcp list` for a command reference, \
-                 or `biomcp skill list` for guided investigation workflows."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }
+        )
+        .with_server_info(Implementation::new("biomcp", env!("CARGO_PKG_VERSION")))
+        .with_instructions(
+            "BioMCP provides biomedical data from 15 sources (PubMed, ClinicalTrials.gov, \
+             ClinVar, gnomAD, OncoKB, Reactome, UniProt, PharmGKB, OpenFDA, and more). \
+             Use the `shell` tool to run BioMCP CLI commands. \
+             Start with `biomcp list` for a command reference, \
+             or `biomcp skill` for guided investigation workflows."
+                .to_string(),
+        )
     }
 
     fn list_resources(
         &self,
-        _request: PaginatedRequestParam,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
-        std::future::ready(Ok(ListResourcesResult {
-            next_cursor: None,
-            resources: build_resource_list()
+        std::future::ready(Ok(ListResourcesResult::with_all_items(
+            build_resource_list()
                 .into_iter()
                 .map(|r| r.no_annotation())
                 .collect(),
-        }))
+        )))
     }
 
     fn read_resource(
         &self,
-        request: ReadResourceRequestParam,
+        request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ReadResourceResult, McpError>> + Send + '_ {
         std::future::ready(read_resource_markdown(&request.uri))
@@ -143,13 +168,9 @@ fn read_resource_markdown(uri: &str) -> Result<ReadResourceResult, McpError> {
 }
 
 fn build_resource_list() -> Vec<RawResource> {
-    let mut resources = vec![RawResource {
-        uri: RESOURCE_HELP_URI.to_string(),
-        name: "BioMCP Overview".to_string(),
-        description: None,
-        mime_type: Some("text/markdown".to_string()),
-        size: None,
-    }];
+    let mut resources = vec![
+        RawResource::new(RESOURCE_HELP_URI, "BioMCP Overview").with_mime_type("text/markdown"),
+    ];
 
     if let Ok(skills) = crate::cli::skill::list_use_case_refs() {
         for skill in skills {
@@ -159,13 +180,10 @@ fn build_resource_list() -> Vec<RawResource> {
             } else {
                 format!("Pattern: {title}")
             };
-            resources.push(RawResource {
-                uri: format!("biomcp://skill/{}", skill.slug),
-                name,
-                description: None,
-                mime_type: Some("text/markdown".to_string()),
-                size: None,
-            });
+            resources.push(
+                RawResource::new(format!("biomcp://skill/{}", skill.slug), name)
+                    .with_mime_type("text/markdown"),
+            );
         }
     }
 
@@ -173,13 +191,9 @@ fn build_resource_list() -> Vec<RawResource> {
 }
 
 fn to_resource_result(uri: &str, content: String) -> ReadResourceResult {
-    ReadResourceResult {
-        contents: vec![ResourceContents::TextResourceContents {
-            uri: uri.to_string(),
-            mime_type: Some("text/markdown".to_string()),
-            text: content,
-        }],
-    }
+    ReadResourceResult::new(vec![
+        ResourceContents::text(content, uri).with_mime_type("text/markdown"),
+    ])
 }
 
 fn mcp_stdio_guidance() -> &'static str {
@@ -189,6 +203,19 @@ fn mcp_stdio_guidance() -> &'static str {
 fn is_handshake_startup_error(err: &anyhow::Error) -> bool {
     let msg = err.to_string().to_ascii_lowercase();
     msg.contains("expect initialize") || msg.contains("unexpected eof")
+}
+
+async fn health_handler() -> Json<serde_json::Value> {
+    Json(json!({"status": "ok"}))
+}
+
+async fn index_handler() -> Json<serde_json::Value> {
+    Json(json!({
+        "name": "biomcp",
+        "version": env!("CARGO_PKG_VERSION"),
+        "transport": "streamable-http",
+        "mcp": "/mcp"
+    }))
 }
 
 pub async fn run_stdio() -> anyhow::Result<()> {
@@ -203,7 +230,7 @@ pub async fn run_stdio() -> anyhow::Result<()> {
 
     let startup = tokio::time::timeout(
         Duration::from_secs(5),
-        BioMcpServer.serve_with_ct(rmcp::transport::stdio(), shutdown),
+        BioMcpServer::new().serve_with_ct(rmcp::transport::stdio(), shutdown),
     )
     .await;
 
@@ -225,31 +252,59 @@ pub async fn run_stdio() -> anyhow::Result<()> {
 }
 
 pub async fn run_http(host: &str, port: u16) -> anyhow::Result<()> {
-    use rmcp::transport::sse_server::SseServer;
-
     let ip: std::net::IpAddr = host
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid host address: {e}"))?;
     let bind = std::net::SocketAddr::new(ip, port);
+    let shutdown = CancellationToken::new();
 
-    tracing::info!("BioMCP HTTP server listening on http://{bind}");
-    tracing::info!("  SSE endpoint:  GET  http://{bind}/sse");
-    tracing::info!("  Post endpoint: POST http://{bind}/message");
+    let service: StreamableHttpService<BioMcpServer, LocalSessionManager> =
+        StreamableHttpService::new(
+            || Ok(BioMcpServer::new()),
+            Default::default(),
+            StreamableHttpServerConfig {
+                stateful_mode: true,
+                cancellation_token: shutdown.child_token(),
+                ..Default::default()
+            },
+        );
 
-    let ct = SseServer::serve(bind)
+    let router = Router::new()
+        .nest_service("/mcp", service)
+        .route("/health", get(health_handler))
+        .route("/readyz", get(health_handler))
+        .route("/", get(index_handler));
+    let listener = tokio::net::TcpListener::bind(bind)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to bind HTTP server: {e}"))?
-        .with_service(|| BioMcpServer);
+        .map_err(|e| anyhow::anyhow!("Failed to bind HTTP server: {e}"))?;
 
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("Shutting down…");
-    ct.cancel();
+    tracing::info!("BioMCP Streamable HTTP server listening on http://{bind}");
+    tracing::info!("  MCP endpoint:   POST/GET http://{bind}/mcp");
+    tracing::info!("  Health probe:   GET      http://{bind}/health");
+    tracing::info!("  Ready probe:    GET      http://{bind}/readyz");
+    tracing::info!("  Status:         GET      http://{bind}/");
+
+    let cancel = shutdown.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            cancel.cancel();
+        }
+    });
+
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            shutdown.cancelled_owned().await;
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("HTTP server exited: {e}"))?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_mcp_command;
+    use axum::Json;
+
+    use super::{index_handler, is_allowed_mcp_command};
 
     #[test]
     fn mcp_allowlist_blocks_mutating_commands() {
@@ -295,5 +350,13 @@ mod tests {
             "skill".into(),
             "uninstall".into()
         ]));
+    }
+
+    #[tokio::test]
+    async fn index_handler_reports_streamable_http_surface() {
+        let Json(payload) = index_handler().await;
+        assert_eq!(payload["name"], "biomcp");
+        assert_eq!(payload["transport"], "streamable-http");
+        assert_eq!(payload["mcp"], "/mcp");
     }
 }

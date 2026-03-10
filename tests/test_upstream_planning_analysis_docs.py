@@ -80,6 +80,10 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "The spec suite is repo-local executable documentation; no GitHub workflow currently runs `make spec`." in technical
     assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical
     assert "release validation runs `pytest tests/` and `mkdocs build --strict`" in technical
+    assert "Streamable HTTP" in technical
+    assert "`/mcp`" in technical
+    assert "`/health`" in technical
+    assert "`/readyz`" in technical
 
     assert "`search all` Contract" in ux
     assert "typed slots first" in ux
@@ -92,6 +96,8 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "Overview: `biomcp skill`" in ux
     assert "List: `biomcp skill list`" in ux
     assert "Legacy lookup: `biomcp skill 03` or `biomcp skill variant-to-treatment`" in ux
+    assert "biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`" in ux
+    assert "biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`" in ux
 
 
 def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
@@ -112,12 +118,23 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "./scripts/contract-smoke.sh --fast" in staging_demo
     assert 'uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"' in staging_demo
     assert "ONCOKB_TOKEN" in staging_demo
+    assert "./target/release/biomcp serve-http --host 127.0.0.1 --port 8080" in staging_demo
+    assert "POST/GET /mcp" in staging_demo
+    assert "GET /health" in staging_demo
+    assert "GET /readyz" in staging_demo
+    assert "GET /" in staging_demo
+    assert "tests/test_mcp_http_transport.py" in staging_demo
 
     assert "# BioMCP Runbook" in runbook
     assert "cargo build --release --locked" in runbook
     assert "./target/release/biomcp serve" in runbook
     assert "./target/release/biomcp serve-http --host 127.0.0.1 --port 8080" in runbook
     assert 'uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"' in runbook
+    assert "curl http://127.0.0.1:8080/health" in runbook
+    assert "curl http://127.0.0.1:8080/readyz" in runbook
+    assert "curl http://127.0.0.1:8080/" in runbook
+    assert "tests/test_mcp_http_surface.py" in runbook
+    assert "tests/test_mcp_http_transport.py" in runbook
     assert "make spec" in runbook
     assert "docs/user-guide/cli-reference.md" in runbook
     assert "docs/reference/mcp-server.md" in runbook
