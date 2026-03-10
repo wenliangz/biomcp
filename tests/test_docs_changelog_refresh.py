@@ -89,3 +89,40 @@ def test_cli_and_quick_reference_cover_search_all_and_gene_sections() -> None:
     assert "biomcp search gene BRAF --limit 5" in quick_reference
     assert "biomcp search all --gene BRAF --disease melanoma" in quick_reference
     assert "biomcp search all --keyword resistance --counts-only" in quick_reference
+
+
+def test_public_docs_surface_local_study_analytics() -> None:
+    readme = _read("README.md")
+    quick_reference = _read("docs/reference/quick-reference.md")
+    cli_reference = _read("docs/user-guide/cli-reference.md")
+    study_commands = [
+        "biomcp study list",
+        "biomcp study download [--list] [<study_id>]",
+        "biomcp study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]",
+        "biomcp study query --study <id> --gene <symbol> --type <mutations|cna|expression>",
+        "biomcp study cohort --study <id> --gene <symbol>",
+        "biomcp study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]",
+        "biomcp study compare --study <id> --gene <symbol> --type <expression|mutations> --target <symbol>",
+        "biomcp study co-occurrence --study <id> --genes <g1,g2,...>",
+    ]
+
+    assert "plus local study analytics" in readme
+    assert "## Local study analytics" in readme
+    assert "12 remote entity commands" in readme
+    assert "study download" in readme
+
+    assert "## Study commands" in quick_reference
+    assert "local downloaded cBioPortal-style datasets" in quick_reference
+    assert "BIOMCP_STUDY_DIR" in quick_reference
+    for command in study_commands:
+        assert command in quick_reference
+
+    assert "## Local study analytics" in cli_reference
+    assert "BIOMCP_STUDY_DIR" in cli_reference
+    assert "local cBioPortal analytics family for downloaded" in cli_reference
+    assert "cBioPortal-style datasets" in cli_reference
+    assert "12 remote entity commands" in cli_reference
+    assert "data_mutations.txt" in cli_reference
+    assert "data_clinical_patient.txt" in cli_reference
+    for command in study_commands:
+        assert command in cli_reference

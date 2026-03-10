@@ -31,6 +31,14 @@ biomcp enrich <GENE1,GENE2,...> [--limit N]
 biomcp batch <entity> <id1,id2,...> [--sections ...] [--source ...]
 biomcp health [--apis-only]
 biomcp list [entity]
+biomcp study list
+biomcp study download [--list] [<study_id>]
+biomcp study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]
+biomcp study query --study <id> --gene <symbol> --type <mutations|cna|expression>
+biomcp study cohort --study <id> --gene <symbol>
+biomcp study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]
+biomcp study compare --study <id> --gene <symbol> --type <expression|mutations> --target <symbol>
+biomcp study co-occurrence --study <id> --genes <g1,g2,...>
 biomcp skill
 biomcp skill install [dir]
 biomcp skill list                 # legacy compatibility alias
@@ -248,6 +256,49 @@ biomcp pathway trials R-HSA-5673001
 biomcp protein structures P15056
 biomcp article entities 22663011
 ```
+
+## Local study analytics
+
+`study` is BioMCP's local cBioPortal analytics family for downloaded
+cBioPortal-style datasets. Unlike the 12 remote entity commands, `study`
+operates on files in your local study root instead of querying remote APIs for
+each request.
+
+Use `BIOMCP_STUDY_DIR` when you want an explicit study root for reproducible
+downloads and examples; if it is unset, BioMCP falls back to its default study
+root. `biomcp study download --list` shows downloadable IDs, and
+`biomcp study download <study_id>` installs a study into that local root.
+
+| Use this | When |
+|----------|------|
+| `biomcp search/get/<entity>` | You want live API-backed discovery or detail across the 12 remote entity commands |
+| `biomcp study download` | You need to fetch a cBioPortal-style study dataset into your local study root |
+| `biomcp study ...` analytics commands | You already have local study files and want cohort, query, survival, compare, or co-occurrence analysis |
+
+### Study command examples
+
+```bash
+biomcp study list
+biomcp study download --list
+biomcp study download msk_impact_2017
+biomcp study query --study msk_impact_2017 --gene TP53 --type mutations
+biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --amplified ERBB2 --expression-above ERBB2:1.5
+biomcp study cohort --study brca_tcga_pan_can_atlas_2018 --gene TP53
+biomcp study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53 --endpoint os
+biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2
+biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type mutations --target PIK3CA
+biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS
+```
+
+### Dataset requirements
+
+- `study list` shows locally available studies.
+- `study download` fetches remote datasets into the local study root.
+- `study filter` intersects mutation, CNA, expression, and clinical filters.
+- `study query` supports `mutations`, `cna`, and `expression` per-gene summaries.
+- `study cohort`, `study survival`, and `study compare` require `data_mutations.txt` and `data_clinical_sample.txt`.
+- `study survival` also requires `data_clinical_patient.txt` with canonical `{ENDPOINT}_STATUS` and `{ENDPOINT}_MONTHS` columns.
+- Expression workflows require a supported expression matrix file.
 
 ## Batch mode
 
