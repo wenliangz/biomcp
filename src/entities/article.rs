@@ -200,6 +200,11 @@ const MAX_SEARCH_LIMIT: usize = 50;
 const EUROPE_PMC_PAGE_SIZE: usize = 25;
 const PUBTATOR_PAGE_SIZE: usize = 25;
 const MAX_PAGE_FETCHES: usize = 50;
+const INVALID_ARTICLE_ID_MSG: &str = "\
+Unsupported identifier format. BioMCP resolves PMID (digits only, e.g., 22663011), \
+PMCID (starts with PMC, e.g., PMC9984800), and DOI (starts with 10., \
+e.g., 10.1056/NEJMoa1203421), and publisher PIIs (e.g., S1535610826000103) are not \
+indexed by PubMed or Europe PMC and cannot be resolved.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendPlan {
@@ -1101,9 +1106,7 @@ pub async fn get(id: &str, sections: &[String]) -> Result<Article, BioMcpError> 
             }
         }
         ArticleIdType::Invalid => {
-            return Err(BioMcpError::InvalidArgument(
-                "ID must be a PMID (digits), PMCID (starts with PMC), or DOI (starts with 10.). Example: biomcp get article 22663011".into(),
-            ));
+            return Err(BioMcpError::InvalidArgument(INVALID_ARTICLE_ID_MSG.into()));
         }
     };
 
@@ -1283,6 +1286,24 @@ mod tests {
             parse_article_id("doi:10.1056/NEJMoa1203421"),
             ArticleIdType::Invalid
         ));
+    }
+
+    #[test]
+    fn parse_article_id_publisher_pii_is_invalid() {
+        assert!(matches!(
+            parse_article_id("S1535610826000103"),
+            ArticleIdType::Invalid
+        ));
+    }
+
+    #[test]
+    fn invalid_article_id_error_names_supported_types_and_publisher_limit() {
+        assert!(INVALID_ARTICLE_ID_MSG.contains("PMID"));
+        assert!(INVALID_ARTICLE_ID_MSG.contains("PMCID"));
+        assert!(INVALID_ARTICLE_ID_MSG.contains("DOI"));
+        assert!(
+            INVALID_ARTICLE_ID_MSG.contains("PII") || INVALID_ARTICLE_ID_MSG.contains("publisher")
+        );
     }
 
     #[test]

@@ -52,7 +52,9 @@ biomcp search article -g BRAF --source europepmc --limit 5
 
 ## Get an article
 
-Supported IDs include PMID, PMCID, and DOI.
+Supported IDs are PMID (digits only), PMCID (e.g., PMC9984800), and DOI
+(e.g., 10.1056/NEJMoa1203421). Publisher PIIs (e.g., `S1535610826000103`) are not
+indexed by PubMed or Europe PMC and cannot be resolved.
 
 ```bash
 biomcp get article 22663011

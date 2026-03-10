@@ -60,6 +60,22 @@ echo "$out" | mustmatch like "# Entities in PMID 22663011"
 echo "$out" | mustmatch like "## Genes"
 ```
 
+## Invalid Identifier Rejection
+
+BioMCP supports PMID, PMCID, and DOI for article lookup. Unsupported formats such as
+publisher PIIs must fail fast, return a non-zero exit, and name the supported types in
+the error text.
+
+```bash
+status=0
+out="$(biomcp get article S1535610826000103 2>&1)" || status=$?
+test "$status" -ne 0
+echo "$out" | mustmatch like "PMID"
+echo "$out" | mustmatch like "PMCID"
+echo "$out" | mustmatch like "DOI"
+echo "$out" | mustmatch like "publisher"
+```
+
 ## Sort Behavior
 
 Default article search uses relevance sort. The output header echoes the sort in effect so callers can verify the default.
