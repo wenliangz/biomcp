@@ -69,6 +69,7 @@ cargo build --release --locked
 biomcp health --apis-only            # verify API connectivity
 biomcp list                          # show all entities and commands
 biomcp list gene                     # show gene-specific filters and examples
+biomcp search all --gene BRAF --disease melanoma  # unified cross-entity discovery
 ```
 
 ## Command grammar
@@ -79,6 +80,7 @@ get <entity> <id> [sections] → focused detail
 <entity> <helper> <id>       → cross-entity pivots
 enrich <GENE1,GENE2,...>     → gene-set enrichment
 batch <entity> <id1,id2,...> → parallel gets
+search all [slot filters]    → unified fan-out across all entities
 ```
 
 ## Entities and sources
