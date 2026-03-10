@@ -6,9 +6,25 @@ useful for oncology and translational workflows.
 
 ## Install
 
+**PyPI (recommended):**
+
+```bash
+uv tool install biomcp-cli
+# or inside an active Python environment:
+# pip install biomcp-cli
+```
+
+Install the `biomcp-cli` package, then use the `biomcp` command for the
+commands below.
+
+**Binary installer:**
+
 ```bash
 curl -fsSL https://biomcp.org/install.sh | bash
 ```
+
+See [Installation](../getting-started/installation.md) for source-build and
+platform-specific notes.
 
 ## Core command grammar
 
