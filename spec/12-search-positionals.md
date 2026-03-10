@@ -41,8 +41,9 @@ echo "$out" | mustmatch like "hgvsp=V600E"
 Complex clinical phrases should remain in filter search space, not exact-ID lookup space.
 
 ```bash
-out="$(biomcp search variant "EGFR Exon 19 Deletion" --limit 3)"
-echo "$out" | mustmatch like "condition=EGFR Exon 19 Deletion"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "EGFR Exon 19 Deletion" --limit 3)"
+echo "$out" | mustmatch like "gene=EGFR"
+echo "$out" | mustmatch like "consequence=inframe_deletion"
 echo "$out" | mustmatch like "# Variant Search Results"
 ```
 

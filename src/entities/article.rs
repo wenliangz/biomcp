@@ -132,9 +132,9 @@ impl ArticleSourceFilter {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ArticleSort {
-    #[default]
     Date,
     Citations,
+    #[default]
     Relevance,
 }
 
@@ -1210,8 +1210,30 @@ mod tests {
             open_access: false,
             no_preprints: false,
             exclude_retracted: false,
-            sort: ArticleSort::Date,
+            sort: ArticleSort::Relevance,
         }
+    }
+
+    #[test]
+    fn article_sort_default_is_relevance() {
+        let default: ArticleSort = Default::default();
+        assert_eq!(default, ArticleSort::Relevance);
+    }
+
+    #[test]
+    fn pubtator_sort_omits_param_for_relevance() {
+        assert_eq!(pubtator_sort(ArticleSort::Relevance), None);
+    }
+
+    #[test]
+    fn pubtator_sort_sends_param_for_date() {
+        assert_eq!(pubtator_sort(ArticleSort::Date), Some("date desc"));
+    }
+
+    #[test]
+    fn empty_filters_default_sort_is_relevance() {
+        let filters = empty_filters();
+        assert_eq!(filters.sort, ArticleSort::Relevance);
     }
 
     #[test]

@@ -76,7 +76,7 @@ echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 Exact disease labels should be reranked to the front of the returned page even when upstream ordering is noisy. This regression checks that the canonical colorectal cancer node appears in the surfaced result set.
 
 ```bash
-out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search disease "colorectal cancer" --limit 10)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search disease "colorectal cancer" --limit 10)"
 echo "$out" | mustmatch like "| ID | Name | Synonyms |"
 echo "$out" | mustmatch like "colorectal cancer"
 ```

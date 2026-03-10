@@ -77,13 +77,13 @@ echo "$out" | mustmatch like "| PMID | Title |"
 Alias-only symbols should still surface the canonical gene rows. These checks guard the ERBB1 and P53 regressions by asserting that alias queries return EGFR and TP53 rows.
 
 ```bash
-out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search gene ERBB1 --limit 5)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search gene ERBB1 --limit 5)"
 echo "$out" | mustmatch like "# Genes: ERBB1"
 echo "$out" | mustmatch like "EGFR"
 ```
 
 ```bash
-out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search gene P53 --limit 5)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search gene P53 --limit 5)"
 echo "$out" | mustmatch like "# Genes: P53"
 echo "$out" | mustmatch like "TP53"
 ```

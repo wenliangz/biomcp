@@ -77,7 +77,7 @@ echo "$out" | mustmatch like "Total reports (OpenFDA)"
 Brand-only MyChem hits should still render search rows with a usable canonical name. This regression protects the Keytruda brand-name bug where totals were non-zero but rows were empty.
 
 ```bash
-out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search drug Keytruda --limit 5)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search drug Keytruda --limit 5)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 echo "$out" | mustmatch like "pembrolizumab"
