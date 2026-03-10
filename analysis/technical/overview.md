@@ -1,0 +1,158 @@
+# BioMCP Technical Overview
+
+## System Shape
+
+BioMCP is a single Rust binary (`biomcp`) with two operating modes:
+
+- **CLI mode:** Standard command-line invocation. Each command is a blocking
+  async call that prints markdown to stdout and exits.
+- **MCP server mode:** `biomcp serve` starts a JSON-RPC MCP server over stdio.
+  Agents connect through the MCP protocol and call tools that mirror the CLI
+  command surface.
+- **HTTP mode:** `biomcp serve-http --host 0.0.0.0 --port 8080` starts an HTTP
+  relay for multi-worker deployments. This is the canonical scaling answer when
+  rate limiting needs to be shared across concurrent agent workers, since rate
+  limiting is otherwise process-local.
+
+The binary is also distributed as `biomcp-cli` on PyPI (a thin Python wrapper
+that ships the platform-specific Rust binary). Python is packaging only;
+no Python logic is involved in query processing.
+
+## Build and Packaging
+
+```
+cargo build --release --locked   # Rust binary
+uv build / uv publish            # PyPI wheel (biomcp-cli)
+curl ... install.sh | bash       # binary installer (resolves latest release)
+```
+
+- **Edition:** Rust 2024
+- **Current version:** 0.8.13 (as of 2026-03-09)
+- **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
+- **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
+- **Release checklist:** Bump `Cargo.toml` version, update `CHANGELOG.md`,
+  cut a GitHub release with tag — the release workflow builds and publishes
+
+## Source Integration Patterns
+
+BioMCP integrates with 15+ upstream APIs. Integration patterns:
+
+| Pattern | Examples |
+|---------|---------|
+| REST JSON | UniProt, ChEMBL, InterPro, ClinicalTrials.gov, cBioPortal, OncoKB, OpenFDA |
+| GraphQL | gnomAD, OpenTargets |
+| Custom REST | MyGene.info, MyVariant.info, MyChem.info, PubMed/PubTator3, Reactome, g:Profiler |
+
+All queries are read-only. BioMCP never writes to upstream systems.
+
+Federated queries (e.g., `search all`, unified article search) fan out in
+parallel across sources and merge results. Federated totals are approximate
+due to cross-source deduplication — `total=None` is the correct design for
+federated counts.
+
+## API Keys
+
+Most commands work without credentials. Optional keys improve rate limits or
+unlock additional data:
+
+| Key | Source | Effect |
+|-----|--------|--------|
+| `NCBI_API_KEY` | PubTator3, PMC OA, NCBI ID converter | Higher rate limits |
+| `OPENFDA_API_KEY` | OpenFDA | Higher rate limits |
+| `NCI_API_KEY` | NCI CTS trial search (`--source nci`) | Required for NCI source |
+| `ONCOKB_TOKEN` | OncoKB production API | Full clinical data (demo available without) |
+| `ALPHAGENOME_API_KEY` | AlphaGenome variant effect prediction | Required for AlphaGenome |
+
+For demo and offline workflows: `BIOMCP_CACHE_MODE=infinite` enables infinite
+cache mode, replaying prior responses without hitting upstream APIs.
+
+## Rate Limiting
+
+Rate limiting is process-local. Multiple concurrent CLI invocations or MCP
+server workers do NOT share a limiter. For deployments with many concurrent
+agent workers, run a single shared `biomcp serve-http` endpoint so all workers
+share one limiter budget.
+
+## Release Pipeline
+
+1. Update version in `Cargo.toml` and `CHANGELOG.md`
+2. Commit and push to `main`
+3. Cut a GitHub release with a semver tag
+4. GitHub Actions validates and publishes:
+   - CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`,
+     `cargo clippy -- -D warnings`, and `cargo test`.
+   - Release validation runs the Rust checks again, then
+     `uv run pytest tests/ -v --mcp-cmd "biomcp serve"` and
+     `uv run mkdocs build --strict`.
+   - Release build jobs package cross-platform binaries, publish PyPI wheels,
+     and deploy docs.
+5. `install.sh` resolves the latest tagged release with downloadable assets
+
+Known issue: `uv sync --extra dev` may rewrite the editable root package
+version in `uv.lock` during a release cut. Verify whether the lockfile
+version bump should ship with the release commit.
+
+## Verification Approach
+
+BioMCP has three verification layers:
+
+### 1. GitHub Workflows
+
+CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`.
+Contract smoke checks run in `.github/workflows/contracts.yml` on a schedule
+and by manual dispatch via `bash scripts/contract-smoke.sh`.
+release validation runs `pytest tests/` and `mkdocs build --strict` after the
+Rust checks before packaging and publishing artifacts.
+
+### 2. Spec Suite (`spec/`)
+
+BDD executable documentation written as `mustmatch` spec files. The suite
+exercises CLI output at the command level using stable structural markers
+(headers, table columns, query echoes) rather than brittle upstream data
+values.
+
+The spec suite is repo-local executable documentation; no GitHub workflow currently runs `make spec`.
+
+Run locally with `make spec`.
+
+Important: `uv run` may execute a stale `.venv/bin/biomcp`. Either refresh
+with `uv pip install -e .` or ensure `target/release` is ahead of `.venv/bin`
+when running CLI specs.
+
+### 3. Contract Smoke Checks (`scripts/contract-smoke.sh`)
+
+Lightweight API contract probes for each integrated source. Three probes per
+source: happy path, edge/empty path, invalid path. Not a replacement for unit
+tests - source-facing contract verification only.
+
+Run: `./scripts/contract-smoke.sh` from the repo root.
+
+### 4. Demo Scripts (`scripts/genegpt-demo.sh`, `scripts/geneagent-demo.sh`)
+
+End-to-end demo flows that reproduce paper-style GeneGPT and GeneAgent
+workflows. These scripts:
+- Run live against the default binary
+- Assert on JSON field presence (not exact values)
+- Compute a scoring metric (evidence score for GeneGPT, drug count for GeneAgent)
+- Exit non-zero on any assertion failure
+
+These are the canonical smoke checks for a working release.
+
+## Known Constraints
+
+- Rate limiting is process-local (see above)
+- Federated totals are approximate
+- Some sources (OncoKB production, NCI CTS, AlphaGenome) require API keys
+- OncoKB demo endpoint has a known no-hit response for some variants — this
+  is expected behavior, not a bug
+- PubTator coerces small `size` parameters — use fixed internal page sizes
+  (25) to avoid offset drift in pagination
+- ClinicalTrials.gov mutation discovery cannot rely on `EligibilityCriteria`
+  alone; search mutation-related title, summary, and keyword fields too
+
+## Operator Notes
+
+No `RUN.md` or staging-demo runbook exists as of T041. If T042 (environment
+contracts) produces runtime operator docs, a `RUN.md` should be created in a
+follow-on ticket. For now, the canonical demo commands are in
+`analysis/ux/cli-reference.md` and `scripts/`.
