@@ -84,6 +84,41 @@ biomcp protein structures P15056
 biomcp article entities 22663011
 ```
 
+## Study commands
+
+`study` works on local downloaded cBioPortal-style datasets rather than the
+remote entity APIs.
+
+Set `BIOMCP_STUDY_DIR` when you want an explicit dataset root for downloads and
+analysis; if it is unset, BioMCP uses its default study root.
+
+| Command | Purpose |
+|---------|---------|
+| `biomcp study list` | List locally available studies |
+| `biomcp study download [--list] [<study_id>]` | List downloadable study IDs or install a study locally |
+| `biomcp study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]` | Intersect mutation, CNA, expression, and clinical sample filters |
+| `biomcp study query --study <id> --gene <symbol> --type <mutations|cna|expression>` | Summarize one gene within one study |
+| `biomcp study cohort --study <id> --gene <symbol>` | Split a cohort into mutant vs wildtype groups |
+| `biomcp study survival --study <id> --gene <symbol> [--endpoint <os|dfs|pfs|dss>]` | Compare mutation-defined groups on survival endpoints |
+| `biomcp study compare --study <id> --gene <symbol> --type <expression|mutations> --target <symbol>` | Compare a target gene across mutation-defined groups |
+| `biomcp study co-occurrence --study <id> --genes <g1,g2,...>` | Compute pairwise mutation co-occurrence across genes |
+
+Examples:
+
+```bash
+biomcp study download --list
+biomcp study download msk_impact_2017
+biomcp study query --study msk_impact_2017 --gene TP53 --type mutations
+biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --amplified ERBB2 --expression-above ERBB2:1.5
+biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2
+biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS
+```
+
+`study cohort`, `study survival`, and `study compare` require
+`data_mutations.txt` and `data_clinical_sample.txt`. `study survival` also
+requires `data_clinical_patient.txt` with endpoint columns, and expression
+workflows require a supported expression matrix.
+
 ## Common gene aliases
 
 Use these aliases in `search` when a clinical report or paper does not use the HGNC symbol.

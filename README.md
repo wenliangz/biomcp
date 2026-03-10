@@ -1,7 +1,7 @@
 # BioMCP
 
 BioMCP is a single-binary CLI and MCP server for querying biomedical databases.
-One command grammar, compact markdown output, 12 entities across 15+ data sources.
+One command grammar, compact markdown output, 12 remote entities across 15+ data sources, plus local study analytics.
 
 ## Install
 
@@ -161,6 +161,27 @@ biomcp skill install ~/.claude --force
 
 See [Skills](docs/getting-started/skills.md) for supported install targets,
 installed files, and legacy compatibility notes.
+
+## Local study analytics
+
+`study` is BioMCP's local analysis family for downloaded cBioPortal-style datasets.
+The 12 remote entity commands query upstream APIs for discovery and detail; `study`
+commands work on local datasets when you need per-study query, cohort, survival,
+comparison, or co-occurrence workflows.
+
+Use `study download` to fetch a dataset into your local study root. Set
+`BIOMCP_STUDY_DIR` when you want an explicit dataset location for reproducible
+scripts and demos; if it is unset, BioMCP falls back to its default study root.
+
+```bash
+export BIOMCP_STUDY_DIR="$HOME/.local/share/biomcp/studies"
+biomcp study download msk_impact_2017
+biomcp study list
+biomcp study query --study msk_impact_2017 --gene TP53 --type mutations
+```
+
+See the [CLI reference](docs/user-guide/cli-reference.md#local-study-analytics)
+for the full `study` command family and dataset prerequisites.
 
 ## Ops
 
