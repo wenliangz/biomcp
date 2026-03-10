@@ -1,7 +1,8 @@
-# 091 Expansion Source Contracts
+# BioMCP Source Contract Probes
 
-This note captures phase-0 API contract probes for the committed 091 scope.
-Each source includes one happy query, one edge/empty query, and one invalid query.
+This note captures BioMCP source-facing API contract probes for the current
+operator path. Each source includes one happy query, one edge/empty query, and
+one invalid query.
 
 ## UniProt
 

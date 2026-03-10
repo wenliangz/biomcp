@@ -2,9 +2,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${BIOMCP_BIN:-$ROOT/target/debug/biomcp}"
+BIN="${BIOMCP_BIN:-$ROOT/target/release/biomcp}"
 if [[ ! -x "$BIN" ]]; then
-  BIN="biomcp"
+  if command -v biomcp >/dev/null 2>&1; then
+    BIN="$(command -v biomcp)"
+  fi
+fi
+
+if [[ ! -x "$BIN" ]]; then
+  echo "biomcp binary not found; set BIOMCP_BIN or build ./target/release/biomcp" >&2
+  exit 1
 fi
 
 echo "GeneAgent demo: variant, pathway, and protein pivots"

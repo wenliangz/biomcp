@@ -92,3 +92,55 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "Overview: `biomcp skill`" in ux
     assert "List: `biomcp skill list`" in ux
     assert "Legacy lookup: `biomcp skill 03` or `biomcp skill variant-to-treatment`" in ux
+
+
+def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
+    staging_demo = _read_repo("analysis/technical/staging-demo.md")
+    runbook = _read_repo("RUN.md")
+    technical = _read_repo("analysis/technical/overview.md")
+    scripts_readme = _read_repo("scripts/README.md")
+    source_contracts = _read_repo("scripts/source-contracts.md")
+    contract_smoke = _read_repo("scripts/contract-smoke.sh")
+    genegpt_demo = _read_repo("scripts/genegpt-demo.sh")
+    geneagent_demo = _read_repo("scripts/geneagent-demo.sh")
+
+    assert "# BioMCP Staging and Demo Contract" in staging_demo
+    assert "./target/release/biomcp" in staging_demo
+    assert "shared merged-main target" in staging_demo
+    assert "BIOMCP_BIN=./target/release/biomcp ./scripts/genegpt-demo.sh" in staging_demo
+    assert "BIOMCP_BIN=./target/release/biomcp ./scripts/geneagent-demo.sh" in staging_demo
+    assert "./scripts/contract-smoke.sh --fast" in staging_demo
+    assert 'uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"' in staging_demo
+    assert "ONCOKB_TOKEN" in staging_demo
+
+    assert "# BioMCP Runbook" in runbook
+    assert "cargo build --release --locked" in runbook
+    assert "./target/release/biomcp serve" in runbook
+    assert "./target/release/biomcp serve-http --host 127.0.0.1 --port 8080" in runbook
+    assert 'uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"' in runbook
+    assert "make spec" in runbook
+    assert "docs/user-guide/cli-reference.md" in runbook
+    assert "docs/reference/mcp-server.md" in runbook
+
+    assert "analysis/technical/staging-demo.md" in technical
+    assert "RUN.md" in technical
+    assert "No `RUN.md` or staging-demo runbook exists" not in technical
+
+    assert "current BioMCP operator command layer" in scripts_readme
+    assert "source-facing contract probes" in scripts_readme
+    assert "091 expansion scope" not in scripts_readme
+
+    assert "# BioMCP Source Contract Probes" in source_contracts
+    assert "source-facing API contract probes" in source_contracts
+    assert "ONCOKB_TOKEN" in source_contracts
+    assert "091 expansion scope" not in source_contracts
+
+    assert "ONCOKB_TOKEN" in contract_smoke
+    assert "ONCOKB_API_TOKEN" in contract_smoke
+    assert "set ONCOKB_TOKEN to enable" in contract_smoke
+
+    for demo_script in (genegpt_demo, geneagent_demo):
+        assert 'BIN="${BIOMCP_BIN:-' in demo_script
+        assert "$ROOT/target/release/biomcp" in demo_script
+        assert "target/debug/biomcp" not in demo_script
+        assert 'command -v biomcp >/dev/null 2>&1' in demo_script
