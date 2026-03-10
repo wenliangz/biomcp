@@ -416,8 +416,8 @@ See also: biomcp list article")]
         #[arg(long, conflicts_with = "exclude_retracted")]
         include_retracted: bool,
 
-        /// Sort order [values: date, citations, relevance] (default: date)
-        #[arg(long, default_value = "date", value_parser = ["date", "citations", "relevance"])]
+        /// Sort order [values: date, citations, relevance] (default: relevance)
+        #[arg(long, default_value = "relevance", value_parser = ["date", "citations", "relevance"])]
         sort: String,
 
         /// Article source [values: all, pubtator, europepmc] (default: all)
@@ -1478,6 +1478,25 @@ See also: biomcp list study")]
 
 fn empty_sections() -> &'static [String] {
     &[]
+}
+
+fn related_article_filters() -> crate::entities::article::ArticleSearchFilters {
+    crate::entities::article::ArticleSearchFilters {
+        gene: None,
+        gene_anchored: false,
+        disease: None,
+        drug: None,
+        author: None,
+        keyword: None,
+        date_from: None,
+        date_to: None,
+        article_type: None,
+        journal: None,
+        open_access: false,
+        no_preprints: true,
+        exclude_retracted: true,
+        sort: crate::entities::article::ArticleSort::Relevance,
+    }
 }
 
 fn parse_batch_sections(value: Option<&str>) -> Vec<String> {
@@ -2674,18 +2693,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     let filters = crate::entities::article::ArticleSearchFilters {
                         gene,
                         gene_anchored: true,
-                        disease: None,
-                        drug: None,
-                        author: None,
                         keyword,
-                        date_from: None,
-                        date_to: None,
-                        article_type: None,
-                        journal: None,
-                        open_access: false,
-                        no_preprints: true,
-                        exclude_retracted: true,
-                        sort: crate::entities::article::ArticleSort::Date,
+                        ..related_article_filters()
                     };
 
                     let query = vec![
@@ -2900,20 +2909,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     offset,
                 } => {
                     let filters = crate::entities::article::ArticleSearchFilters {
-                        gene: None,
-                        gene_anchored: false,
                         disease: Some(name.clone()),
-                        drug: None,
-                        author: None,
-                        keyword: None,
-                        date_from: None,
-                        date_to: None,
-                        article_type: None,
-                        journal: None,
-                        open_access: false,
-                        no_preprints: true,
-                        exclude_retracted: true,
-                        sort: crate::entities::article::ArticleSort::Date,
+                        ..related_article_filters()
                     };
 
                     let query = if offset > 0 {
@@ -3100,18 +3097,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     let filters = crate::entities::article::ArticleSearchFilters {
                         gene: Some(symbol.clone()),
                         gene_anchored: true,
-                        disease: None,
-                        drug: None,
-                        author: None,
-                        keyword: None,
-                        date_from: None,
-                        date_to: None,
-                        article_type: None,
-                        journal: None,
-                        open_access: false,
-                        no_preprints: true,
-                        exclude_retracted: true,
-                        sort: crate::entities::article::ArticleSort::Date,
+                        ..related_article_filters()
                     };
                     let query = if offset > 0 {
                         format!("gene={symbol}, offset={offset}")
@@ -3203,20 +3189,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         pathway_name.to_string()
                     };
                     let filters = crate::entities::article::ArticleSearchFilters {
-                        gene: None,
-                        gene_anchored: false,
-                        disease: None,
-                        drug: None,
-                        author: None,
                         keyword: Some(keyword.clone()),
-                        date_from: None,
-                        date_to: None,
-                        article_type: None,
-                        journal: None,
-                        open_access: false,
-                        no_preprints: true,
-                        exclude_retracted: true,
-                        sort: crate::entities::article::ArticleSort::Date,
+                        ..related_article_filters()
                     };
                     let query = if offset > 0 {
                         format!("keyword={keyword}, offset={offset}")
@@ -5321,6 +5295,19 @@ mod tests {
     }
 
     #[test]
+    fn search_article_defaults_to_relevance_sort() {
+        let cli = Cli::try_parse_from(["biomcp", "search", "article", "-k", "melanoma"])
+            .expect("search article without --sort should parse");
+
+        match cli.command {
+            Commands::Search {
+                entity: super::SearchEntity::Article { sort, .. },
+            } => assert_eq!(sort, "relevance"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn search_article_parses_multi_token_keyword_and_until_alias() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -5399,6 +5386,19 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn related_article_filters_default_to_relevance_and_safety_flags() {
+        let filters = super::related_article_filters();
+
+        assert_eq!(
+            filters.sort,
+            crate::entities::article::ArticleSort::Relevance
+        );
+        assert!(!filters.open_access);
+        assert!(filters.no_preprints);
+        assert!(filters.exclude_retracted);
     }
 
     #[test]
