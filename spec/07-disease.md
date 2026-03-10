@@ -78,5 +78,5 @@ Exact disease labels should be reranked to the front of the returned page even w
 ```bash
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search disease "colorectal cancer" --limit 10)"
 echo "$out" | mustmatch like "| ID | Name | Synonyms |"
-echo "$out" | mustmatch like "colorectal cancer"
+echo "$out" | mustmatch like "| MONDO:0024331 | colorectal carcinoma |"
 ```

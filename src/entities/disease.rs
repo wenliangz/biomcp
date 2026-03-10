@@ -401,16 +401,20 @@ fn disease_candidate_labels(hit: &MyDiseaseHit) -> Vec<String> {
     deduped
 }
 
+fn best_disease_candidate_score(query: &str, hit: &MyDiseaseHit) -> i32 {
+    disease_candidate_labels(hit)
+        .into_iter()
+        .map(|label| disease_candidate_score(query, &label))
+        .max()
+        .unwrap_or(i32::MIN / 2)
+}
+
 fn scored_best_candidate(query: &str, hits: Vec<MyDiseaseHit>) -> Option<MyDiseaseHit> {
     let mut ranked: Vec<(i32, usize, String, MyDiseaseHit)> = hits
         .into_iter()
         .map(|hit| {
             let primary_name = transform::disease::name_from_mydisease_hit(&hit);
-            let best_score = disease_candidate_labels(&hit)
-                .into_iter()
-                .map(|label| disease_candidate_score(query, &label))
-                .max()
-                .unwrap_or(i32::MIN / 2);
+            let best_score = best_disease_candidate_score(query, &hit);
             let normalized_len = normalize_disease_text(&primary_name).len();
             (best_score, normalized_len, hit.id.clone(), hit)
         })
@@ -438,6 +442,53 @@ fn resolver_queries(name_or_id: &str) -> Vec<String> {
         }
     }
     queries
+}
+
+struct DiseaseSearchCandidate {
+    hit: MyDiseaseHit,
+    first_seen_query_idx: usize,
+    first_seen_upstream_idx: usize,
+}
+
+fn rerank_disease_search_hits(
+    query: &str,
+    query_hits: Vec<(usize, Vec<MyDiseaseHit>)>,
+) -> Vec<MyDiseaseHit> {
+    let mut deduped: HashMap<String, DiseaseSearchCandidate> = HashMap::new();
+    for (query_idx, hits) in query_hits {
+        for (upstream_idx, hit) in hits.into_iter().enumerate() {
+            deduped
+                .entry(hit.id.clone())
+                .or_insert(DiseaseSearchCandidate {
+                    hit,
+                    first_seen_query_idx: query_idx,
+                    first_seen_upstream_idx: upstream_idx,
+                });
+        }
+    }
+
+    let mut ranked = deduped
+        .into_values()
+        .map(|candidate| {
+            let display_name = transform::disease::name_from_mydisease_hit(&candidate.hit);
+            (
+                best_disease_candidate_score(query, &candidate.hit),
+                disease_exact_rank(&display_name, query),
+                candidate.first_seen_query_idx,
+                candidate.first_seen_upstream_idx,
+                candidate.hit.id.clone(),
+                candidate.hit,
+            )
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.3.cmp(&b.3))
+            .then_with(|| a.4.cmp(&b.4))
+    });
+    ranked.into_iter().map(|(_, _, _, _, _, hit)| hit).collect()
 }
 
 async fn resolve_disease_hit_by_name(
@@ -1338,50 +1389,55 @@ pub async fn search_page(
     } else {
         (needed.saturating_mul(5)).clamp(needed, 50)
     };
-    let resp = client
-        .query(
-            query,
-            fetch_size,
-            0,
-            filters.source.as_deref(),
-            inheritance,
-            phenotype,
-            onset,
-        )
-        .await?;
     let prefer_doid = filters
         .source
         .as_deref()
         .map(str::trim)
         .is_some_and(|s| s.eq_ignore_ascii_case("doid"));
-    let mut ranked = resp
-        .hits
-        .iter()
-        .enumerate()
-        .filter(|(_, hit)| {
-            inheritance.is_none_or(|value| inheritance_matches(hit, value))
-                && phenotype.is_none_or(|value| phenotype_matches(hit, value))
-                && onset.is_none_or(|value| onset_matches(hit, value))
-        })
-        .map(|(idx, hit)| {
-            let mut row = transform::disease::from_mydisease_search_hit(hit);
-            if prefer_doid && let Some(doid) = transform::disease::doid_from_mydisease_hit(hit) {
+
+    let mut merged_total = 0usize;
+    let mut query_hits = Vec::new();
+    for (query_idx, resolved_query) in resolver_queries(query).into_iter().enumerate() {
+        let resp = client
+            .query(
+                &resolved_query,
+                fetch_size,
+                0,
+                filters.source.as_deref(),
+                inheritance,
+                phenotype,
+                onset,
+            )
+            .await?;
+        merged_total = merged_total.max(resp.total);
+        let hits = resp
+            .hits
+            .into_iter()
+            .filter(|hit| {
+                inheritance.is_none_or(|value| inheritance_matches(hit, value))
+                    && phenotype.is_none_or(|value| phenotype_matches(hit, value))
+                    && onset.is_none_or(|value| onset_matches(hit, value))
+            })
+            .collect::<Vec<_>>();
+        query_hits.push((query_idx, hits));
+    }
+
+    let ranked_hits = rerank_disease_search_hits(query, query_hits);
+    let total = Some(merged_total.max(ranked_hits.len()));
+    let results = ranked_hits
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|hit| {
+            let mut row = transform::disease::from_mydisease_search_hit(&hit);
+            if prefer_doid && let Some(doid) = transform::disease::doid_from_mydisease_hit(&hit) {
                 row.id = doid;
             }
-            (disease_exact_rank(&row.name, query), idx, row)
+            row
         })
         .collect::<Vec<_>>();
-    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
-    Ok(SearchPage::offset(
-        ranked
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .map(|(_, _, row)| row)
-            .collect(),
-        Some(resp.total),
-    ))
+    Ok(SearchPage::offset(results, total))
 }
 
 pub fn search_query_summary(filters: &DiseaseSearchFilters) -> String {
@@ -1628,10 +1684,73 @@ mod tests {
     }
 
     #[test]
-    fn disease_candidate_score_prefers_broad_match_over_subtype() {
-        let broad = disease_candidate_score("breast cancer", "breast carcinoma");
-        let subtype = disease_candidate_score("breast cancer", "sporadic breast carcinoma");
+    fn disease_candidate_score_prefers_canonical_colorectal_match_over_subtype() {
+        let broad = disease_candidate_score("colorectal cancer", "colorectal carcinoma");
+        let subtype = disease_candidate_score(
+            "colorectal cancer",
+            "hereditary nonpolyposis colorectal cancer type 6",
+        );
         assert!(broad > subtype);
+    }
+
+    fn test_disease_hit(
+        id: &str,
+        disease_name: &str,
+        mondo_synonyms: &[&str],
+        do_synonyms: &[&str],
+    ) -> MyDiseaseHit {
+        serde_json::from_value(serde_json::json!({
+            "_id": id,
+            "mondo": {
+                "name": disease_name,
+                "synonym": mondo_synonyms,
+            },
+            "disease_ontology": {
+                "name": disease_name,
+                "synonyms": do_synonyms,
+            }
+        }))
+        .expect("valid disease hit")
+    }
+
+    #[test]
+    fn rerank_disease_search_hits_prefers_canonical_exact_candidate_across_query_variants() {
+        let canonical = test_disease_hit(
+            "MONDO:0024331",
+            "colorectal carcinoma",
+            &["colorectal cancer"],
+            &["colorectal cancer"],
+        );
+
+        let ranked = rerank_disease_search_hits(
+            "colorectal cancer",
+            vec![
+                (
+                    0,
+                    vec![test_disease_hit(
+                        "MONDO:0101010",
+                        "hereditary nonpolyposis colorectal cancer type 6",
+                        &[],
+                        &[],
+                    )],
+                ),
+                (
+                    1,
+                    vec![
+                        canonical,
+                        test_disease_hit(
+                            "MONDO:0101010",
+                            "hereditary nonpolyposis colorectal cancer type 6",
+                            &[],
+                            &[],
+                        ),
+                    ],
+                ),
+            ],
+        );
+
+        let ids = ranked.iter().map(|hit| hit.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["MONDO:0024331", "MONDO:0101010"]);
     }
 
     #[test]
