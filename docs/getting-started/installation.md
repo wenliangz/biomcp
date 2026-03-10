@@ -4,7 +4,24 @@ This page covers supported BioMCP installation paths and verification checks.
 
 After installation, the `biomcp` command should be available in your shell.
 
-## Option 1: Installer script (recommended)
+## Option 1: PyPI package
+
+```bash
+uv tool install biomcp-cli
+# or, inside an active Python environment:
+# pip install biomcp-cli
+```
+
+Install the `biomcp-cli` package, then use the `biomcp` command in the rest of
+this guide.
+
+Verify:
+
+```bash
+biomcp --version
+```
+
+## Option 2: Installer script
 
 ```bash
 curl -fsSL https://biomcp.org/install.sh | bash
@@ -24,7 +41,7 @@ Verify:
 biomcp --version
 ```
 
-## Option 2: Source build
+## Option 3: Source build
 
 From a local checkout:
 
