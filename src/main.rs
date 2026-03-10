@@ -34,6 +34,13 @@ async fn main() -> std::process::ExitCode {
                 }
             }
         }
+        biomcp_cli::cli::Commands::ServeSse => match biomcp_cli::mcp::run_sse().await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("Error: {err}");
+                std::process::ExitCode::from(1)
+            }
+        },
         _ => match biomcp_cli::cli::run(cli).await {
             Ok(output) => {
                 println!("{output}");

@@ -11,15 +11,28 @@ pub async fn run_stdio() -> anyhow::Result<()> {
     shell::run_stdio().await
 }
 
-/// Runs the BioMCP MCP server over HTTP with SSE transport.
+/// Runs the BioMCP MCP server over Streamable HTTP.
 ///
 /// Starts an HTTP server on `host:port` with:
-/// - `GET /sse` — SSE stream for server-to-client messages
-/// - `POST /message?sessionId=<id>` — client-to-server JSON-RPC messages
+/// - `POST /mcp` — Streamable HTTP JSON-RPC requests
+/// - `GET /mcp` — SSE stream managed by the Streamable HTTP session
+/// - `GET /health` — liveness probe
+/// - `GET /readyz` — readiness alias
+/// - `GET /` — identity/status response
 ///
 /// # Errors
 ///
 /// Returns an error when TCP bind or server startup fails.
 pub async fn run_http(host: &str, port: u16) -> anyhow::Result<()> {
     shell::run_http(host, port).await
+}
+
+/// Returns the deprecation guidance for the removed SSE transport command.
+pub const fn sse_deprecation_message() -> &'static str {
+    "The legacy SSE transport has been removed. Use `biomcp serve-http` and connect to `/mcp` instead."
+}
+
+/// Returns a deprecation error for the removed SSE transport command.
+pub async fn run_sse() -> anyhow::Result<()> {
+    anyhow::bail!("{}", sse_deprecation_message())
 }

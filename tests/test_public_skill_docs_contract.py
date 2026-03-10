@@ -53,10 +53,19 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "biomcp skill [list|install|<name>]" not in cli_reference
     assert "biomcp skill install [dir]" in cli_reference
     assert "biomcp skill list                 # legacy compatibility alias" in cli_reference
+    assert "biomcp serve-sse" in cli_reference
+    assert "Streamable HTTP" in cli_reference
+    assert "/mcp" in cli_reference
 
     assert "one markdown resource per registered skill use-case" not in mcp_server
     assert "biomcp://help" in mcp_server
     assert "No `biomcp://skill/<slug>` resources are currently listed" in mcp_server
+    assert "Streamable HTTP" in mcp_server
+    assert "`biomcp serve-http`" in mcp_server
+    assert "`/mcp`" in mcp_server
+    assert "`/health`" in mcp_server
+    assert "`/readyz`" in mcp_server
+    assert "`/`" in mcp_server
 
     assert "one resource per installed skill" not in claude_desktop
     assert "biomcp://help" in claude_desktop

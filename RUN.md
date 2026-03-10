@@ -51,14 +51,21 @@ Minimal client configuration:
 
 `serve` is the canonical operator spelling and is equivalent to `biomcp mcp`.
 
-## Run: HTTP/SSE Mode
+## Run: Streamable HTTP Mode
 
 ```bash
 ./target/release/biomcp serve-http --host 127.0.0.1 --port 8080
 ```
 
-This serves MCP over `/sse` and `/message`. Use `--host 0.0.0.0` only when the
-endpoint must be reachable from other machines or containers on the network.
+This serves MCP over Streamable HTTP at `/mcp`. Use `--host 0.0.0.0` only when
+the endpoint must be reachable from other machines or containers on the network.
+
+Owned routes:
+
+- `POST/GET /mcp`
+- `GET /health`
+- `GET /readyz`
+- `GET /`
 
 ## Environment Variables
 
@@ -86,6 +93,10 @@ Use `analysis/technical/staging-demo.md` for the promotion contract and
 
 ```bash
 uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"
+uv run pytest tests/test_mcp_http_surface.py tests/test_mcp_http_transport.py -v
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/
 ```
 
 See `docs/reference/mcp-server.md` for the documented MCP surface.

@@ -45,6 +45,7 @@ biomcp skill list                 # legacy compatibility alias
 biomcp mcp
 biomcp serve
 biomcp serve-http [--host 127.0.0.1] [--port 8080]
+biomcp serve-sse                  # removed compatibility command; use serve-http
 biomcp update [--check]
 biomcp uninstall
 biomcp version
@@ -231,7 +232,10 @@ biomcp enrich BRAF,KRAS,NRAS --limit 10 --json
 ## MCP mode
 
 - `biomcp serve` runs the stdio MCP server.
-- `biomcp serve-http` runs MCP over HTTP/SSE.
+- `biomcp serve-http` runs the MCP Streamable HTTP server.
+- Streamable HTTP clients connect to `/mcp`.
+- Probe routes: `/health`, `/readyz`, and `/`.
+- `biomcp serve-sse` remains visible only as a removed compatibility command that points back to `biomcp serve-http`.
 
 See also: `docs/reference/mcp-server.md`.
 

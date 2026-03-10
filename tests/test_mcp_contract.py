@@ -17,6 +17,9 @@ async def test_initialize_advertises_tools_and_resources(
         capabilities = initialize_result.capabilities
         assert capabilities.tools is not None
         assert capabilities.resources is not None
+        assert initialize_result.instructions is not None
+        assert "biomcp skill list" not in initialize_result.instructions
+        assert "biomcp skill" in initialize_result.instructions
 
 
 @pytest.mark.asyncio

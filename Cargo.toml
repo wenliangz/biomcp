@@ -24,12 +24,13 @@ path = "src/main_biomcp_cli.rs"
 clap = { version = "4", features = ["derive"] }
 
 # Async
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "signal", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "signal", "io-util", "net"] }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 futures = "0.3"
 
 # HTTP
+axum = { version = "0.8.1", default-features = false, features = ["tokio", "http1", "json"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "multipart"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.7"
@@ -53,7 +54,7 @@ regex = "1"
 csv = "1"
 
 # MCP
-rmcp = { version = "0.1", features = ["server", "transport-io", "transport-sse-server"] }
+rmcp = { version = "1.1.1", features = ["server", "transport-io", "transport-streamable-http-server"] }
 
 # Templates
 minijinja = { version = "2", features = ["builtins"] }

@@ -9,10 +9,11 @@ BioMCP is a single Rust binary (`biomcp`) with two operating modes:
 - **MCP server mode:** `biomcp serve` starts a JSON-RPC MCP server over stdio.
   Agents connect through the MCP protocol and call tools that mirror the CLI
   command surface.
-- **HTTP mode:** `biomcp serve-http --host 0.0.0.0 --port 8080` starts an HTTP
-  relay for multi-worker deployments. This is the canonical scaling answer when
-  rate limiting needs to be shared across concurrent agent workers, since rate
-  limiting is otherwise process-local.
+- **HTTP mode:** `biomcp serve-http --host 0.0.0.0 --port 8080` starts the
+  Streamable HTTP server. Remote MCP traffic uses `/mcp`, and lightweight
+  probes live at `/health`, `/readyz`, and `/`. This is the canonical scaling
+  answer when rate limiting needs to be shared across concurrent agent workers,
+  since rate limiting is otherwise process-local.
 
 The binary is also distributed as `biomcp-cli` on PyPI (a thin Python wrapper
 that ships the platform-specific Rust binary). Python is packaging only;
@@ -71,7 +72,7 @@ cache mode, replaying prior responses without hitting upstream APIs.
 Rate limiting is process-local. Multiple concurrent CLI invocations or MCP
 server workers do NOT share a limiter. For deployments with many concurrent
 agent workers, run a single shared `biomcp serve-http` endpoint so all workers
-share one limiter budget.
+share one limiter budget and one Streamable HTTP `/mcp` surface.
 
 ## Release Pipeline
 

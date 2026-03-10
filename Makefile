@@ -18,8 +18,8 @@ clean:
 
 spec:
 	XDG_CACHE_HOME="$(CURDIR)/.cache" PATH="$(CURDIR)/target/release:$(PATH)" \
-		uv run --extra dev pytest spec/ --mustmatch-lang bash --mustmatch-timeout 60 -v
+		uv run --extra dev sh -c 'PATH="$(CURDIR)/target/release:$$PATH" pytest spec/ --mustmatch-lang bash --mustmatch-timeout 60 -v'
 
 validate-skills:
 	XDG_CACHE_HOME="$(CURDIR)/.cache" PATH="$(CURDIR)/target/release:$(PATH)" \
-		uv run --extra dev ./scripts/validate-skills.sh
+		uv run --extra dev sh -c 'PATH="$(CURDIR)/target/release:$$PATH" ./scripts/validate-skills.sh'

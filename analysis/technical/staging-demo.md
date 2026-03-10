@@ -17,8 +17,8 @@ not guarantee the exact post-merge source state.
 - CLI mode: `./target/release/biomcp <command> [args]`
 - MCP stdio mode: `./target/release/biomcp serve`
 - Equivalent MCP alias: `biomcp mcp`
-- HTTP/SSE mode: `./target/release/biomcp serve-http --host 127.0.0.1 --port 8080`
-- Shared-network HTTP/SSE variant: `./target/release/biomcp serve-http --host 0.0.0.0 --port 8080`
+- Streamable HTTP mode: `./target/release/biomcp serve-http --host 127.0.0.1 --port 8080`
+- Shared-network Streamable HTTP variant: `./target/release/biomcp serve-http --host 0.0.0.0 --port 8080`
 
 `serve` is the canonical operator spelling because current client examples and
 contract tests use it directly.
@@ -30,7 +30,7 @@ contract tests use it directly.
   corpus for baseline validation
 - Baseline validation hits live upstream APIs
 - Optional local replay aid: `BIOMCP_CACHE_MODE=infinite`
-- HTTP/SSE owned endpoints: `/sse` and `/message` on the chosen bind address
+- Streamable HTTP owned endpoints: `POST/GET /mcp`, `GET /health`, `GET /readyz`, and `GET /` on the chosen bind address
 
 Cache state is process-local and optional. It is not a shared artifact that
 future tickets should treat as part of promotion.
@@ -57,14 +57,16 @@ MCP stdio proof:
 uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"
 ```
 
-HTTP/SSE proof:
+Streamable HTTP proof:
 
 1. Start `./target/release/biomcp serve-http --host 127.0.0.1 --port 8080`
-2. Confirm the bind address in logs
-3. Confirm `/sse` and `/message` respond on that bind
+2. Confirm `GET /health` returns `{"status":"ok"}`
+3. Confirm `GET /readyz` returns `{"status":"ok"}`
+4. Confirm `GET /` returns the BioMCP identity document
+5. Confirm one MCP initialize request succeeds against `POST/GET /mcp`
 
-Automated MCP contract coverage in the repo is stdio-based today. There is no
-separate automated HTTP/SSE contract suite yet.
+Automated MCP contract coverage includes stdio plus the Streamable HTTP suites
+in `tests/test_mcp_http_surface.py` and `tests/test_mcp_http_transport.py`.
 
 ## Promotion Steps
 

@@ -84,7 +84,7 @@ Results depend on source document wording and may vary across sources.
 ## Deployment Notes
 
 - Set `NCBI_API_KEY` to increase NCBI request throughput for article annotation/full-text paths.
-- In multi-worker environments, run one shared `biomcp serve-http` process so workers use a single BioMCP SSE server and one limiter budget.
+- In multi-worker environments, run one shared `biomcp serve-http` process so workers share one Streamable HTTP `/mcp` endpoint and one limiter budget.
 
 ## Ops
 
