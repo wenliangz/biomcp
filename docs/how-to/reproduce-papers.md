@@ -1,40 +1,39 @@
-# Reproduce Paper Workflows with Skills
+# Reproduce Paper Workflows
 
-BioMCP paper demos are consolidated into embedded skill workflows so any agent can run them without a custom runtime. Use this guide to map each paper-style task to the canonical skill and execution pattern.
+BioMCP paper-style workflows are best reproduced with direct CLI commands. If
+you want the agent-facing guide first, run `biomcp skill` or install it into
+your agent directory, then execute the commands that match the paper pattern you
+want to reproduce.
 
 ## Mapping
 
-| Paper-style workflow | Canonical skill | Typical command |
-|----------------------|-----------------|-----------------|
-| GeneGPT | `09-gene-function-lookup` | `biomcp skill gene-function-lookup` |
-| GeneAgent | `10-gene-set-analysis` | `biomcp skill gene-set-analysis` |
-| TrialGPT | `03-trial-searching` (patient matching section) | `biomcp skill 03` |
-| PubMed & Beyond | `11-literature-synthesis` | `biomcp skill literature-synthesis` |
+| Paper-style workflow | BioMCP workflow area | Representative commands |
+|----------------------|----------------------|-------------------------|
+| GeneGPT | gene, variant, trial, and article walkthroughs | `biomcp get gene BRAF`, `biomcp get variant "BRAF V600E" population`, `biomcp variant trials "BRAF V600E" --limit 3`, `biomcp search article -g BRAF -d melanoma --limit 3` |
+| GeneAgent | pathway, drug, and protein synthesis | `biomcp get pathway R-HSA-5673001 genes`, `biomcp pathway drugs R-HSA-5673001 --limit 3`, `biomcp protein structures P15056` |
+| TrialGPT | trial discovery and patient matching | `biomcp search trial -c melanoma --mutation "BRAF V600E" --status recruiting --limit 5` |
+| PubMed & Beyond | literature synthesis | `biomcp search article -g BRAF -d melanoma --limit 5`, `biomcp get article 22663011 fulltext` |
 
-## Basic Flow
+## Suggested execution pattern
 
-1. List available workflows.
-2. Retrieve one by number or slug.
-3. Execute the included CLI steps.
-4. Verify results against that skill's validation checklist.
+1. Pick the workflow area that matches the paper task.
+2. Run the direct CLI commands for that area.
+3. Save command output in a markdown log with stable IDs such as PMIDs, gene
+   symbols, pathway IDs, and NCT IDs.
+4. Verify the final summary against the paper's reported entities and evidence.
 
-```bash
-biomcp skill list
-biomcp skill gene-function-lookup
-```
-
-## Suggested Execution Pattern
-
-For a reproducible run, copy command output to a markdown log and keep IDs (PMIDs/NCT IDs) visible in the final summary.
+## Example session
 
 ```bash
-biomcp skill 10
-biomcp enrich "BRCA1,TP53,ATM,CHEK2,PALB2" --limit 10
-biomcp get gene BRCA1 pathways
+biomcp get gene BRAF
+biomcp get variant "BRAF V600E" population
+biomcp search trial -c melanoma --mutation "BRAF V600E" --status recruiting --limit 5
+biomcp get article 22663011 fulltext
 ```
 
 ## Notes
 
-- Skills are model agnostic; any shell-capable agent can execute them.
+- The BioMCP guide is optional context, not the primary execution path.
 - If a service is temporarily rate limited, retry after a short pause.
-- If enrichment is unavailable, continue with pathway/interaction/literature verification steps in skill 10.
+- If enrichment is unavailable, continue with pathway, interaction, or
+  literature checks that answer the same paper question.

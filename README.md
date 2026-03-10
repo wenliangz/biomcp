@@ -150,29 +150,17 @@ biomcp serve-http --host 0.0.0.0 --port 8080
 
 ## Skills
 
-14 guided investigation workflows are built in:
+BioMCP ships an embedded agent guide instead of a browsable in-binary catalog.
+Use `biomcp skill` to read the embedded BioMCP guide, then install it into
+your agent directory when you want local copies of the workflow references:
 
 ```bash
-biomcp skill list
-biomcp skill show 03
+biomcp skill
+biomcp skill install ~/.claude --force
 ```
 
-| # | Skill | Focus |
-|---|-------|-------|
-| 01 | variant-to-treatment | Variant annotation to treatment options |
-| 02 | drug-investigation | Drug mechanism, safety, alternatives |
-| 03 | trial-searching | Trial discovery and patient matching |
-| 04 | rare-disease | Rare disease evidence and trial strategy |
-| 05 | drug-shortages | Shortage monitoring and alternatives |
-| 06 | advanced-therapies | CAR-T and checkpoint therapy workflows |
-| 07 | hereditary-cancer | Hereditary cancer syndrome workup |
-| 08 | resistance | Resistance mechanisms and next-line options |
-| 09 | gene-function-lookup | Gene-centric function and context |
-| 10 | gene-set-analysis | Enrichment, pathway, and interaction synthesis |
-| 11 | literature-synthesis | Evidence synthesis with cross-entity checks |
-| 12 | pharmacogenomics | PGx gene-drug interactions and dosing |
-| 13 | phenotype-triage | Symptom-first rare disease workup |
-| 14 | protein-pathway | Protein structure and pathway deep dive |
+See [Skills](docs/getting-started/skills.md) for supported install targets,
+installed files, and legacy compatibility notes.
 
 ## Ops
 

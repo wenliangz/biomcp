@@ -31,7 +31,9 @@ biomcp enrich <GENE1,GENE2,...> [--limit N]
 biomcp batch <entity> <id1,id2,...> [--sections ...] [--source ...]
 biomcp health [--apis-only]
 biomcp list [entity]
-biomcp skill [list|install|<name>]
+biomcp skill
+biomcp skill install [dir]
+biomcp skill list                 # legacy compatibility alias
 biomcp mcp
 biomcp serve
 biomcp serve-http [--host 127.0.0.1] [--port 8080]
@@ -39,6 +41,10 @@ biomcp update [--check]
 biomcp uninstall
 biomcp version
 ```
+
+Numeric and slug skill lookups remain compatibility behavior, but they are not
+part of the recommended command synopsis because current builds do not ship a
+browsable embedded catalog.
 
 ## Search command families
 

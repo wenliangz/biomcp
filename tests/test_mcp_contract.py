@@ -61,15 +61,7 @@ async def test_list_resources_returns_expected_inventory(
         result = await session.list_resources()
         actual = [(str(resource.uri), resource.name) for resource in result.resources]
 
-        assert actual
-        assert actual[0] == EXPECTED_HELP_RESOURCE
-        assert len({uri for uri, _name in actual}) == len(actual)
-
-        skill_resources = actual[1:]
-        for uri, name in skill_resources:
-            assert uri.startswith("biomcp://skill/")
-            assert name.startswith("Pattern: ")
-            assert "Pattern: Pattern:" not in name
+        assert actual == [EXPECTED_HELP_RESOURCE]
 
 
 @pytest.mark.asyncio
