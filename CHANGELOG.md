@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.14 — 2026-03-10
+
+- Promoted remote Streamable HTTP in newcomer docs with a dedicated getting-started page for `biomcp serve-http`.
+- Added a runnable PEP 723 demo client at `demo/streamable_http_client.py` for `/mcp`, including a `tools/list` flow and `biomcp version` tool call.
+- Surfaced the canonical remote HTTP routes more prominently across public docs: `/mcp`, `/health`, `/readyz`, and `/`.
+- Kept `serve-sse` migration guidance visible while shipping the Streamable HTTP release/docs/demo verification package together.
+
 ## 0.8.13 — 2026-03-09
 
 - `study survival` now reports Kaplan-Meier median survival, 1/3/5-year survival landmarks, and two-group log-rank p-values.

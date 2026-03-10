@@ -22,10 +22,11 @@ def test_changelog_has_backfilled_releases_and_release_header() -> None:
     changelog = _read("CHANGELOG.md")
 
     assert "## [Unreleased]" not in changelog
-    assert "## 0.8.13 — 2026-03-09" in changelog
+    assert "## 0.8.14 — 2026-03-10" in changelog
     assert "## 0.9.0" not in changelog
 
     expected_releases = [
+        ("0.8.14", "2026-03-10"),
         ("0.8.13", "2026-03-09"),
         ("0.8.12", "2026-03-07"),
         ("0.8.11", "2026-03-06"),
@@ -40,6 +41,63 @@ def test_changelog_has_backfilled_releases_and_release_header() -> None:
         header = f"## {version} — {date}"
         assert header in changelog
         assert "\n- " in _markdown_section_block(changelog, header)
+
+
+def test_remote_http_docs_are_promoted_for_newcomers() -> None:
+    readme = _read("README.md")
+    docs_index = _read("docs/index.md")
+    mkdocs = _read("mkdocs.yml")
+    remote_http = _read("docs/getting-started/remote-http.md")
+
+    assert "### Remote HTTP server" in readme
+    assert "biomcp serve-http --host 127.0.0.1 --port 8080" in readme
+    assert "http://127.0.0.1:8080/mcp" in readme
+    assert "demo/streamable_http_client.py" in readme
+    assert "https://biomcp.org/getting-started/remote-http/" in readme
+    assert readme.index("### Remote HTTP server") < readme.index(
+        "## Multi-worker deployment"
+    )
+
+    assert "### Remote HTTP server" in docs_index
+    assert "biomcp serve-http --host 127.0.0.1 --port 8080" in docs_index
+    assert "http://127.0.0.1:8080/mcp" in docs_index
+    assert "`/health`, `/readyz`, and `/`" in docs_index
+    assert "getting-started/remote-http.md" in docs_index
+    assert "demo/streamable_http_client.py" in docs_index
+
+    assert "Remote HTTP Server: getting-started/remote-http.md" in mkdocs
+
+    assert "# Remote Streamable HTTP Server" in remote_http
+    assert "Use `biomcp serve-http` when you need one shared MCP server" in remote_http
+    assert "Use `biomcp serve` when a single local client" in remote_http
+    assert "biomcp serve-http --host 127.0.0.1 --port 8080" in remote_http
+    assert "`/mcp`" in remote_http
+    assert "`/health`" in remote_http
+    assert "`/readyz`" in remote_http
+    assert "streamable_http_client" in remote_http
+    assert "terminate_on_close=False" in remote_http
+    assert "demo/streamable_http_client.py" in remote_http
+
+
+def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
+    demo_script = _read("demo/streamable_http_client.py")
+
+    assert demo_script.startswith("#!/usr/bin/env -S uv run --script")
+    assert '# requires-python = ">=3.11"' in demo_script
+    assert '"mcp>=' in demo_script
+    assert "biomcp serve-http --host 127.0.0.1 --port 8080" in demo_script
+    assert "uv run --script demo/streamable_http_client.py" in demo_script
+    assert 'DEFAULT_BASE_URL = "http://127.0.0.1:8080"' in demo_script
+    assert 'mcp_url = f"{base_url.rstrip(\'/\')}/mcp"' in demo_script
+    assert "terminate_on_close=False" in demo_script
+    assert '"shell"' in demo_script
+    assert '"biomcp version"' in demo_script
+
+
+def test_release_overview_mentions_v0_8_14_streamable_http_release() -> None:
+    overview = _read("analysis/technical/overview.md")
+
+    assert "**Current version:** 0.8.14 (as of 2026-03-10)" in overview
 
 
 def test_gene_guide_includes_new_sections_and_positional_search() -> None:

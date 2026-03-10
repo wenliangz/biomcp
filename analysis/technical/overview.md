@@ -28,11 +28,12 @@ curl ... install.sh | bash       # binary installer (resolves latest release)
 ```
 
 - **Edition:** Rust 2024
-- **Current version:** 0.8.13 (as of 2026-03-09)
+- **Current version:** 0.8.14 (as of 2026-03-10)
 - **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
 - **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
-- **Release checklist:** Bump `Cargo.toml` version, update `CHANGELOG.md`,
-  cut a GitHub release with tag — the release workflow builds and publishes
+- **Release checklist:** Bump `Cargo.toml` and `pyproject.toml`, update
+  `CHANGELOG.md`, verify version sync, then cut a GitHub release tag — the
+  release workflow builds and publishes
 
 ## Source Integration Patterns
 
@@ -76,7 +77,7 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
 
 ## Release Pipeline
 
-1. Update version in `Cargo.toml` and `CHANGELOG.md`
+1. Update version in `Cargo.toml`, `pyproject.toml`, and `CHANGELOG.md`
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
@@ -138,6 +139,18 @@ workflows. These scripts:
 - Exit non-zero on any assertion failure
 
 These are the canonical smoke checks for a working release.
+
+### 5. Remote HTTP Demo Artifact (`demo/streamable_http_client.py`)
+
+Release verification for the Streamable HTTP surface also includes the standalone
+PEP 723 demo client. Run `biomcp serve-http`, then execute:
+
+```bash
+uv run --script demo/streamable_http_client.py
+```
+
+The demo initializes against `/mcp`, lists tools, and performs one `shell`
+tool call (`biomcp version`).
 
 ## Known Constraints
 
