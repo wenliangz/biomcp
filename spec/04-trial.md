@@ -47,7 +47,7 @@ echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 The `1/2` shorthand should preserve the raw query echo while broadening to the combined ClinicalTrials.gov phase bucket. This regression guards the overly narrow early-phase mapping bug.
 
 ```bash
-out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search trial -c melanoma --phase 1/2 --limit 3)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma --phase 1/2 --limit 3)"
 echo "$out" | mustmatch like "phase=1/2"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
@@ -67,7 +67,7 @@ echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 Intervention code searches should normalize the confirmed space-delimited drug-code pattern before dispatch. The CLI should still echo the user query while returning the standard trial table.
 
 ```bash
-out="$(/home/ian/workspace/worktrees/P028-biomcp/target/release/biomcp search trial -c "pancreatic cancer" --intervention "HRS 4642" --limit 1)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c "pancreatic cancer" --intervention "HRS 4642" --limit 1)"
 echo "$out" | mustmatch like "intervention=HRS 4642"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
