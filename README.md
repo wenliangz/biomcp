@@ -41,6 +41,26 @@ biomcp skill install ~/.claude --force
 }
 ```
 
+### Remote HTTP server
+
+For shared or remote deployments:
+
+```bash
+biomcp serve-http --host 127.0.0.1 --port 8080
+```
+
+Remote clients connect to `http://127.0.0.1:8080/mcp`. Probe routes are
+`GET /health`, `GET /readyz`, and `GET /`.
+
+Runnable demo:
+
+```bash
+uv run --script demo/streamable_http_client.py
+```
+
+See [Remote HTTP Server](https://biomcp.org/getting-started/remote-http/) for
+the newcomer guide.
+
 ### From source
 
 ```bash
