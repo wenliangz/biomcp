@@ -4838,7 +4838,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
     .await
 }
 
-/// Main CLI execution - called by MCP `shell` tool.
+/// Main CLI execution - called by the MCP `biomcp` tool.
 ///
 /// # Errors
 ///

@@ -73,7 +73,7 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
 impl BioMcpServer {
     #[doc = include_str!(concat!(env!("OUT_DIR"), "/mcp_shell_description.txt"))]
     #[tool]
-    async fn shell(
+    async fn biomcp(
         &self,
         Parameters(ShellCommand { command }): Parameters<ShellCommand>,
     ) -> Result<String, String> {
@@ -95,7 +95,7 @@ impl BioMcpServer {
 
         if !is_allowed_mcp_command(&args) {
             return Err(
-                "Error: MCP shell allows read-only commands only (search/get/helpers/study/list/version/health/batch/enrich/skill)."
+                "Error: BioMCP allows read-only commands only (search/get/helpers/study/list/version/health/batch/enrich/skill)."
                     .to_string(),
             );
         }
@@ -119,7 +119,7 @@ impl ServerHandler for BioMcpServer {
         .with_instructions(
             "BioMCP provides biomedical data from 15 sources (PubMed, ClinicalTrials.gov, \
              ClinVar, gnomAD, OncoKB, Reactome, UniProt, PharmGKB, OpenFDA, and more). \
-             Use the `shell` tool to run BioMCP CLI commands. \
+             Use the `biomcp` tool to run BioMCP CLI commands. \
              Start with `biomcp list` for a command reference, \
              or `biomcp skill` for guided investigation workflows."
                 .to_string(),

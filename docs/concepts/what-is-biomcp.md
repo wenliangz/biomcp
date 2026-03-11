@@ -76,7 +76,7 @@ The second command gives focused depth.
 
 The server advertises:
 
-- tools: one execution tool (`shell`)
+- tools: one execution tool (`biomcp`)
 - resources: curated markdown help and pattern documents
 
 This keeps client integration simple while preserving discoverability.

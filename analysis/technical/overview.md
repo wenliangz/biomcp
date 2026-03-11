@@ -152,9 +152,9 @@ standalone Streamable HTTP demo client
 uv run --script demo/streamable_http_client.py
 ```
 
-The demo initializes against `/mcp`, prints server identity, then runs a
-three-step mutation -> evidence -> trials workflow through the remote `shell`
-tool:
+The demo initializes against `/mcp`, prints server identity, lists the
+available tools, then runs a three-step mutation -> evidence -> trials workflow
+through the remote `biomcp` tool:
 
 - `biomcp search all --gene BRAF --disease melanoma --counts-only`
 - `biomcp get variant "BRAF V600E" clinvar`

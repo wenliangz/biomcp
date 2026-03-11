@@ -30,7 +30,7 @@ biomcp health --apis-only
 
 When connected, clients should discover:
 
-- one tool: `shell`
+- one tool: `biomcp`
 - one help resource (`biomcp://help`)
 
 Current builds do not discover a browsable `biomcp://skill/<slug>` catalog because no embedded use-case files ship.

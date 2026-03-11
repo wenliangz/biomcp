@@ -74,11 +74,14 @@ async def main(base_url: str) -> None:
         ) as session:
             initialize_result = await session.initialize()
             print(initialize_result.serverInfo)
+            tools_result = await session.list_tools()
+            tool_names = [tool.name for tool in tools_result.tools]
+            print(f"Available tools: {', '.join(tool_names)}")
 
             for title, command in selected_steps():
                 print(f"\n=== {title} ===")
                 call_result = await session.call_tool(
-                    "shell",
+                    "biomcp",
                     arguments={"command": command},
                 )
                 for content in call_result.content:

@@ -48,7 +48,7 @@ A single lookup is a clean comparison, but the real payoff is multi-step. A rese
 
 ### 1. One tool does it all
 
-The old version was an MCP server that happened to have a CLI. The new version is a CLI that happens to serve MCP — one tool called `shell` that proxies the full command hierarchy:
+The old version was an MCP server that happened to have a CLI. The new version is a CLI that happens to serve MCP — one tool called `biomcp` that proxies the full command hierarchy:
 
 ```
 ## Patterns

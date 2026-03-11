@@ -87,10 +87,11 @@ async def test_streamable_http_supports_initialize_list_tools_and_tool_call(
 
             tools_result = await session.list_tools()
             names = {tool.name for tool in tools_result.tools}
-            assert "shell" in names
+            assert "biomcp" in names
+            assert 'shell' not in names
 
             call_result = await session.call_tool(
-                "shell",
+                "biomcp",
                 arguments={"command": "biomcp version"},
             )
             text_chunks = [
