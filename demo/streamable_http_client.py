@@ -18,12 +18,13 @@ from __future__ import annotations
 import asyncio
 import sys
 from datetime import timedelta
+from typing import TypeAlias
 
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamable_http_client
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
-type ScenarioStep = tuple[str, str]
+ScenarioStep: TypeAlias = tuple[str, str]
 
 # Named demo scenarios keep the workflow loop stable as stories expand.
 SCENARIOS: dict[str, list[ScenarioStep]] = {
