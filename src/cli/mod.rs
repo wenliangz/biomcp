@@ -4195,6 +4195,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
 
                     let query =
                         trial_search_query_summary(&filters, offset, next_page.as_deref());
+                    if count_only {
+                        let total = crate::entities::trial::count_all(&filters).await?;
+                        if cli.json {
+                            #[derive(serde::Serialize)]
+                            struct TrialCountOnlyJson {
+                                total: usize,
+                            }
+                            return Ok(crate::render::json::to_pretty(&TrialCountOnlyJson {
+                                total,
+                            })?);
+                        }
+                        return Ok(format!("Total: {total}"));
+                    }
                     let page = crate::entities::trial::search_page(
                         &filters,
                         limit,
@@ -4202,21 +4215,6 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         next_page.clone(),
                     )
                     .await?;
-                    if count_only {
-                        if cli.json {
-                            #[derive(serde::Serialize)]
-                            struct TrialCountOnlyJson {
-                                total: Option<usize>,
-                            }
-                            return Ok(crate::render::json::to_pretty(&TrialCountOnlyJson {
-                                total: page.total,
-                            })?);
-                        }
-                        return Ok(match page.total {
-                            Some(total) => format!("Total: {total}"),
-                            None => "Total: unknown".to_string(),
-                        });
-                    }
                     let results = page.results;
                     let pagination = PaginationMeta::cursor(
                         offset,

@@ -32,6 +32,21 @@ echo "$out" | mustmatch like "status=recruiting"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 
+## Age Filter Count Stability
+
+Age-filtered count-only search must report the same total regardless of display
+limit. This guards the CTGov post-filter pagination bug where `Total:` changed
+with `--limit`.
+
+```bash
+t10="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 10 --count-only | sed -n 's/^Total: //p')"
+t20="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 20 --count-only | sed -n 's/^Total: //p')"
+t50="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 50 --count-only | sed -n 's/^Total: //p')"
+test -n "$t10"
+test "$t10" = "$t20"
+test "$t20" = "$t50"
+```
+
 ## Filtering by Phase
 
 Trial phase helps separate exploratory from confirmatory evidence. The phase-specific query marker should be present with the standard trial table.
