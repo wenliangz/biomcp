@@ -1,6 +1,6 @@
 # MCP Server Reference
 
-BioMCP exposes one execution tool (`shell`) and a current resource inventory
+BioMCP exposes one execution tool (`biomcp`) and a current resource inventory
 centered on the help guide. This page documents the stable MCP contract and
 executes lightweight checks against the source tree.
 

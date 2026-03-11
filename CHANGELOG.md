@@ -9,6 +9,8 @@
 - Refreshed the public discovery docs so `search all` is taught as the unified
   cross-entity entry point in the README and docs index. This is the docs
   alignment from PR #190.
+- Breaking MCP runtime change: renamed the MCP execution tool from `shell` to
+  `biomcp`; update MCP clients and demos to call `biomcp` after `tools/list`.
 
 ## 0.8.14 — 2026-03-10
 
