@@ -83,6 +83,10 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     assert "streamable_http_client" in remote_http
     assert "terminate_on_close=False" in remote_http
     assert "demo/streamable_http_client.py" in remote_http
+    assert "three-step BRAF V600E workflow" in remote_http
+    assert "biomcp search all --gene BRAF --disease melanoma --counts-only" in remote_http
+    assert 'biomcp get variant "BRAF V600E" clinvar' in remote_http
+    assert 'biomcp variant trials "BRAF V600E" --limit 5' in remote_http
 
 
 def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
@@ -97,7 +101,25 @@ def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
     assert 'mcp_url = f"{base_url.rstrip(\'/\')}/mcp"' in demo_script
     assert "terminate_on_close=False" in demo_script
     assert '"shell"' in demo_script
-    assert '"biomcp version"' in demo_script
+    assert 'SCENARIO = "braf-melanoma"' in demo_script
+    assert '"Step 1' in demo_script
+    assert '"Step 2' in demo_script
+    assert '"Step 3' in demo_script
+    assert '"biomcp search all --gene BRAF --disease melanoma --counts-only"' in demo_script
+    assert 'biomcp get variant "BRAF V600E" clinvar' in demo_script
+    assert 'biomcp variant trials "BRAF V600E" --limit 5' in demo_script
+
+
+def test_release_overview_describes_streamable_http_workflow_demo() -> None:
+    overview = _read("analysis/technical/overview.md")
+
+    assert "standalone Streamable HTTP demo client" in overview
+    assert "three-step mutation -> evidence -> trials workflow" in overview
+    assert "lists tools" not in overview
+    assert "biomcp version" not in overview
+    assert "biomcp search all --gene BRAF --disease melanoma --counts-only" in overview
+    assert 'biomcp get variant "BRAF V600E" clinvar' in overview
+    assert 'biomcp variant trials "BRAF V600E" --limit 5' in overview
 
 
 def test_release_overview_mentions_v0_8_15_current_version() -> None:

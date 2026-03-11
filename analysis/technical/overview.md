@@ -144,15 +144,21 @@ These are the canonical smoke checks for a working release.
 
 ### 5. Remote HTTP Demo Artifact (`demo/streamable_http_client.py`)
 
-Release verification for the Streamable HTTP surface also includes the standalone
-PEP 723 demo client. Run `biomcp serve-http`, then execute:
+Release verification for the Streamable HTTP surface also includes the
+standalone Streamable HTTP demo client
+(`demo/streamable_http_client.py`). Run `biomcp serve-http`, then execute:
 
 ```bash
 uv run --script demo/streamable_http_client.py
 ```
 
-The demo initializes against `/mcp`, lists tools, and performs one `shell`
-tool call (`biomcp version`).
+The demo initializes against `/mcp`, prints server identity, then runs a
+three-step mutation -> evidence -> trials workflow through the remote `shell`
+tool:
+
+- `biomcp search all --gene BRAF --disease melanoma --counts-only`
+- `biomcp get variant "BRAF V600E" clinvar`
+- `biomcp variant trials "BRAF V600E" --limit 5`
 
 ## Known Constraints
 
