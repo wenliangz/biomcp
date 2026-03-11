@@ -20,12 +20,18 @@ def _markdown_section_block(text: str, heading: str) -> str:
 
 def test_changelog_has_backfilled_releases_and_release_header() -> None:
     changelog = _read("CHANGELOG.md")
+    latest_release_block = _markdown_section_block(changelog, "## 0.8.15 — 2026-03-11")
 
     assert "## [Unreleased]" not in changelog
-    assert "## 0.8.14 — 2026-03-10" in changelog
+    assert "## 0.8.15 — 2026-03-11" in changelog
     assert "## 0.9.0" not in changelog
+    assert "planning-docs CI path regression" in latest_release_block
+    assert "repo-local planning fixtures" in latest_release_block
+    assert "public discovery docs" in latest_release_block
+    assert "`search all`" in latest_release_block
 
     expected_releases = [
+        ("0.8.15", "2026-03-11"),
         ("0.8.14", "2026-03-10"),
         ("0.8.13", "2026-03-09"),
         ("0.8.12", "2026-03-07"),
@@ -94,10 +100,10 @@ def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
     assert '"biomcp version"' in demo_script
 
 
-def test_release_overview_mentions_v0_8_14_streamable_http_release() -> None:
+def test_release_overview_mentions_v0_8_15_current_version() -> None:
     overview = _read("analysis/technical/overview.md")
 
-    assert "**Current version:** 0.8.14 (as of 2026-03-10)" in overview
+    assert "**Current version:** 0.8.15 (as of 2026-03-11)" in overview
 
 
 def test_gene_guide_includes_new_sections_and_positional_search() -> None:
