@@ -28,7 +28,7 @@ curl ... install.sh | bash       # binary installer (resolves latest release)
 ```
 
 - **Edition:** Rust 2024
-- **Current version:** 0.8.14 (as of 2026-03-10)
+- **Current version:** 0.8.15 (as of 2026-03-11)
 - **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
 - **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
 - **Release checklist:** Bump `Cargo.toml` and `pyproject.toml`, update

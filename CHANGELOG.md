@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.15 — 2026-03-11
+
+- Fixed the planning-docs CI path regression so release validation uses the
+  repo-local planning fixtures by default instead of an Ian-local absolute
+  path. This is the fix from PR #191 that unblocks release packaging on
+  GitHub Actions.
+- Refreshed the public discovery docs so `search all` is taught as the unified
+  cross-entity entry point in the README and docs index. This is the docs
+  alignment from PR #190.
+
 ## 0.8.14 — 2026-03-10
 
 - Promoted remote Streamable HTTP in newcomer docs with a dedicated getting-started page for `biomcp serve-http`.
