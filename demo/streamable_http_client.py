@@ -11,12 +11,16 @@
 #
 # Then run this demo:
 #   uv run --script demo/streamable_http_client.py
+#   uv run --script demo/streamable_http_client.py --scenario braf-melanoma
 #   uv run --script demo/streamable_http_client.py http://127.0.0.1:8080
 
 from __future__ import annotations
 
+import argparse
 import asyncio
-import sys
+import json
+import urllib.error
+import urllib.request
 from datetime import timedelta
 from typing import TypeAlias
 
@@ -24,6 +28,7 @@ from mcp import ClientSession, types
 from mcp.client.streamable_http import streamable_http_client
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
+HEALTH_TIMEOUT_SECONDS = 5
 ScenarioStep: TypeAlias = tuple[str, str]
 
 # Named demo scenarios keep the workflow loop stable as stories expand.
@@ -38,29 +43,60 @@ SCENARIOS: dict[str, list[ScenarioStep]] = {
             'biomcp get variant "BRAF V600E" clinvar',
         ),
         (
-            "Step 3 - Trials: BRAF V600E clinical trials",
-            'biomcp variant trials "BRAF V600E" --limit 5',
+            "Step 3 - Trials: melanoma trials mentioning BRAF V600E",
+            'biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5',
         ),
     ],
 }
 
-# Change this constant to run a different named scenario.
-SCENARIO = "braf-melanoma"
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the BioMCP Streamable HTTP demo workflow."
+    )
+    parser.add_argument(
+        "base_url",
+        nargs="?",
+        default=DEFAULT_BASE_URL,
+        help=f"Base BioMCP HTTP URL (default: {DEFAULT_BASE_URL})",
+    )
+    parser.add_argument(
+        "--scenario",
+        default="braf-melanoma",
+        choices=sorted(SCENARIOS),
+        help="Named demo scenario to run.",
+    )
+    return parser.parse_args(argv)
 
 
-def selected_steps() -> list[ScenarioStep]:
+def steps_for(scenario: str) -> list[ScenarioStep]:
+    return SCENARIOS[scenario]
+
+
+def check_health(base_url: str) -> None:
+    health_url = f"{base_url.rstrip('/')}/health"
     try:
-        return SCENARIOS[SCENARIO]
-    except KeyError as exc:
-        available = ", ".join(sorted(SCENARIOS))
+        with urllib.request.urlopen(
+            health_url,
+            timeout=HEALTH_TIMEOUT_SECONDS,
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("status") != "ok":
+            raise ValueError(f"unexpected payload: {payload!r}")
+    except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         raise SystemExit(
-            f"Unknown demo scenario {SCENARIO!r}. Available scenarios: {available}"
+            "Health check failed at "
+            f"{health_url}. Start the server first with "
+            "biomcp serve-http --host 127.0.0.1 --port 8080. "
+            f"Details: {exc}"
         ) from exc
 
+    print(f"Health check passed: {health_url}")
 
-async def main(base_url: str) -> None:
+
+async def main(base_url: str, scenario: str) -> None:
     mcp_url = f"{base_url.rstrip('/')}/mcp"
-    print(f"Connecting to BioMCP at {mcp_url}\n")
+    print(f"Connecting to BioMCP at {mcp_url}")
+    print(f"Scenario: {scenario}\n")
 
     # The current Python MCP client warns on 202 Accepted during session teardown.
     async with streamable_http_client(
@@ -78,8 +114,9 @@ async def main(base_url: str) -> None:
             tool_names = [tool.name for tool in tools_result.tools]
             print(f"Available tools: {', '.join(tool_names)}")
 
-            for title, command in selected_steps():
+            for title, command in steps_for(scenario):
                 print(f"\n=== {title} ===")
+                print(f"Command: {command}")
                 call_result = await session.call_tool(
                     "biomcp",
                     arguments={"command": command},
@@ -90,4 +127,6 @@ async def main(base_url: str) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE_URL))
+    args = parse_args()
+    check_health(args.base_url)
+    asyncio.run(main(args.base_url, args.scenario))

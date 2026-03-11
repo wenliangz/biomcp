@@ -58,21 +58,30 @@ asyncio.run(main())
 ## Runnable demo
 
 The repo includes a standalone demo you can run directly. It keeps the
-Streamable HTTP connectivity proof, then runs a three-step BRAF V600E workflow
-over the remote MCP `biomcp` tool:
+Streamable HTTP connectivity proof, then runs a three-step BRAF V600E melanoma
+workflow over the remote MCP `biomcp` tool:
 
 - `biomcp search all --gene BRAF --disease melanoma --counts-only`
 - `biomcp get variant "BRAF V600E" clinvar`
-- `biomcp variant trials "BRAF V600E" --limit 5`
+- `biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5`
 
 ```bash
 biomcp serve-http --host 127.0.0.1 --port 8080
 uv run --script demo/streamable_http_client.py
+uv run --script demo/streamable_http_client.py --scenario braf-melanoma
 ```
+
+The demo checks `/health` before opening the MCP session, prints the scenario,
+lists available tools, and prints `Command: ...` before each BioMCP step so a
+screenshot or recording still makes sense without extra narration.
+
+See `demo/README.md` for the short newcomer walkthrough, expected output
+markers, `uv run --quiet` guidance for first-run dependency noise, and the
+release-binary note for repo verification.
 
 The examples above disable explicit session termination because the current
 Python MCP client logs a warning when the server acknowledges teardown with
-HTTP `202 Accepted`.
+HTTP `202 Accepted` (`terminate_on_close=False` in the demo client).
 
 ## Related docs
 

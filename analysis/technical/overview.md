@@ -152,13 +152,17 @@ standalone Streamable HTTP demo client
 uv run --script demo/streamable_http_client.py
 ```
 
-The demo initializes against `/mcp`, prints server identity, lists the
-available tools, then runs a three-step mutation -> evidence -> trials workflow
-through the remote `biomcp` tool:
+The demo checks `/health`, initializes against `/mcp`, prints server identity,
+lists the available tools, and prints `Command:` framing before a three-step
+discovery -> evidence -> melanoma trials workflow through the remote `biomcp` tool:
 
 - `biomcp search all --gene BRAF --disease melanoma --counts-only`
 - `biomcp get variant "BRAF V600E" clinvar`
-- `biomcp variant trials "BRAF V600E" --limit 5`
+- `biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5`
+
+Expected structural output includes `Health check passed:` and `Command:`
+markers so the remote run remains readable in screenshots and recorded demos
+without replacing the real BioMCP markdown output.
 
 ## Known Constraints
 
