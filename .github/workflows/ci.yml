@@ -28,3 +28,32 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo test
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache protoc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-v28.3
+
+      - uses: arduino/setup-protoc@v3
+        continue-on-error: true
+        with:
+          version: "28.3"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/ -v --mcp-cmd "biomcp serve"
+      - run: uv run mkdocs build --strict

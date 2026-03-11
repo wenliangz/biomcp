@@ -1,10 +1,15 @@
-.PHONY: build test check run clean spec validate-skills
+.PHONY: build test check run clean spec validate-skills test-contracts
 
 build:
 	cargo build --release
 
 test:
 	cargo test
+
+test-contracts:
+	uv sync --extra dev
+	uv run pytest tests/ -v --mcp-cmd "biomcp serve"
+	uv run mkdocs build --strict
 
 check:
 	cargo clippy -- -D warnings
