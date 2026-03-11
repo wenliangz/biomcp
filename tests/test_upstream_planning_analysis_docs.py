@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLANNING_ROOT = Path("/home/ian/workspace/planning/teams/biomcp")
+PLANNING_ROOT = Path(
+    os.environ.get(
+        "BIOMCP_PLANNING_ROOT",
+        REPO_ROOT / "tests" / "fixtures" / "planning" / "biomcp",
+    )
+)
 
 
 def _read_repo(path: str) -> str:
