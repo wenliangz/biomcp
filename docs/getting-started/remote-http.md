@@ -57,7 +57,13 @@ asyncio.run(main())
 
 ## Runnable demo
 
-The repo includes a standalone demo you can run directly:
+The repo includes a standalone demo you can run directly. It keeps the
+Streamable HTTP connectivity proof, then runs a three-step BRAF V600E workflow
+over the remote MCP `shell` tool:
+
+- `biomcp search all --gene BRAF --disease melanoma --counts-only`
+- `biomcp get variant "BRAF V600E" clinvar`
+- `biomcp variant trials "BRAF V600E" --limit 5`
 
 ```bash
 biomcp serve-http --host 127.0.0.1 --port 8080
