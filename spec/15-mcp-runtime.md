@@ -25,3 +25,18 @@ out="$(biomcp serve-sse --help)"
 echo "$out" | mustmatch like "removed"
 echo "$out" | mustmatch like "serve-http"
 ```
+
+## Stdio Tool Identity
+
+The stdio MCP handshake should advertise the BioMCP execution tool as
+`biomcp`, not the old `shell` name.
+
+```bash
+out="$( (printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"spec","version":"0.1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'; \
+  sleep 1) | biomcp serve 2>/dev/null)"
+echo "$out" | mustmatch like '"name":"biomcp"'
+echo "$out" | mustmatch not like '"name":"shell"'
+```

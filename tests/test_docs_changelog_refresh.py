@@ -100,7 +100,9 @@ def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
     assert 'DEFAULT_BASE_URL = "http://127.0.0.1:8080"' in demo_script
     assert 'mcp_url = f"{base_url.rstrip(\'/\')}/mcp"' in demo_script
     assert "terminate_on_close=False" in demo_script
-    assert '"shell"' in demo_script
+    assert "list_tools()" in demo_script
+    assert '"biomcp"' in demo_script
+    assert 'shell' not in demo_script
     assert 'SCENARIO = "braf-melanoma"' in demo_script
     assert '"Step 1' in demo_script
     assert '"Step 2' in demo_script
@@ -120,6 +122,15 @@ def test_release_overview_describes_streamable_http_workflow_demo() -> None:
     assert "biomcp search all --gene BRAF --disease melanoma --counts-only" in overview
     assert 'biomcp get variant "BRAF V600E" clinvar' in overview
     assert 'biomcp variant trials "BRAF V600E" --limit 5' in overview
+
+
+def test_latest_changelog_documents_mcp_tool_rename() -> None:
+    changelog = _read("CHANGELOG.md")
+    latest_release_block = _markdown_section_block(changelog, "## 0.8.15 — 2026-03-11")
+
+    assert "MCP execution tool" in latest_release_block
+    assert '`shell`' in latest_release_block
+    assert "`biomcp`" in latest_release_block
 
 
 def test_release_overview_mentions_v0_8_15_current_version() -> None:

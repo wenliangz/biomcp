@@ -204,7 +204,7 @@ fn collect_tool_calls(value: &Value, out: &mut Vec<ToolCall>) {
         Value::Object(map) => {
             if let Some(name) = extract_tool_name(map)
                 && let Some(command) = extract_command_from_object(map)
-                && is_shell_tool_name(&name)
+                && is_biomcp_tool_name(&name)
             {
                 out.push(ToolCall {
                     tool_name: name,
@@ -215,7 +215,7 @@ fn collect_tool_calls(value: &Value, out: &mut Vec<ToolCall>) {
             if let Some(function) = map.get("function").and_then(Value::as_object)
                 && let Some(name) = extract_tool_name(function)
                 && let Some(command) = extract_command_from_object(function)
-                && is_shell_tool_name(&name)
+                && is_biomcp_tool_name(&name)
             {
                 out.push(ToolCall {
                     tool_name: name,
@@ -289,16 +289,18 @@ fn extract_command_from_value(value: &Value) -> Option<String> {
     }
 }
 
-fn is_shell_tool_name(name: &str) -> bool {
+fn is_biomcp_tool_name(name: &str) -> bool {
     let normalized = name.trim().to_ascii_lowercase();
-    normalized == "bash"
+    normalized == "biomcp"
+        || normalized == "bash"
         || normalized == "shell"
+        || normalized.ends_with(".biomcp")
         || normalized.ends_with(".bash")
         || normalized.ends_with(".shell")
 }
 
 fn is_biomcp_shell_tool(name: &str) -> bool {
-    is_shell_tool_name(name)
+    is_biomcp_tool_name(name)
 }
 
 fn normalize_command_shape(command: &str) -> Option<String> {
@@ -725,7 +727,7 @@ mod tests {
 
         let session = [
             r#"{"timestamp":"2026-02-17T12:00:00Z","tool":{"name":"bash","input":{"cmd":"biomcp get gene BRAF"}},"usage":{"input_tokens":10,"output_tokens":4,"cache_read_tokens":2,"cache_write_tokens":1,"cost_usd":0.001}}"#,
-            r#"{"timestamp":"2026-02-17T12:00:02Z","event":{"name":"shell","arguments":{"command":"biomcp --help"}}}"#,
+            r#"{"timestamp":"2026-02-17T12:00:02Z","event":{"name":"biomcp","arguments":{"command":"biomcp --help"}}}"#,
             r#"{"timestamp":"2026-02-17T12:00:04Z","tool":{"name":"bash","input":{"cmd":"cat skills/use-cases/03-trial-searching.md"}}}"#,
             r#"{"timestamp":"2026-02-17T12:00:05Z","stderr":"HTTP 503 from api"}"#,
             r#"{"timestamp":"2026-02-17T12:00:06Z","error":"unterminated quote in command"}"#,
@@ -768,6 +770,17 @@ mod tests {
         assert_eq!(coverage.hits, 2);
         assert_eq!(coverage.misses, 1);
         assert_eq!(coverage.extras, 0);
+    }
+
+    #[test]
+    fn recognizes_legacy_and_current_biomcp_tool_names() {
+        assert!(is_biomcp_tool_name("biomcp"));
+        assert!(is_biomcp_tool_name("mcp.biomcp"));
+        assert!(is_biomcp_tool_name("shell"));
+        assert!(is_biomcp_tool_name("mcp.shell"));
+        assert!(is_biomcp_tool_name("bash"));
+        assert!(is_biomcp_tool_name("mcp.bash"));
+        assert!(!is_biomcp_tool_name("python"));
     }
 
     #[test]

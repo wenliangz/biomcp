@@ -23,15 +23,16 @@ async def test_initialize_advertises_tools_and_resources(
 
 
 @pytest.mark.asyncio
-async def test_list_tools_includes_shell(mcp_session_factory) -> None:
+async def test_list_tools_includes_biomcp(mcp_session_factory) -> None:
     async with mcp_session_factory() as (session, _initialize_result):
         result = await session.list_tools()
         names = {tool.name for tool in result.tools}
-        assert "shell" in names
+        assert "biomcp" in names
+        assert 'shell' not in names
 
 
 @pytest.mark.asyncio
-async def test_shell_description_matches_list_contract(
+async def test_biomcp_description_matches_list_contract(
     mcp_session_factory,
 ) -> None:
     repo = Path(__file__).resolve().parents[1]
@@ -47,8 +48,8 @@ async def test_shell_description_matches_list_contract(
 
     async with mcp_session_factory() as (session, _initialize_result):
         result = await session.list_tools()
-        shell = next(tool for tool in result.tools if tool.name == "shell")
-        description = shell.description
+        biomcp = next(tool for tool in result.tools if tool.name == "biomcp")
+        description = biomcp.description
         for marker in required:
             assert marker in description
         assert "SEARCH FILTERS:" in description
