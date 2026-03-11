@@ -130,7 +130,7 @@ impl ClinicalTrialsClient {
     }
 
     #[cfg(test)]
-    fn new_for_test(base: String) -> Result<Self, BioMcpError> {
+    pub(crate) fn new_for_test(base: String) -> Result<Self, BioMcpError> {
         Ok(Self {
             client: crate::sources::shared_client()?,
             base: Cow::Owned(base),
