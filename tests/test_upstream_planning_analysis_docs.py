@@ -3,21 +3,51 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLANNING_ROOT = Path(
-    os.environ.get(
-        "BIOMCP_PLANNING_ROOT",
-        REPO_ROOT / "tests" / "fixtures" / "planning" / "biomcp",
-    )
-)
+DEFAULT_PLANNING_ROOT = REPO_ROOT / "tests" / "fixtures" / "planning" / "biomcp"
 
 
 def _read_repo(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
 
 
+def _planning_root() -> Path:
+    return Path(os.environ.get("BIOMCP_PLANNING_ROOT", DEFAULT_PLANNING_ROOT))
+
+
 def _read_planning(path: str) -> str:
-    return (PLANNING_ROOT / path).read_text(encoding="utf-8")
+    return (_planning_root() / path).read_text(encoding="utf-8")
+
+
+def test_planning_contract_uses_repo_fixture_fallback_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BIOMCP_PLANNING_ROOT", raising=False)
+
+    assert _planning_root() == DEFAULT_PLANNING_ROOT
+    assert "# BioMCP Strategy" in _read_planning("strategy.md")
+
+
+def test_planning_contract_reads_explicit_env_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("BIOMCP_PLANNING_ROOT", str(tmp_path))
+    (tmp_path / "strategy.md").write_text("# override strategy\n", encoding="utf-8")
+
+    assert _planning_root() == tmp_path
+    assert _read_planning("strategy.md") == "# override strategy\n"
+
+
+def test_planning_contract_bad_override_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    missing_root = tmp_path / "missing-planning-root"
+    monkeypatch.setenv("BIOMCP_PLANNING_ROOT", str(missing_root))
+
+    with pytest.raises(FileNotFoundError):
+        _read_planning("strategy.md")
 
 
 def test_strategy_and_frontier_capture_upstream_planning_contract() -> None:
