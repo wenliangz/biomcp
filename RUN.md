@@ -78,6 +78,26 @@ Owned routes:
 | `ONCOKB_TOKEN` | Canonical OncoKB production token |
 | `ALPHAGENOME_API_KEY` | Required for AlphaGenome variant prediction |
 
+## Pre-Merge Checks
+
+Run the Rust gate locally:
+
+```bash
+make check
+make test
+```
+
+Run the Python/docs contract gate (same as PR CI `contracts` job):
+
+```bash
+make test-contracts
+```
+
+`make test-contracts` runs `uv sync --extra dev`, `pytest tests/`, and
+`mkdocs build --strict` - the same steps that PR CI and release validation
+require. Use this to catch docs-contract and Python regressions before
+pushing.
+
 ## Smoke Checks
 
 ```bash

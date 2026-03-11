@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,20 @@ def _planning_root() -> Path:
 
 def _read_planning(path: str) -> str:
     return (_planning_root() / path).read_text(encoding="utf-8")
+
+
+def _workflow_job_block(workflow: str, job_name: str) -> str:
+    match = re.search(
+        rf"^  {re.escape(job_name)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        workflow,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, f"missing workflow job {job_name}"
+    return match.group(1)
+
+
+def _workflow_run_steps(job_block: str) -> list[str]:
+    return re.findall(r"^\s+- run: (.+)$", job_block, flags=re.MULTILINE)
 
 
 def test_planning_contract_uses_repo_fixture_fallback_by_default(
@@ -112,7 +127,9 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     technical = _read_repo("analysis/technical/overview.md")
     ux = _read_repo("analysis/ux/cli-reference.md")
 
-    assert "CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`." in technical
+    assert "CI (`.github/workflows/ci.yml`) runs two parallel jobs" in technical
+    assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)" in technical
+    assert '`contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`)' in technical
     assert "The spec suite is repo-local executable documentation; no GitHub workflow currently runs `make spec`." in technical
     assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical
     assert "release validation runs `pytest tests/` and `mkdocs build --strict`" in technical
@@ -134,6 +151,31 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "Legacy lookup: `biomcp skill 03` or `biomcp skill variant-to-treatment`" in ux
     assert "biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`" in ux
     assert "biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`" in ux
+
+
+def test_pull_request_contract_gate_matches_release_validation() -> None:
+    ci = _read_repo(".github/workflows/ci.yml")
+    release = _read_repo(".github/workflows/release.yml")
+    contracts_smoke = _read_repo(".github/workflows/contracts.yml")
+    expected_contract_runs = [
+        "uv sync --extra dev",
+        'uv run pytest tests/ -v --mcp-cmd "biomcp serve"',
+        "uv run mkdocs build --strict",
+    ]
+
+    ci_contracts = _workflow_job_block(ci, "contracts")
+    release_validate = _workflow_job_block(release, "validate")
+
+    assert 'python-version: "3.12"' in ci_contracts
+    assert 'python-version: "3.12"' in release_validate
+    assert _workflow_run_steps(ci_contracts) == expected_contract_runs
+    assert _workflow_run_steps(release_validate)[-3:] == expected_contract_runs
+
+    assert "name: Contract Smoke Tests" in contracts_smoke
+    assert 'cron: "0 6 * * *"' in contracts_smoke
+    assert "workflow_dispatch:" in contracts_smoke
+    assert "continue-on-error: true" in contracts_smoke
+    assert "- run: bash scripts/contract-smoke.sh" in contracts_smoke
 
 
 def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
@@ -172,6 +214,7 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "tests/test_mcp_http_surface.py" in runbook
     assert "tests/test_mcp_http_transport.py" in runbook
     assert "make spec" in runbook
+    assert "make test-contracts" in runbook
     assert "docs/user-guide/cli-reference.md" in runbook
     assert "docs/reference/mcp-server.md" in runbook
 
