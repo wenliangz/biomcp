@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -200,6 +201,12 @@ const MAX_SEARCH_LIMIT: usize = 50;
 const EUROPE_PMC_PAGE_SIZE: usize = 25;
 const PUBTATOR_PAGE_SIZE: usize = 25;
 const MAX_PAGE_FETCHES: usize = 50;
+const FEDERATED_PAGE_SIZE_CAP: usize = if EUROPE_PMC_PAGE_SIZE < PUBTATOR_PAGE_SIZE {
+    EUROPE_PMC_PAGE_SIZE
+} else {
+    PUBTATOR_PAGE_SIZE
+};
+const MAX_FEDERATED_FETCH_RESULTS: usize = MAX_PAGE_FETCHES * FEDERATED_PAGE_SIZE_CAP;
 const INVALID_ARTICLE_ID_MSG: &str = "\
 Unsupported identifier format. BioMCP resolves PMID (digits only, e.g., 22663011), \
 PMCID (starts with PMC, e.g., PMC9984800), and DOI (starts with 10., \
@@ -472,10 +479,13 @@ fn pubtator_sort(sort: ArticleSort) -> Option<&'static str> {
 }
 
 fn parse_row_date(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(|v| v.get(0..10).unwrap_or(v).to_string())
+    let value = value.map(str::trim).filter(|v| !v.is_empty())?;
+    let truncated = value.get(0..10).unwrap_or(value);
+    match truncated.len() {
+        4 => Some(format!("{truncated}-01-01")),
+        7 => Some(format!("{truncated}-01")),
+        _ => Some(truncated.to_string()),
+    }
 }
 
 fn matches_optional_journal_filter(
@@ -550,6 +560,52 @@ fn dedup_by_pmid_preserve_order(results: Vec<ArticleSearchResult>) -> Vec<Articl
         }
     }
     deduped
+}
+
+fn compare_optional_dates_desc(
+    left: Option<&ArticleSearchResult>,
+    right: Option<&ArticleSearchResult>,
+) -> Ordering {
+    match (
+        left.and_then(|row| parse_row_date(row.date.as_deref())),
+        right.and_then(|row| parse_row_date(row.date.as_deref())),
+    ) {
+        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_citations_desc(
+    left: Option<&ArticleSearchResult>,
+    right: Option<&ArticleSearchResult>,
+) -> Ordering {
+    match (
+        left.and_then(|row| row.citation_count),
+        right.and_then(|row| row.citation_count),
+    ) {
+        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn sort_federated_rows(rows: &mut [ArticleSearchResult], sort: ArticleSort) {
+    match sort {
+        ArticleSort::Relevance => {}
+        ArticleSort::Citations => rows.sort_by(|left, right| {
+            compare_optional_citations_desc(Some(left), Some(right))
+                .then_with(|| compare_optional_dates_desc(Some(left), Some(right)))
+                .then_with(|| left.pmid.cmp(&right.pmid))
+        }),
+        ArticleSort::Date => rows.sort_by(|left, right| {
+            compare_optional_dates_desc(Some(left), Some(right))
+                .then_with(|| compare_optional_citations_desc(Some(left), Some(right)))
+                .then_with(|| left.pmid.cmp(&right.pmid))
+        }),
+    }
 }
 
 fn build_search_query(filters: &ArticleSearchFilters) -> Result<String, BioMcpError> {
@@ -992,24 +1048,34 @@ async fn search_federated_page(
     limit: usize,
     offset: usize,
 ) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
+    let fetch_count = limit.saturating_add(offset);
+    if fetch_count > MAX_FEDERATED_FETCH_RESULTS {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--offset + --limit must be <= {MAX_FEDERATED_FETCH_RESULTS} for federated article search"
+        )));
+    }
     let (pubtator_leg, europe_leg) = tokio::join!(
-        search_pubtator_page(filters, limit, offset),
-        search_europepmc_page(filters, limit, offset)
+        search_pubtator_page(filters, fetch_count, 0),
+        search_europepmc_page(filters, fetch_count, 0)
     );
 
-    merge_federated_pages(pubtator_leg, europe_leg, limit)
+    merge_federated_pages(pubtator_leg, europe_leg, limit, offset, filters.sort)
 }
 
 fn merge_federated_pages(
     pubtator_leg: Result<SearchPage<ArticleSearchResult>, BioMcpError>,
     europe_leg: Result<SearchPage<ArticleSearchResult>, BioMcpError>,
     limit: usize,
+    offset: usize,
+    sort: ArticleSort,
 ) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
     match (pubtator_leg, europe_leg) {
         (Ok(pubtator_page), Ok(europe_page)) => {
             let mut merged = pubtator_page.results;
             merged.extend(europe_page.results);
             let mut merged = dedup_by_pmid_preserve_order(merged);
+            sort_federated_rows(&mut merged, sort);
+            merged.drain(0..offset.min(merged.len()));
             merged.truncate(limit);
             Ok(SearchPage::offset(merged, None))
         }
@@ -1019,6 +1085,8 @@ fn merge_federated_pages(
                 "Europe PMC search leg failed; returning PubTator-only results"
             );
             let mut rows = pubtator_page.results;
+            sort_federated_rows(&mut rows, sort);
+            rows.drain(0..offset.min(rows.len()));
             rows.truncate(limit);
             Ok(SearchPage::offset(rows, None))
         }
@@ -1028,6 +1096,8 @@ fn merge_federated_pages(
                 "PubTator search leg failed; returning Europe PMC-only results"
             );
             let mut rows = europe_page.results;
+            sort_federated_rows(&mut rows, sort);
+            rows.drain(0..offset.min(rows.len()));
             rows.truncate(limit);
             Ok(SearchPage::offset(rows, None))
         }
@@ -1473,15 +1543,25 @@ mod tests {
     }
 
     fn row(pmid: &str, source: ArticleSource) -> ArticleSearchResult {
+        row_with(pmid, source, Some("2025-01-01"), Some(1), false)
+    }
+
+    fn row_with(
+        pmid: &str,
+        source: ArticleSource,
+        date: Option<&str>,
+        citation_count: Option<u64>,
+        is_retracted: bool,
+    ) -> ArticleSearchResult {
         ArticleSearchResult {
             pmid: pmid.to_string(),
             title: format!("title-{pmid}"),
             journal: Some("Journal".into()),
-            date: Some("2025-01-01".into()),
-            citation_count: Some(1),
+            date: date.map(str::to_string),
+            citation_count,
             source,
             score: (source == ArticleSource::PubTator).then_some(42.0),
-            is_retracted: false,
+            is_retracted,
         }
     }
 
@@ -1502,8 +1582,14 @@ mod tests {
             Some(2),
         );
 
-        let merged = merge_federated_pages(Ok(pubtator_page), Ok(europe_page), 3)
-            .expect("federated merge should succeed");
+        let merged = merge_federated_pages(
+            Ok(pubtator_page),
+            Ok(europe_page),
+            3,
+            0,
+            ArticleSort::Relevance,
+        )
+        .expect("federated merge should succeed");
         assert_eq!(merged.results.len(), 3);
         assert_eq!(merged.results[0].pmid, "100");
         assert_eq!(merged.results[1].pmid, "200");
@@ -1526,8 +1612,14 @@ mod tests {
             message: "HTTP 500: upstream".into(),
         };
 
-        let merged = merge_federated_pages(Ok(pubtator_page), Err(europe_err), 2)
-            .expect("fallback should return pubtator rows");
+        let merged = merge_federated_pages(
+            Ok(pubtator_page),
+            Err(europe_err),
+            2,
+            0,
+            ArticleSort::Relevance,
+        )
+        .expect("fallback should return pubtator rows");
         assert_eq!(merged.results.len(), 2);
         assert!(
             merged
@@ -1553,8 +1645,14 @@ mod tests {
             Some(50),
         );
 
-        let merged = merge_federated_pages(Err(pubtator_err), Ok(europe_page), 2)
-            .expect("fallback should return europe rows");
+        let merged = merge_federated_pages(
+            Err(pubtator_err),
+            Ok(europe_page),
+            2,
+            0,
+            ArticleSort::Relevance,
+        )
+        .expect("fallback should return europe rows");
         assert_eq!(merged.results.len(), 2);
         assert!(
             merged
@@ -1563,6 +1661,46 @@ mod tests {
                 .all(|r| r.source == ArticleSource::EuropePmc)
         );
         assert_eq!(merged.total, None);
+    }
+
+    #[test]
+    fn merge_federated_pages_sorts_surviving_leg_before_offset() {
+        let pubtator_err = BioMcpError::Api {
+            api: "pubtator3".into(),
+            message: "HTTP 500: upstream".into(),
+        };
+        let europe_page = SearchPage::offset(
+            vec![
+                row_with(
+                    "100",
+                    ArticleSource::EuropePmc,
+                    Some("2024-01-01"),
+                    Some(1),
+                    false,
+                ),
+                row_with(
+                    "200",
+                    ArticleSource::EuropePmc,
+                    Some("2025-01-01"),
+                    Some(1),
+                    false,
+                ),
+                row_with(
+                    "300",
+                    ArticleSource::EuropePmc,
+                    Some("2023-01-01"),
+                    Some(1),
+                    false,
+                ),
+            ],
+            Some(3),
+        );
+
+        let merged =
+            merge_federated_pages(Err(pubtator_err), Ok(europe_page), 1, 1, ArticleSort::Date)
+                .expect("fallback should sort surviving rows before offset");
+        assert_eq!(merged.results.len(), 1);
+        assert_eq!(merged.results[0].pmid, "100");
     }
 
     #[test]
@@ -1576,9 +1714,201 @@ mod tests {
             message: "HTTP 500: europe failed".into(),
         };
 
-        let err = merge_federated_pages(Err(pubtator_err), Err(europe_err), 10)
-            .expect_err("both failing legs should return first error");
+        let err = merge_federated_pages(
+            Err(pubtator_err),
+            Err(europe_err),
+            10,
+            0,
+            ArticleSort::Relevance,
+        )
+        .expect_err("both failing legs should return first error");
         let msg = err.to_string();
         assert!(msg.contains("pubtator"));
+    }
+
+    #[test]
+    fn federated_offset_applied_after_merge_not_per_leg() {
+        let pubtator_page = SearchPage::offset(
+            vec![
+                row("100", ArticleSource::PubTator),
+                row("200", ArticleSource::PubTator),
+                row("300", ArticleSource::PubTator),
+                row("400", ArticleSource::PubTator),
+                row("500", ArticleSource::PubTator),
+            ],
+            Some(5),
+        );
+        let europe_page = SearchPage::offset(
+            vec![
+                row("600", ArticleSource::EuropePmc),
+                row("700", ArticleSource::EuropePmc),
+            ],
+            Some(2),
+        );
+
+        let merged = merge_federated_pages(
+            Ok(pubtator_page),
+            Ok(europe_page),
+            2,
+            3,
+            ArticleSort::Relevance,
+        )
+        .expect("federated merge should succeed");
+
+        let pmids: Vec<&str> = merged.results.iter().map(|row| row.pmid.as_str()).collect();
+        assert_eq!(pmids, vec!["400", "500"]);
+    }
+
+    #[test]
+    fn federated_sort_orders_merged_results_for_citations_and_date() {
+        let citation_pubtator_page = SearchPage::offset(
+            vec![
+                row_with(
+                    "100",
+                    ArticleSource::PubTator,
+                    Some("2025-02-01"),
+                    Some(50),
+                    false,
+                ),
+                row_with(
+                    "200",
+                    ArticleSource::PubTator,
+                    Some("2024-01-01"),
+                    Some(5),
+                    false,
+                ),
+            ],
+            Some(2),
+        );
+        let citation_europe_page = SearchPage::offset(
+            vec![
+                row_with(
+                    "300",
+                    ArticleSource::EuropePmc,
+                    Some("2025-03-01"),
+                    Some(100),
+                    false,
+                ),
+                row_with(
+                    "400",
+                    ArticleSource::EuropePmc,
+                    Some("2024-06-01"),
+                    Some(10),
+                    false,
+                ),
+            ],
+            Some(2),
+        );
+
+        let citation_merged = merge_federated_pages(
+            Ok(citation_pubtator_page),
+            Ok(citation_europe_page),
+            10,
+            0,
+            ArticleSort::Citations,
+        )
+        .expect("citation merge should succeed");
+        let citation_pmids: Vec<&str> = citation_merged
+            .results
+            .iter()
+            .map(|row| row.pmid.as_str())
+            .collect();
+        assert_eq!(citation_pmids, vec!["300", "100", "400", "200"]);
+
+        let date_pubtator_page = SearchPage::offset(
+            vec![
+                row_with(
+                    "500",
+                    ArticleSource::PubTator,
+                    Some("2025"),
+                    Some(25),
+                    false,
+                ),
+                row_with(
+                    "600",
+                    ArticleSource::PubTator,
+                    Some("2024-12-31"),
+                    Some(30),
+                    false,
+                ),
+            ],
+            Some(2),
+        );
+        let date_europe_page = SearchPage::offset(
+            vec![
+                row_with(
+                    "700",
+                    ArticleSource::EuropePmc,
+                    Some("2025-06-01"),
+                    Some(10),
+                    false,
+                ),
+                row_with("800", ArticleSource::EuropePmc, None, Some(99), false),
+            ],
+            Some(2),
+        );
+
+        let date_merged = merge_federated_pages(
+            Ok(date_pubtator_page),
+            Ok(date_europe_page),
+            10,
+            0,
+            ArticleSort::Date,
+        )
+        .expect("date merge should succeed");
+        let date_pmids: Vec<&str> = date_merged
+            .results
+            .iter()
+            .map(|row| row.pmid.as_str())
+            .collect();
+        assert_eq!(date_pmids, vec!["700", "500", "600", "800"]);
+    }
+
+    #[test]
+    fn partial_date_normalization_and_filtering_are_consistent() {
+        assert_eq!(parse_row_date(Some("2024")), Some("2024-01-01".into()));
+        assert_eq!(parse_row_date(Some("2024-06")), Some("2024-06-01".into()));
+        assert_eq!(
+            parse_row_date(Some("2024-06-15")),
+            Some("2024-06-15".into())
+        );
+
+        assert!(matches_optional_date_filter(
+            Some("2024"),
+            Some("2024-01-01"),
+            None,
+        ));
+        assert!(!matches_optional_date_filter(
+            Some("2023"),
+            Some("2024-01-01"),
+            None,
+        ));
+        assert!(matches_optional_date_filter(
+            Some("2024-06"),
+            None,
+            Some("2024-12-31"),
+        ));
+    }
+
+    #[test]
+    fn exclude_retracted_filters_pubtator_source_rows() {
+        let row = row_with(
+            "100",
+            ArticleSource::PubTator,
+            Some("2025-01-01"),
+            Some(1),
+            true,
+        );
+        let exclude_filters = ArticleSearchFilters {
+            exclude_retracted: true,
+            ..empty_filters()
+        };
+        let include_filters = ArticleSearchFilters {
+            exclude_retracted: false,
+            ..empty_filters()
+        };
+
+        assert!(!matches_result_filters(&row, &exclude_filters, None, None));
+        assert!(matches_result_filters(&row, &include_filters, None, None));
     }
 }

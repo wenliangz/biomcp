@@ -91,3 +91,14 @@ Passing `--sort date` opts into date-based ordering.
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search article -k melanoma --sort date --limit 3)"
 echo "$out" | mustmatch like "sort=date"
 ```
+
+## Federated Deep Offset Guard
+
+Federated article search merges PubTator3 and Europe PMC before applying paging. Very deep offsets must fail fast with an explicit bound so callers do not get silently incorrect merged windows.
+
+```bash
+status=0
+out="$(biomcp search article -k melanoma --limit 50 --offset 1201 2>&1)" || status=$?
+test "$status" -ne 0
+echo "$out" | mustmatch like "--offset + --limit must be <= 1250"
+```
