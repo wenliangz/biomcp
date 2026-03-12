@@ -1,506 +1,309 @@
-# Design: P049 — Streamable HTTP Demo Polish
+# Design: P051 - Trial Search Edge-Case Tests
 
-## Problem Summary
+## Ticket
 
-The current `demo/streamable_http_client.py` works, but it is still a developer
-artifact rather than a polished public demo.
+T061: Trial search edge-case tests (age units, biomarker tokens, cursor boundary)
 
-1. **The story breaks at step 3.** The current scenario ends with
-   `biomcp variant trials "BRAF V600E" --limit 5`, which is mutation-only and
-   currently returns a broad cross-indication result set. In local review on
-   2026-03-11 this surface showed `455` total results, which weakens the
-   melanoma narrative set up by steps 1 and 2.
-2. **There is no `demo/README.md`.** Setup, run instructions, and expected
-   output cues currently live only in the script header.
-3. **Scenario selection requires editing source.** The script still uses a
-   top-level `SCENARIO = "braf-melanoma"` constant plus `selected_steps()`.
-4. **Startup failures are not newcomer-friendly.** The script jumps straight
-   into MCP session setup, so a dead server fails with lower-level transport
-   errors instead of a clear "start the server first" message.
-5. **Local version confusion is real.** The running server may come from a
-   different `biomcp` binary than the one on `PATH`; the design has to make the
-   release-binary path explicit in docs and dev verification.
-6. **The terminal output needs a little more framing.** For screenshots and
-   recordings, the demo should print scenario and command context, not only raw
-   BioMCP output.
+This review corrected one major inaccuracy from the prior design: the proposed
+compound CTGov cursor is not warranted in the current codebase. The age-unit
+fix is real, the PD-L1+ gap is test coverage only, and the cursor work should
+stay at the regression-test layer because the current `trial.rs` CTGov search
+path cannot stop mid-page against a compliant upstream response.
 
-First-run `uv` dependency installation noise is also a polish issue, but that
-belongs in documentation (`uv run --quiet`), not in runtime logic.
+---
 
-## Verified Facts From The Current Codebase
+## Verified Facts From The Codebase
 
-- `demo/streamable_http_client.py` currently defines `SCENARIO` and
-  `selected_steps()` and accepts only an optional positional base URL.
-- `tests/test_streamable_http_demo.py` currently covers `selected_steps()` and
-  the PEP 723 Python-floor contract, but not CLI parsing or health-check UX.
-- Streamable HTTP probe routes are real and stable:
-  `GET /health` and `GET /readyz` both return `{"status": "ok"}`. This is
-  covered by `tests/test_mcp_http_surface.py` and implemented in
-  `src/mcp/shell.rs`.
-- The live MCP tool name is `biomcp`, not `shell`. This is covered by
-  `tests/test_mcp_http_transport.py`.
-- `variant trials` does **not** accept a disease filter. The current parser in
-  `src/cli/mod.rs` only exposes `id`, `--limit`, `--offset`, and `--source`.
-- The supported disease-scoped alternative already exists:
-  `biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5`.
-  A live run on 2026-03-11 returned `Results: 5 of 104` with query echo
-  `condition=melanoma, mutation=BRAF V600E`.
-- Existing docs-contract tests already describe the demo in
-  `docs/getting-started/remote-http.md`,
-  `analysis/technical/overview.md`, and
-  `tests/test_docs_changelog_refresh.py`; these must move with the demo.
+### Gap 1: `parse_age_years` is unit-blind
 
-## Product Decisions
+`src/entities/trial.rs` defines:
 
-**Primary optimization**: prove BioMCP scientific usefulness over Streamable
-HTTP. Pure transport correctness is already covered elsewhere by
-`tests/test_mcp_http_transport.py`; this demo should foreground a coherent
-research story.
+```rust
+fn parse_age_years(value: &str) -> Option<u32> {
+    let trimmed = value.trim().to_ascii_lowercase();
+    let digits = trimmed.trim_end_matches(|c: char| !c.is_ascii_digit());
+    let digits = digits.trim();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
+}
+```
 
-**Output shape**: keep real BioMCP markdown output, not a custom summary mode.
-The polish work is limited to lightweight framing lines around that output:
-health line, connection line, scenario line, available-tools line, section
-title, and the command being executed.
+That means:
 
-**Disease scoping for step 3**: use the existing `search trial` surface instead
-of trying to extend `variant trials`. The demo should rely on current repo
-capabilities, not invent a new CLI flag during polish work.
+- `"18 Years"` -> `Some(18)` (current tests cover this)
+- `"6 Months"` -> `Some(6)` instead of `Some(0.5)`
+- `"2 Weeks"` -> `Some(2)` instead of about `0.038`
 
-**Narrative expectation**: the step-3 query must be explicitly melanoma-scoped,
-but results may still include multi-indication basket trials whose condition
-lists contain melanoma among other diseases. Verify should assert the query echo
-contains `condition=melanoma, mutation=BRAF V600E`; it should not require every
-returned row to be melanoma-only.
+`verify_age_eligibility` consumes `parse_age_years` for both minimum and
+maximum age checks, so the parser bug directly affects CTGov post-filtering.
 
-**CLI vs MCP comparison**: out of scope for this ticket.
+### Gap 2: `PD-L1+` matching already works; coverage is incomplete
 
-**Health prelude**: add only a lightweight `GET /health` check before opening
-the MCP session. `/readyz` exists, but duplicating both probes in the demo adds
-noise without improving the newcomer story.
+`contains_keyword_tokens` escapes each token and delegates boundaries to
+`build_token_pattern`.
 
-**Two demos / `--json` / artifact capture**: out of scope for this ticket.
+For `PD-L1+`, the resulting pattern is effectively:
 
-**Spec impact**: no `spec/` change is required. This ticket changes a demo
-artifact plus documentation/tests around that artifact; the numbered CLI
-behavior specs remain the wrong proof surface here.
+```text
+\bPD\-L1\+($|[^\w])
+```
+
+That correctly matches:
+
+- `"PD-L1+ expression"`
+- `"PD-L1+"`
+
+and correctly rejects:
+
+- `"PD-L1 positive"` when the keyword is `PD-L1+`
+
+Existing tests already cover:
+
+- `HER2+`
+- `ER+`
+- `PD-L1` (without plus)
+- plain word boundaries like `BRAF`
+
+The missing coverage is specifically the hyphen-plus biomarker form.
+
+### Gap 3: the previously proposed mid-page CTGov cursor fix is based on an unreachable production path
+
+The current CTGov search path sets:
+
+```rust
+let page_size = limit.clamp(1, 100);
+```
+
+and then passes that `page_size` to `ClinicalTrialsClient::search`.
+
+Within the same function:
+
+- `page_study_count` is the number of post-filtered studies from the fetched
+  CTGov page
+- new rows are appended until `rows.len() >= limit`
+- the "mid-page" branch is only taken when `page_consumed < page_study_count`
+
+Against a compliant upstream CTGov response, a fetched page cannot contain more
+than `page_size`, and here `page_size == limit`. That means a single fetched
+page cannot contain more than `limit` CTGov studies, so the current trial
+search implementation cannot hit `rows.len() >= limit` while leaving additional
+studies unconsumed on that same fetched page.
+
+This remains true even when `offset > 0`: with `page_size == limit`, there is
+still no faithful way to both skip some rows and fill `limit` fresh rows while
+also leaving extra rows unconsumed in the same response.
+
+Conclusion: do not add a compound cursor format, do not change `--next-page`
+semantics, and do not add a mock that returns oversized CTGov pages just to
+force an impossible branch.
+
+The valid cursor regression for the current code is narrower:
+
+- when `offset` consumes part of a fetched page but the code still consumes the
+  whole response, the returned cursor must remain the upstream `nextPageToken`
+- no `next_page` format change is required
+
+### Existing harnesses are sufficient
+
+`src/entities/trial.rs` already has:
+
+- unit tests near `parse_age_years` and `contains_keyword_tokens`
+- async `MockServer` CTGov pagination tests
+- `ClinicalTrialsClient::new_for_test(...)`
+
+No new file, fixture system, or helper module is needed.
+
+---
 
 ## Architecture Decisions
 
-### 1. Replace `SCENARIO` with `parse_args(argv=None)`
+### AD-1: Change `parse_age_years` to `Option<f32>`
 
-Add `argparse` to the demo script and expose:
+Fractional years are required for month/week/day inputs. Keeping `u32` would
+force truncation or rounding in the wrong domain.
 
-- optional positional `base_url` with default `http://127.0.0.1:8080`
-- optional `--scenario` flag with `choices=sorted(SCENARIOS)`
+Implementation requirements:
 
-Use:
+- parse the leading numeric token as `f32`
+- read the first unit token case-insensitively
+- support `year|years|month|months|week|weeks|day|days`
+- treat a missing unit as years
+- return `None` for empty/unknown inputs such as `""` or `N/A`
 
-```python
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-```
+Comparison sites in `verify_age_eligibility` must compare `age as f32` against
+the parsed bounds.
 
-This signature is valid on Python 3.11 because the file already uses
-`from __future__ import annotations`.
+### AD-2: Keep `contains_keyword_tokens` implementation unchanged
 
-Remove the `SCENARIO` constant and `selected_steps()` helper. Replace them with
-`steps_for(scenario: str) -> list[ScenarioStep]` that directly indexes
-`SCENARIOS`; `argparse` now owns unknown-scenario validation.
+The code already handles `PD-L1+`. Only add tests that prove the intended
+behavior and prevent regressions.
 
-### 2. Add `check_health(base_url)` using `urllib.request`
+### AD-3: Keep CTGov `next_page` as the upstream token format
 
-No new dependency is needed. `check_health()` should:
+Do not introduce `CtGovCursorToken`, JSON cursor wrapping, or any new parsing
+logic in `trial.rs`.
 
-- call `GET {base_url.rstrip('/')}/health`
-- parse JSON and require `{"status": "ok"}`
-- print `Health check passed: <url>` on success
-- raise `SystemExit` on failure with a message that:
-  - names the probe URL that failed
-  - tells the user to start `biomcp serve-http --host 127.0.0.1 --port 8080`
-  - is clear enough for a first-time user reading a screenshot/log
+Instead, add one faithful regression test around the current cursor contract:
 
-The runtime error message should stay generic and portable. The version-aligned
-release-binary guidance belongs in README/dev verification, not in the script's
-fatal path.
+- offset may reduce the number of rows returned from a fetched page
+- when the fetched page is fully consumed, the returned cursor must still be
+  the upstream `nextPageToken`
 
-### 3. Tighten step 3 using the supported trial search surface
+If trial pagination is ever refactored to use a fixed CTGov page size larger
+than `limit`, then a compound cursor design may become necessary. That is not
+the current architecture and should not be pre-implemented here.
 
-Do **not** implement this:
+### AD-4: No `spec/` change for this ticket
 
-```bash
-biomcp variant trials "BRAF V600E" --disease melanoma --limit 5
-```
+This repo is spec-driven, but this ticket does not need a new executable spec.
 
-That flag does not exist on the current CLI.
+Reasoning:
 
-Use this existing command instead:
+- the age-unit behavior is exercised through private helper logic fed by CTGov
+  age strings, not a stable public CLI string contract
+- the PD-L1+ gap is a private tokenizer boundary case
+- the corrected cursor regression is about preserving an upstream token in a
+  mocked pagination flow, not a stable live-API spec scenario
 
-```bash
-biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5
-```
+`spec/04-trial.md` already covers the outside-in trial search surface. The
+faithful proof for this ticket belongs in focused Rust tests in
+`src/entities/trial.rs`.
 
-Update the step title accordingly, for example:
-
-```text
-Step 3 - Trials: melanoma trials mentioning BRAF V600E
-```
-
-This keeps the demo coherent without requiring new CLI functionality.
-
-### 4. Add explicit command framing to each step
-
-Before each MCP tool call, print the exact BioMCP command being executed:
-
-```text
-=== Step 2 - Evidence: BRAF V600E ClinVar evidence ===
-Command: biomcp get variant "BRAF V600E" clinvar
-```
-
-This is important for screenshot/recording readability and makes the MCP run
-easier to compare mentally with everyday CLI use.
-
-### 5. Add `demo/README.md`
-
-Create a short standalone README that covers:
-
-- what the demo proves
-- how to start the server
-- how to run the client
-- how to choose a scenario
-- what output to expect, using structural markers rather than brittle exact data
-- how to avoid first-run `uv` noise with `uv run --quiet`
-- version-alignment guidance:
-  - installed `biomcp` is fine for normal use
-  - for repo verification, prefer `./target/release/biomcp serve-http ...`
-    so the server version matches the checked-out code
-
-### 6. Update existing demo-facing docs contracts
-
-Because the repo already describes the Streamable HTTP demo outside the script,
-the implementation must update these surfaces too:
-
-- `docs/getting-started/remote-http.md`
-- `analysis/technical/overview.md`
-- `tests/test_docs_changelog_refresh.py`
-
-The goal is not a docs rewrite. The goal is to keep existing newcomer/runtime
-documentation aligned with the polished demo story and the removal of the
-`SCENARIO` constant.
+---
 
 ## File Disposition
 
 | File | Action | Notes |
 |------|--------|-------|
-| `demo/streamable_http_client.py` | Modify | add argparse, remove `SCENARIO`, add health check, print command context, switch step 3 to `search trial -c melanoma --mutation ...` |
-| `demo/README.md` | Create | newcomer-facing demo guide with expected-output sketch and version-alignment note |
-| `tests/test_streamable_http_demo.py` | Modify | replace `selected_steps()` tests with parse/health/scenario assertions |
-| `docs/getting-started/remote-http.md` | Modify | update the documented three-step demo workflow and mention the new scenario flag |
-| `analysis/technical/overview.md` | Modify | keep the technical overview aligned with the actual polished demo behavior |
-| `tests/test_docs_changelog_refresh.py` | Modify | update contract assertions for the demo script and remote-http overview |
+| `src/entities/trial.rs` | Modify | age parsing code fix, age/token/cursor regression tests |
 
-No `spec/` files are part of this change.
+No `spec/`, docs, CLI, renderer, or source-client files should change.
+
+---
 
 ## Implementation Notes
 
-### `demo/streamable_http_client.py`
+### Age parsing
 
-Representative structure:
+Preferred shape:
 
-```python
-from __future__ import annotations
-
-import argparse
-import asyncio
-import json
-import urllib.error
-import urllib.request
-from datetime import timedelta
-from typing import TypeAlias
-
-from mcp import ClientSession, types
-from mcp.client.streamable_http import streamable_http_client
-
-DEFAULT_BASE_URL = "http://127.0.0.1:8080"
-ScenarioStep: TypeAlias = tuple[str, str]
-
-SCENARIOS: dict[str, list[ScenarioStep]] = {
-    "braf-melanoma": [
-        (
-            "Step 1 - Discovery: BRAF in melanoma",
-            "biomcp search all --gene BRAF --disease melanoma --counts-only",
-        ),
-        (
-            "Step 2 - Evidence: BRAF V600E ClinVar evidence",
-            'biomcp get variant "BRAF V600E" clinvar',
-        ),
-        (
-            "Step 3 - Trials: melanoma trials mentioning BRAF V600E",
-            'biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5',
-        ),
-    ],
-}
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="BioMCP Streamable HTTP demo client.",
-    )
-    parser.add_argument(
-        "base_url",
-        nargs="?",
-        default=DEFAULT_BASE_URL,
-        help=f"Base URL of the BioMCP server (default: {DEFAULT_BASE_URL})",
-    )
-    parser.add_argument(
-        "--scenario",
-        default="braf-melanoma",
-        choices=sorted(SCENARIOS),
-        help="Named demo scenario to run (default: braf-melanoma)",
-    )
-    return parser.parse_args(argv)
-
-
-def steps_for(scenario: str) -> list[ScenarioStep]:
-    return SCENARIOS[scenario]
-
-
-def check_health(base_url: str) -> None:
-    url = f"{base_url.rstrip('/')}/health"
-    try:
-        with urllib.request.urlopen(url, timeout=5) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError) as exc:
-        raise SystemExit(
-            f"Cannot reach BioMCP server at {url}: {exc}\n"
-            "Start the server first:\n"
-            "  biomcp serve-http --host 127.0.0.1 --port 8080"
-        ) from exc
-    if body.get("status") != "ok":
-        raise SystemExit(f"Unexpected health response from {url}: {body}")
-    print(f"Health check passed: {url}")
-
-
-async def main(base_url: str, scenario: str) -> None:
-    check_health(base_url)
-
-    mcp_url = f"{base_url.rstrip('/')}/mcp"
-    print(f"Connecting to BioMCP at {mcp_url}")
-    print(f"Running scenario: {scenario}\n")
-
-    async with streamable_http_client(
-        mcp_url,
-        terminate_on_close=False,
-    ) as (read_stream, write_stream, _):
-        async with ClientSession(
-            read_stream,
-            write_stream,
-            read_timeout_seconds=timedelta(seconds=30),
-        ) as session:
-            initialize_result = await session.initialize()
-            print(initialize_result.serverInfo)
-            tools_result = await session.list_tools()
-            tool_names = [tool.name for tool in tools_result.tools]
-            print(f"Available tools: {', '.join(tool_names)}\n")
-
-            for title, command in steps_for(scenario):
-                print(f"\n=== {title} ===")
-                print(f"Command: {command}")
-                call_result = await session.call_tool(
-                    "biomcp",
-                    arguments={"command": command},
-                )
-                for content in call_result.content:
-                    if isinstance(content, types.TextContent):
-                        print(content.text)
+```rust
+fn parse_age_years(value: &str) -> Option<f32>
 ```
 
-Notes:
+Use a parser that is tolerant of normal CTGov strings:
 
-- Keep `terminate_on_close=False`; this is still required because of the known
-  Python MCP client warning on valid `202 Accepted` session teardown.
-- Keep the script standalone and runnable as a PEP 723 artifact.
-- Do not add CLI-vs-MCP diff logic or artifact-capture mode in this ticket.
+- `"18 Years"`
+- `"6 Months"`
+- `"2 Weeks"`
+- `"30 Days"`
 
-### `tests/test_streamable_http_demo.py`
+The implementation should parse the first numeric token and the first unit
+token rather than depending on trimming all non-digits from the tail.
 
-Replace the current constant-driven tests with focused coverage for the polished
-demo contract:
+### Age comparison
 
-```python
-def test_parse_args_defaults() -> None:
-    module = _load_demo_module()
-    args = module.parse_args([])
-    assert args.scenario == "braf-melanoma"
-    assert args.base_url == module.DEFAULT_BASE_URL
+Update these two checks only:
 
-
-def test_parse_args_rejects_unknown_scenario() -> None:
-    module = _load_demo_module()
-    with pytest.raises(SystemExit):
-        module.parse_args(["--scenario", "missing"])
-
-
-def test_parse_args_accepts_positional_url_and_scenario() -> None:
-    module = _load_demo_module()
-    args = module.parse_args(
-        ["http://10.0.0.1:9000", "--scenario", "braf-melanoma"]
-    )
-    assert args.base_url == "http://10.0.0.1:9000"
-    assert args.scenario == "braf-melanoma"
-
-
-def test_check_health_failure_message_mentions_start_command(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_demo_module()
-
-    def fail(*args, **kwargs):
-        raise urllib.error.URLError("connection refused")
-
-    monkeypatch.setattr(module.urllib.request, "urlopen", fail)
-
-    with pytest.raises(SystemExit, match="biomcp serve-http --host 127.0.0.1 --port 8080"):
-        module.check_health(module.DEFAULT_BASE_URL)
-
-
-def test_braf_melanoma_step3_uses_trial_search_with_condition_and_mutation() -> None:
-    module = _load_demo_module()
-    _, step3_cmd = module.SCENARIOS["braf-melanoma"][2]
-    assert step3_cmd == (
-        'biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5'
-    )
-
-
-def test_demo_python_floor_matches_syntax() -> None:
-    # keep the existing floor/syntax contract unchanged
-    ...
+```rust
+.is_none_or(|min| age as f32 >= min)
+.is_none_or(|max| age as f32 <= max)
 ```
 
-### `demo/README.md`
+### Token tests
 
-Expected content shape:
+Add tests near the existing `contains_keyword_tokens_*` cases:
 
-````markdown
-# BioMCP Streamable HTTP Demo
+- `contains_keyword_tokens_matches_hyphenated_plus_token`
+- `contains_keyword_tokens_rejects_hyphenated_token_without_plus_suffix`
 
-This demo proves that the live `biomcp` MCP tool is reachable over Streamable
-HTTP and can drive a coherent BRAF/melanoma workflow end to end.
+### Cursor regression
 
-## Start the server
+Add one async mock test using the existing `MockServer` pattern. Use a faithful
+response shape where `pageSize == limit`.
 
-For repo-local verification, prefer the checked-out release binary:
+Suggested scenario:
 
-```bash
-./target/release/biomcp serve-http --host 127.0.0.1 --port 8080
-```
+1. call `search_page_with_ctgov_client(..., limit = 3, offset = 1, next_page = None)`
+2. first mocked CTGov page returns exactly 3 studies and `nextPageToken = "p2"`
+3. because one row is skipped by offset, 2 rows are returned
+4. because the fetched page was fully consumed, returned `next_page_token` is
+   still `"p2"`
 
-Installed binary also works:
+This proves the current cursor boundary without inventing a new cursor format.
 
-```bash
-biomcp serve-http --host 127.0.0.1 --port 8080
-```
-
-## Run the demo
-
-```bash
-uv run --script demo/streamable_http_client.py
-uv run --script demo/streamable_http_client.py --scenario braf-melanoma
-uv run --quiet --script demo/streamable_http_client.py
-```
-
-## Expected output
-
-Look for these structural markers:
-
-- `Health check passed: http://127.0.0.1:8080/health`
-- `Connecting to BioMCP at http://127.0.0.1:8080/mcp`
-- `Available tools: biomcp`
-- `Command: biomcp search all --gene BRAF --disease melanoma --counts-only`
-- `Command: biomcp get variant "BRAF V600E" clinvar`
-- `Command: biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5`
-- step 3 output with query echo `condition=melanoma, mutation=BRAF V600E`
-````
-
-Important: keep the expected output section structural. Do not pin exact trial
-titles, counts, or server versions that may drift.
+---
 
 ## Acceptance Criteria
 
-- [ ] `demo/streamable_http_client.py` remains a standalone PEP 723 script with
-  `requires-python = ">=3.11"` and no new non-stdlib dependency beyond `mcp`
-- [ ] `parse_args(argv=None)` exists and supports:
-  - default scenario `braf-melanoma`
-  - optional positional base URL
-  - `--scenario` selection with clear argparse rejection for unknown values
-- [ ] The demo performs a `GET /health` preflight before opening the MCP
-  session and fails with a human-readable start-the-server message
-- [ ] The default three-step scenario is:
-  - `biomcp search all --gene BRAF --disease melanoma --counts-only`
-  - `biomcp get variant "BRAF V600E" clinvar`
-  - `biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5`
-- [ ] The demo prints enough framing for screenshots/recordings:
-  - health line
-  - scenario line
-  - tool list containing `biomcp`
-  - section title per step
-  - `Command: ...` line per step
-- [ ] `demo/README.md` exists and documents setup, scenario selection, expected
-  output structure, `uv run --quiet`, and version-alignment guidance
-- [ ] Demo-facing docs stay aligned with the polished workflow in:
-  `docs/getting-started/remote-http.md` and `analysis/technical/overview.md`
-- [ ] Focused tests and contracts pass without leaving stale references to
-  `SCENARIO = "braf-melanoma"` or the old `variant trials ... --limit 5`
-  demo step
+### 1. Age unit conversion
+
+- `parse_age_years("18 Years")` returns `Some(18.0)`
+- `parse_age_years("6 Months")` returns `Some(0.5)`
+- `parse_age_years("2 Weeks")` returns a value close to `2.0 / 52.0`
+- `parse_age_years("30 Days")` returns a value close to `30.0 / 365.0`
+- `parse_age_years("N/A")` returns `None`
+- `parse_age_years("")` returns `None`
+- `verify_age_eligibility` excludes age `0` for a trial with minimum age
+  `"6 Months"`
+- `verify_age_eligibility` includes age `1` for that same trial
+
+### 2. PD-L1+ token coverage
+
+- `contains_keyword_tokens("PD-L1+ expression level >= 1%", "PD-L1+")` is `true`
+- `contains_keyword_tokens("PD-L1 positive", "PD-L1+")` is `false`
+- existing plus-token and hyphen-token tests continue to pass
+
+### 3. Faithful CTGov cursor regression
+
+- with `limit = 3`, `offset = 1`, and a mocked CTGov response containing
+  exactly 3 studies plus `nextPageToken = "p2"`, the returned page contains
+  2 results
+- the returned `next_page_token` is `Some("p2".into())`
+- no new JSON cursor envelope is introduced
+- `validate_search_page_args` remains unchanged
+
+---
 
 ## Dev Verification Plan
 
+Run in the P051 worktree:
+
 ```bash
-# 1. Focused demo tests
-uv run pytest tests/test_streamable_http_demo.py -v
+cd /home/ian/workspace/worktrees/P051-biomcp
 
-# 2. Focused docs-contract regression for the demo surfaces
-uv run pytest tests/test_docs_changelog_refresh.py -v
+cargo test --lib entities::trial
 
-# 3. Start the release binary explicitly to avoid PATH/version confusion
-./target/release/biomcp serve-http --host 127.0.0.1 --port 8080
-
-# 4. Run the default scenario
-uv run --script demo/streamable_http_client.py
-
-# 5. Run with explicit scenario selection
-uv run --script demo/streamable_http_client.py --scenario braf-melanoma
-
-# 6. Confirm unknown scenario failure is clear
-uv run --script demo/streamable_http_client.py --scenario missing 2>&1 || true
-
-# 7. Optional: confirm quieter first-run recording path
-uv run --quiet --script demo/streamable_http_client.py --scenario braf-melanoma
-
-# 8. Full contracts gate
-make test-contracts
+cargo test parse_age_years -- --nocapture
+cargo test contains_keyword_tokens_matches_hyphenated_plus_token -- --nocapture
+cargo test ctgov_cursor_preserves_next_page_token_after_offset_full_page_consumption -- --nocapture
 ```
 
-Manual smoke expectations:
+Baseline check during review-design: `cargo test --lib entities::trial` is
+already green on the current branch before implementation.
 
-- health check prints before MCP initialization
-- server info prints a `biomcp` implementation/version
-- tool listing includes `biomcp`
-- step 3 query echo includes `condition=melanoma, mutation=BRAF V600E`
-- no step requires source editing to change scenario
+---
 
 ## Proof Matrix
 
 | Proof type | Coverage |
 |------------|----------|
-| Focused test proof | `tests/test_streamable_http_demo.py` covers arg parsing, health-check failure UX, step-3 command contract, and Python-floor compatibility |
-| Docs-contract proof | `tests/test_docs_changelog_refresh.py` covers remote-http and overview alignment with the polished demo |
-| Runtime proof | manual smoke against a real `./target/release/biomcp serve-http --host 127.0.0.1 --port 8080` instance |
-| Shared transport proof | existing `tests/test_mcp_http_transport.py` and `tests/test_mcp_http_surface.py` remain the transport/route proof surfaces |
-| Full regression proof | `make test-contracts` |
+| Spec proof | Not applicable for this ticket; behavior is private-helper/mock driven rather than a stable outside-in CLI contract |
+| Unit test - age conversion | `parse_age_years_*` coverage for years, months, weeks, days, and invalid inputs |
+| Unit/integration test - age eligibility | focused `verify_age_eligibility` coverage for sub-year minimum age |
+| Unit test - PD-L1+ token | the two new `contains_keyword_tokens_*` cases plus the existing plus/hyphen tests |
+| Async mock test - cursor | faithful offset/full-page-consumption regression preserving upstream `nextPageToken` |
+| Dev proof | `cargo test --lib entities::trial` |
 
-## Out of Scope
+---
 
-- Adding a new `--disease` flag to `variant trials`
-- CLI-vs-MCP side-by-side comparison mode
-- A second short-form demo script
-- `--json` / artifact capture mode
-- Changes to numbered `spec/` files
+## Out Of Scope
+
+- any change to trial CLI flags or query summaries
+- any change to markdown/json pagination rendering
+- any change to CTGov source client request/response types
+- introducing a new CTGov cursor serialization format
+- speculative fixes for a future trial pagination architecture that does not
+  exist in the current codebase

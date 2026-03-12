@@ -1025,14 +1025,22 @@ async fn verify_eligibility_criteria(
     verified
 }
 
-fn parse_age_years(value: &str) -> Option<u32> {
-    let trimmed = value.trim().to_ascii_lowercase();
-    let digits = trimmed.trim_end_matches(|c: char| !c.is_ascii_digit());
-    let digits = digits.trim();
-    if digits.is_empty() {
-        return None;
+fn parse_age_years(value: &str) -> Option<f32> {
+    let mut parts = value.split_whitespace();
+    let amount = parts.next()?.parse::<f32>().ok()?;
+    let unit = parts.next().map(|token| {
+        token
+            .trim_matches(|c: char| !c.is_ascii_alphabetic())
+            .to_ascii_lowercase()
+    });
+
+    match unit.as_deref() {
+        None | Some("year") | Some("years") => Some(amount),
+        Some("month") | Some("months") => Some(amount / 12.0),
+        Some("week") | Some("weeks") => Some(amount / 52.0),
+        Some("day") | Some("days") => Some(amount / 365.0),
+        _ => None,
     }
-    digits.parse().ok()
 }
 
 fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: u32) -> Vec<CtGovStudy> {
@@ -1046,11 +1054,11 @@ fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: u32) -> Vec<CtGovStudy>
             let min_ok = module
                 .and_then(|m| m.minimum_age.as_deref())
                 .and_then(parse_age_years)
-                .is_none_or(|min| age >= min);
+                .is_none_or(|min| age as f32 >= min);
             let max_ok = module
                 .and_then(|m| m.maximum_age.as_deref())
                 .and_then(parse_age_years)
-                .is_none_or(|max| age <= max);
+                .is_none_or(|max| age as f32 <= max);
             min_ok && max_ok
         })
         .collect()
@@ -1581,6 +1589,8 @@ async fn search_page_with_ctgov_client(
             verified_total = verified_total.saturating_add(studies.len());
         }
 
+        let page_started_with_skip = remaining_skip;
+        let rows_before_page = rows.len();
         let page_study_count = studies.len();
         let mut page_consumed = 0;
         for study in studies.drain(..) {
@@ -1604,6 +1614,20 @@ async fn search_page_with_ctgov_client(
                 page_token = None;
             }
             if next_page_token.is_none() {
+                exhausted = true;
+            }
+            break;
+        }
+
+        // Once offset is satisfied inside a fetched page, stop at that page boundary so the
+        // returned cursor remains CTGov's upstream next-page token for the unconsumed remainder.
+        if page_started_with_skip > 0
+            && remaining_skip == 0
+            && rows.len() > rows_before_page
+            && page_consumed >= page_study_count
+        {
+            page_token = next_page_token;
+            if page_token.is_none() {
                 exhausted = true;
             }
             break;
@@ -1995,10 +2019,43 @@ mod tests {
 
     #[test]
     fn parse_age_years_handles_standard_formats() {
-        assert_eq!(parse_age_years("18 Years"), Some(18));
-        assert_eq!(parse_age_years("75 Years"), Some(75));
+        assert_eq!(parse_age_years("18 Years"), Some(18.0));
+        assert_eq!(parse_age_years("75 Years"), Some(75.0));
+        assert_eq!(parse_age_years("18"), Some(18.0));
+        assert_eq!(parse_age_years("6 Months"), Some(0.5));
+        assert!(
+            (parse_age_years("2 Weeks").expect("weeks should parse") - (2.0 / 52.0)).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (parse_age_years("30 Days").expect("days should parse") - (30.0 / 365.0)).abs()
+                < f32::EPSILON
+        );
         assert_eq!(parse_age_years("N/A"), None);
         assert_eq!(parse_age_years(""), None);
+    }
+
+    #[test]
+    fn verify_age_eligibility_handles_sub_year_minimum_age() {
+        let study: CtGovStudy = serde_json::from_value(ctgov_search_study_fixture(
+            "NCT00000001",
+            "6 Months",
+            "75 Years",
+        ))
+        .expect("study fixture should deserialize");
+
+        assert!(verify_age_eligibility(vec![study.clone()], 0).is_empty());
+        assert_eq!(verify_age_eligibility(vec![study], 1).len(), 1);
+    }
+
+    #[test]
+    fn verify_age_eligibility_handles_sub_year_maximum_age() {
+        let study: CtGovStudy =
+            serde_json::from_value(ctgov_search_study_fixture("NCT00000002", "N/A", "6 Months"))
+                .expect("study fixture should deserialize");
+
+        assert_eq!(verify_age_eligibility(vec![study.clone()], 0).len(), 1);
+        assert!(verify_age_eligibility(vec![study], 1).is_empty());
     }
 
     #[test]
@@ -2124,6 +2181,16 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
     #[test]
     fn contains_keyword_tokens_matches_hyphenated_token() {
         assert!(contains_keyword_tokens("PD-L1 expression >=1%", "PD-L1"));
+    }
+
+    #[test]
+    fn contains_keyword_tokens_matches_hyphenated_plus_token() {
+        assert!(contains_keyword_tokens("PD-L1+ expression >=1%", "PD-L1+"));
+    }
+
+    #[test]
+    fn contains_keyword_tokens_rejects_hyphenated_token_without_plus_suffix() {
+        assert!(!contains_keyword_tokens("PD-L1 positive", "PD-L1+"));
     }
 
     #[test]
@@ -2536,6 +2603,36 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
                 .total,
             None
         );
+    }
+
+    #[tokio::test]
+    async fn ctgov_cursor_preserves_next_page_token_after_offset_full_page_consumption() {
+        let server = MockServer::start().await;
+        let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
+
+        Mock::given(method("GET"))
+            .and(path("/studies"))
+            .and(query_param("query.cond", "melanoma"))
+            .and(query_param("filter.overallStatus", "RECRUITING"))
+            .and(query_param("countTotal", "true"))
+            .and(query_param("pageSize", "3"))
+            .and(query_param_is_missing("pageToken"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "studies": studies_with_age_matches(3, 3, "21"),
+                "nextPageToken": "p2",
+                "totalCount": 10
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let page =
+            search_page_with_ctgov_client(&client, &age_filtered_ctgov_filters(), 3, 1, None)
+                .await
+                .expect("page");
+
+        assert_eq!(page.results.len(), 2);
+        assert_eq!(page.next_page_token, Some("p2".into()));
     }
 
     #[tokio::test]
