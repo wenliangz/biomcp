@@ -6327,3 +6327,96 @@ mod tests {
         assert!(err.to_string().contains("Unknown comparison type"));
     }
 }
+
+#[cfg(test)]
+mod next_commands_validity {
+    use super::Cli;
+    use clap::Parser;
+
+    fn parse_cmd(cmd: &str) -> Vec<String> {
+        shlex::split(cmd).unwrap_or_else(|| panic!("shlex failed on: {cmd}"))
+    }
+
+    fn assert_parses(cmd: &str) {
+        Cli::try_parse_from(parse_cmd(cmd))
+            .unwrap_or_else(|e| panic!("failed to parse '{cmd}': {e}"));
+    }
+
+    #[test]
+    fn gene_next_commands_parse() {
+        assert_parses("biomcp search variant -g BRAF");
+        assert_parses("biomcp search article -g BRAF");
+        assert_parses("biomcp search drug --target BRAF");
+        assert_parses("biomcp gene trials BRAF");
+    }
+
+    #[test]
+    fn variant_next_commands_parse() {
+        assert_parses("biomcp get gene BRAF");
+        assert_parses("biomcp search drug --target BRAF");
+        assert_parses(r#"biomcp variant trials "rs113488022""#);
+        assert_parses(r#"biomcp variant articles "rs113488022""#);
+        assert_parses(r#"biomcp variant oncokb "rs113488022""#);
+    }
+
+    #[test]
+    fn article_next_commands_parse() {
+        assert_parses("biomcp get gene EGFR");
+        assert_parses("biomcp search disease --query melanoma");
+        assert_parses("biomcp get drug osimertinib");
+        assert_parses("biomcp article entities 12345");
+    }
+
+    #[test]
+    fn trial_next_commands_parse() {
+        assert_parses("biomcp search disease --query melanoma");
+        assert_parses("biomcp search article -d melanoma");
+        assert_parses("biomcp search trial -c melanoma");
+        assert_parses("biomcp get drug dabrafenib");
+        assert_parses("biomcp drug trials dabrafenib");
+    }
+
+    #[test]
+    fn disease_next_commands_parse() {
+        assert_parses("biomcp search trial -c melanoma");
+        assert_parses("biomcp search article -d melanoma");
+        assert_parses("biomcp search drug melanoma");
+    }
+
+    #[test]
+    fn pgx_next_commands_parse() {
+        assert_parses("biomcp search pgx -g CYP2D6");
+        assert_parses("biomcp search pgx -d warfarin");
+    }
+
+    #[test]
+    fn drug_next_commands_parse() {
+        assert_parses("biomcp drug trials osimertinib");
+        assert_parses("biomcp drug adverse-events osimertinib");
+        assert_parses("biomcp get gene EGFR");
+    }
+
+    #[test]
+    fn pathway_next_commands_parse() {
+        assert_parses("biomcp pathway drugs R-HSA-5673001");
+    }
+
+    #[test]
+    fn protein_next_commands_parse() {
+        assert_parses("biomcp get protein P00533 structures");
+        assert_parses("biomcp get gene EGFR");
+    }
+
+    #[test]
+    fn adverse_event_next_commands_parse() {
+        assert_parses("biomcp get drug osimertinib");
+        assert_parses("biomcp drug adverse-events osimertinib");
+        assert_parses("biomcp drug trials osimertinib");
+    }
+
+    #[test]
+    fn device_event_next_commands_parse() {
+        assert_parses("biomcp search adverse-event --type device --device HeartValve");
+        assert_parses(r#"biomcp search adverse-event --type recall --classification "Class I""#);
+    }
+}
