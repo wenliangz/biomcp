@@ -29,6 +29,12 @@ jobs:
       - run: cargo clippy -- -D warnings
       - run: cargo test
 
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-version-sync.sh
+
   contracts:
     runs-on: ubuntu-latest
     steps:
