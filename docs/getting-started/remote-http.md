@@ -68,12 +68,12 @@ workflow over the remote MCP `biomcp` tool:
 ```bash
 biomcp serve-http --host 127.0.0.1 --port 8080
 uv run --script demo/streamable_http_client.py
-uv run --script demo/streamable_http_client.py --scenario braf-melanoma
+uv run --script demo/streamable_http_client.py http://127.0.0.1:8080
 ```
 
-The demo checks `/health` before opening the MCP session, prints the scenario,
-lists available tools, and prints `Command: ...` before each BioMCP step so a
-screenshot or recording still makes sense without extra narration.
+The demo connects to `/mcp`, prints `Command: ...` before each BioMCP step,
+and leaves the real markdown output untouched so a screenshot or recording
+still makes sense without extra narration.
 
 See `demo/README.md` for the short newcomer walkthrough, expected output
 markers, `uv run --quiet` guidance for first-run dependency noise, and the
