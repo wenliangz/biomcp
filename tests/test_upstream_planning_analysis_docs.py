@@ -138,8 +138,9 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "`/mcp`" in technical
     assert "`/health`" in technical
     assert "`/readyz`" in technical
-    assert "available tools" in technical
-    assert "remote `biomcp` tool" in technical
+    assert "connection line and `Command:` markers" in technical
+    assert "through the remote" in technical
+    assert "`biomcp` tool" in technical
     assert "remote `shell`" not in technical
 
     assert "`search all` Contract" in ux

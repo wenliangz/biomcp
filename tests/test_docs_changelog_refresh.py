@@ -86,11 +86,13 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     assert "demo/streamable_http_client.py" in remote_http
     assert "three-step BRAF V600E melanoma" in remote_http
     assert "workflow over the remote MCP `biomcp` tool" in remote_http
-    assert "--scenario braf-melanoma" in remote_http
+    assert "prints `Command: ...` before each BioMCP step" in remote_http
     assert "biomcp search all --gene BRAF --disease melanoma --counts-only" in remote_http
     assert 'biomcp get variant "BRAF V600E" clinvar' in remote_http
     assert 'biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5' in remote_http
     assert "demo/README.md" in remote_http
+    assert "--scenario braf-melanoma" not in remote_http
+    assert "Available tools:" not in remote_http
 
     assert "# Streamable HTTP Demo" in demo_readme
     assert "what the demo proves" in demo_readme.lower()
@@ -99,7 +101,16 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     assert "what output to expect" in demo_readme.lower()
     assert "uv run --quiet --script demo/streamable_http_client.py" in demo_readme
     assert "./target/release/biomcp serve-http --host 127.0.0.1 --port 8080" in demo_readme
-    assert "--scenario braf-melanoma" in demo_readme
+    assert "http://127.0.0.1:8080/mcp" in demo_readme
+    assert "Command: biomcp search all --gene BRAF --disease melanoma --counts-only" in demo_readme
+    assert 'Command: biomcp get variant "BRAF V600E" clinvar' in demo_readme
+    assert (
+        'Command: biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5'
+        in demo_readme
+    )
+    assert "--scenario braf-melanoma" not in demo_readme
+    assert "Health check passed:" not in demo_readme
+    assert "Available tools:" not in demo_readme
 
 
 def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
@@ -112,22 +123,21 @@ def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
     assert "uv run --script demo/streamable_http_client.py" in demo_script
     assert 'DEFAULT_BASE_URL = "http://127.0.0.1:8080"' in demo_script
     assert 'mcp_url = f"{base_url.rstrip(\'/\')}/mcp"' in demo_script
-    assert "def parse_args(argv: list[str] | None = None)" in demo_script
-    assert "def check_health(base_url: str) -> None:" in demo_script
-    assert 'choices=sorted(SCENARIOS)' in demo_script
+    assert "def resolve_base_url(argv: list[str]) -> str:" in demo_script
+    assert "resolve_base_url(sys.argv)" in demo_script
+    assert "Usage: demo/streamable_http_client.py [base_url]" in demo_script
     assert "terminate_on_close=False" in demo_script
-    assert "list_tools()" in demo_script
     assert '"biomcp"' in demo_script
     assert 'shell' not in demo_script
     assert 'SCENARIO = "braf-melanoma"' not in demo_script
-    assert '"Step 1' in demo_script
-    assert '"Step 2' in demo_script
-    assert '"Step 3' in demo_script
     assert '"biomcp search all --gene BRAF --disease melanoma --counts-only"' in demo_script
     assert 'biomcp get variant "BRAF V600E" clinvar' in demo_script
     assert 'biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5' in demo_script
     assert 'print(f"Command: {command}")' in demo_script
-    assert 'check_health(args.base_url)' in demo_script
+    assert "argparse" not in demo_script
+    assert "check_health" not in demo_script
+    assert "list_tools()" not in demo_script
+    assert "--scenario" not in demo_script
 
 
 def test_release_overview_describes_streamable_http_workflow_demo() -> None:
@@ -138,7 +148,7 @@ def test_release_overview_describes_streamable_http_workflow_demo() -> None:
     assert "discovery -> evidence -> melanoma trials workflow" in overview
     assert "lists tools" not in overview
     assert "biomcp version" not in overview
-    assert "Health check passed:" in overview
+    assert "Health check passed:" not in overview
     assert "Command:" in overview
     assert "biomcp search all --gene BRAF --disease melanoma --counts-only" in overview
     assert 'biomcp get variant "BRAF V600E" clinvar' in overview

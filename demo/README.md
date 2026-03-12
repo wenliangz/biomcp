@@ -23,16 +23,15 @@ server version matches the worktree under test:
 
 ## How to run the client
 
-Run the default melanoma scenario:
+Run the default workflow:
 
 ```bash
 uv run --quiet --script demo/streamable_http_client.py
 ```
 
-Pass an explicit scenario or base URL when needed:
+Pass an explicit base URL when needed:
 
 ```bash
-uv run --quiet --script demo/streamable_http_client.py --scenario braf-melanoma
 uv run --quiet --script demo/streamable_http_client.py http://127.0.0.1:8080
 ```
 
@@ -40,10 +39,7 @@ uv run --quiet --script demo/streamable_http_client.py http://127.0.0.1:8080
 
 The output should include these structural markers:
 
-- `Health check passed: http://127.0.0.1:8080/health`
-- `Connecting to BioMCP at http://127.0.0.1:8080/mcp`
-- `Scenario: braf-melanoma`
-- `Available tools: biomcp`
+- `Connecting to http://127.0.0.1:8080/mcp`
 - `Command: biomcp search all --gene BRAF --disease melanoma --counts-only`
 - `Command: biomcp get variant "BRAF V600E" clinvar`
 - `Command: biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5`
