@@ -127,9 +127,10 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     technical = _read_repo("analysis/technical/overview.md")
     ux = _read_repo("analysis/ux/cli-reference.md")
 
-    assert "CI (`.github/workflows/ci.yml`) runs three parallel jobs" in technical
+    assert "CI (`.github/workflows/ci.yml`) runs four parallel jobs" in technical
     assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)" in technical
     assert "`version-sync` (`bash scripts/check-version-sync.sh`)" in technical
+    assert "`climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`)" in technical
     assert '`contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`)' in technical
     assert "The spec suite is repo-local executable documentation; no GitHub workflow currently runs `make spec`." in technical
     assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical
@@ -170,6 +171,7 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
 
     ci_contracts = _workflow_job_block(ci, "contracts")
     ci_version_sync = _workflow_job_block(ci, "version-sync")
+    ci_climb_hygiene = _workflow_job_block(ci, "climb-hygiene")
     release_validate = _workflow_job_block(release, "validate")
 
     assert 'python-version: "3.12"' in ci_contracts
@@ -190,6 +192,20 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
         "python-version:",
     ):
         assert forbidden not in ci_version_sync
+    assert "- uses: actions/checkout@v4" in ci_climb_hygiene
+    assert _workflow_run_steps(ci_climb_hygiene) == [
+        "bash scripts/check-no-climb-tracked.sh"
+    ]
+    for forbidden in (
+        "setup-python",
+        "setup-uv",
+        "setup-protoc",
+        "rust-toolchain",
+        "cargo ",
+        "uv sync",
+        "python-version:",
+    ):
+        assert forbidden not in ci_climb_hygiene
 
     assert "name: Contract Smoke Tests" in contracts_smoke
     assert 'cron: "0 6 * * *"' in contracts_smoke
