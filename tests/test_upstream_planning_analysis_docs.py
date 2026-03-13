@@ -127,12 +127,13 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     technical = _read_repo("analysis/technical/overview.md")
     ux = _read_repo("analysis/ux/cli-reference.md")
 
-    assert "CI (`.github/workflows/ci.yml`) runs four parallel jobs" in technical
+    assert "CI (`.github/workflows/ci.yml`) runs five parallel jobs" in technical
     assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)" in technical
     assert "`version-sync` (`bash scripts/check-version-sync.sh`)" in technical
     assert "`climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`)" in technical
     assert '`contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`)' in technical
-    assert "The spec suite is repo-local executable documentation; no GitHub workflow currently runs `make spec`." in technical
+    assert "`spec` (`cargo build --release --locked`, then `make spec`)" in technical
+    assert "PR CI now runs `make spec` via the `spec` job in `.github/workflows/ci.yml`." in technical
     assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical
     assert "release validation runs `pytest tests/` and `mkdocs build --strict`" in technical
     assert "Streamable HTTP" in technical
@@ -170,13 +171,24 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
     ]
 
     ci_contracts = _workflow_job_block(ci, "contracts")
+    ci_spec = _workflow_job_block(ci, "spec")
     ci_version_sync = _workflow_job_block(ci, "version-sync")
     ci_climb_hygiene = _workflow_job_block(ci, "climb-hygiene")
     release_validate = _workflow_job_block(release, "validate")
 
     assert 'python-version: "3.12"' in ci_contracts
+    assert 'python-version: "3.12"' in ci_spec
     assert 'python-version: "3.12"' in release_validate
     assert _workflow_run_steps(ci_contracts) == expected_contract_runs
+    assert "- uses: actions/checkout@v4" in ci_spec
+    assert "uses: arduino/setup-protoc@v3" in ci_spec
+    assert "uses: dtolnay/rust-toolchain@stable" in ci_spec
+    assert "uses: actions/setup-python@v5" in ci_spec
+    assert "uses: astral-sh/setup-uv@v4" in ci_spec
+    assert _workflow_run_steps(ci_spec) == [
+        "cargo build --release --locked",
+        "make spec",
+    ]
     assert _workflow_run_steps(release_validate)[-3:] == expected_contract_runs
     assert "- uses: actions/checkout@v4" in ci_version_sync
     assert _workflow_run_steps(ci_version_sync) == [

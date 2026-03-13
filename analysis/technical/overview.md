@@ -81,12 +81,13 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
-   - CI (`.github/workflows/ci.yml`) runs four parallel jobs: `check`
+   - CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check`
      (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`),
      `version-sync` (`bash scripts/check-version-sync.sh`),
      `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and
      `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`,
-     `uv run mkdocs build --strict`).
+     `uv run mkdocs build --strict`), and `spec` (`cargo build --release --locked`,
+     then `make spec`).
    - Release validation runs the Rust checks again, then
      `uv run pytest tests/ -v --mcp-cmd "biomcp serve"` and
      `uv run mkdocs build --strict`.
@@ -104,7 +105,7 @@ BioMCP has three verification layers:
 
 ### 1. GitHub Workflows
 
-CI (`.github/workflows/ci.yml`) runs four parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`).
+CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`), and `spec` (`cargo build --release --locked`, then `make spec`).
 Contract smoke checks run in `.github/workflows/contracts.yml` on a schedule
 and by manual dispatch via `bash scripts/contract-smoke.sh`.
 release validation runs `pytest tests/` and `mkdocs build --strict` after the
@@ -117,7 +118,10 @@ exercises CLI output at the command level using stable structural markers
 (headers, table columns, query echoes) rather than brittle upstream data
 values.
 
-The spec suite is repo-local executable documentation; no GitHub workflow currently runs `make spec`.
+PR CI now runs `make spec` via the `spec` job in `.github/workflows/ci.yml`.
+That job builds the release binary first, then relies on the Makefile's
+`target/release`-first `PATH` handling so specs do not accidentally execute a
+stale `.venv/bin/biomcp`.
 
 Run locally with `make spec`.
 
