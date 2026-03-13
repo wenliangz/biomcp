@@ -81,10 +81,11 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
-   - CI (`.github/workflows/ci.yml`) runs three parallel jobs: `check`
+   - CI (`.github/workflows/ci.yml`) runs four parallel jobs: `check`
      (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`),
-     `version-sync` (`bash scripts/check-version-sync.sh`), and `contracts`
-     (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`,
+     `version-sync` (`bash scripts/check-version-sync.sh`),
+     `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and
+     `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`,
      `uv run mkdocs build --strict`).
    - Release validation runs the Rust checks again, then
      `uv run pytest tests/ -v --mcp-cmd "biomcp serve"` and
@@ -103,7 +104,7 @@ BioMCP has three verification layers:
 
 ### 1. GitHub Workflows
 
-CI (`.github/workflows/ci.yml`) runs three parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), and `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`).
+CI (`.github/workflows/ci.yml`) runs four parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`).
 Contract smoke checks run in `.github/workflows/contracts.yml` on a schedule
 and by manual dispatch via `bash scripts/contract-smoke.sh`.
 release validation runs `pytest tests/` and `mkdocs build --strict` after the
