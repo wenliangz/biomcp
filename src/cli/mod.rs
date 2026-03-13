@@ -5496,6 +5496,17 @@ mod tests {
     }
 
     #[test]
+    fn search_trial_rejects_non_numeric_age() {
+        let err =
+            Cli::try_parse_from(["biomcp", "search", "trial", "--age", "abc", "--count-only"])
+                .expect_err("non-numeric age should fail to parse");
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("invalid value 'abc' for '--age <AGE>'"));
+        assert!(rendered.contains("invalid float literal"));
+    }
+
+    #[test]
     fn search_trial_parses_unquoted_multi_token_mutation() {
         let cli = Cli::try_parse_from([
             "biomcp",
