@@ -34,9 +34,9 @@ echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 
 ## Age Filter Count Stability
 
-Age-filtered count-only search must report the same total regardless of display
-limit. This guards the CTGov post-filter pagination bug where `Total:` changed
-with `--limit`.
+Age-only count-only search must stay on the cheap CTGov total path regardless
+of display limit. This guards the regression where age was incorrectly grouped
+with expensive detail-verified post-filters and `Total:` changed with `--limit`.
 
 ```bash
 t10="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 10 --count-only | sed -n 's/^Total: //p')"
@@ -46,6 +46,19 @@ test -n "$t10"
 test "$t10" = "$t20"
 test "$t20" = "$t50"
 ```
+
+## Expensive Count Traversal Cap
+
+When facility or eligibility verification forces the expensive detail-fetch
+path, `--count-only` must stop at the traversal cap and report an unknown total
+instead of a misleading lower bound.
+
+Contract note:
+Text output is `Total: unknown (traversal limit reached)` and JSON output is
+`{"total": null}` when the traversal cap is hit. This is regression-covered in
+`src/entities/trial.rs` unit tests because a real live-spec query broad enough
+to exhaust the cap would require large-scale per-study detail fetches and is
+not stable enough for the executable spec suite.
 
 ## Fractional Age Filter
 
