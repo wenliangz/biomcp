@@ -1,309 +1,211 @@
-# Design: P051 - Trial Search Edge-Case Tests
+# Design: T068 — Fix --age fractional year support (u32 -> f32)
 
-## Ticket
+## Summary
 
-T061: Trial search edge-case tests (age units, biomarker tokens, cursor boundary)
-
-This review corrected one major inaccuracy from the prior design: the proposed
-compound CTGov cursor is not warranted in the current codebase. The age-unit
-fix is real, the PD-L1+ gap is test coverage only, and the cursor work should
-stay at the regression-test layer because the current `trial.rs` CTGov search
-path cannot stop mid-page against a compliant upstream response.
-
----
-
-## Verified Facts From The Codebase
-
-### Gap 1: `parse_age_years` is unit-blind
-
-`src/entities/trial.rs` defines:
-
-```rust
-fn parse_age_years(value: &str) -> Option<u32> {
-    let trimmed = value.trim().to_ascii_lowercase();
-    let digits = trimmed.trim_end_matches(|c: char| !c.is_ascii_digit());
-    let digits = digits.trim();
-    if digits.is_empty() {
-        return None;
-    }
-    digits.parse().ok()
-}
-```
-
-That means:
-
-- `"18 Years"` -> `Some(18)` (current tests cover this)
-- `"6 Months"` -> `Some(6)` instead of `Some(0.5)`
-- `"2 Weeks"` -> `Some(2)` instead of about `0.038`
-
-`verify_age_eligibility` consumes `parse_age_years` for both minimum and
-maximum age checks, so the parser bug directly affects CTGov post-filtering.
-
-### Gap 2: `PD-L1+` matching already works; coverage is incomplete
-
-`contains_keyword_tokens` escapes each token and delegates boundaries to
-`build_token_pattern`.
-
-For `PD-L1+`, the resulting pattern is effectively:
-
-```text
-\bPD\-L1\+($|[^\w])
-```
-
-That correctly matches:
-
-- `"PD-L1+ expression"`
-- `"PD-L1+"`
-
-and correctly rejects:
-
-- `"PD-L1 positive"` when the keyword is `PD-L1+`
-
-Existing tests already cover:
-
-- `HER2+`
-- `ER+`
-- `PD-L1` (without plus)
-- plain word boundaries like `BRAF`
-
-The missing coverage is specifically the hyphen-plus biomarker form.
-
-### Gap 3: the previously proposed mid-page CTGov cursor fix is based on an unreachable production path
-
-The current CTGov search path sets:
-
-```rust
-let page_size = limit.clamp(1, 100);
-```
-
-and then passes that `page_size` to `ClinicalTrialsClient::search`.
-
-Within the same function:
-
-- `page_study_count` is the number of post-filtered studies from the fetched
-  CTGov page
-- new rows are appended until `rows.len() >= limit`
-- the "mid-page" branch is only taken when `page_consumed < page_study_count`
-
-Against a compliant upstream CTGov response, a fetched page cannot contain more
-than `page_size`, and here `page_size == limit`. That means a single fetched
-page cannot contain more than `limit` CTGov studies, so the current trial
-search implementation cannot hit `rows.len() >= limit` while leaving additional
-studies unconsumed on that same fetched page.
-
-This remains true even when `offset > 0`: with `page_size == limit`, there is
-still no faithful way to both skip some rows and fill `limit` fresh rows while
-also leaving extra rows unconsumed in the same response.
-
-Conclusion: do not add a compound cursor format, do not change `--next-page`
-semantics, and do not add a mock that returns oversized CTGov pages just to
-force an impossible branch.
-
-The valid cursor regression for the current code is narrower:
-
-- when `offset` consumes part of a fetched page but the code still consumes the
-  whole response, the returned cursor must remain the upstream `nextPageToken`
-- no `next_page` format change is required
-
-### Existing harnesses are sufficient
-
-`src/entities/trial.rs` already has:
-
-- unit tests near `parse_age_years` and `contains_keyword_tokens`
-- async `MockServer` CTGov pagination tests
-- `ClinicalTrialsClient::new_for_test(...)`
-
-No new file, fixture system, or helper module is needed.
+Change the `--age` CLI flag and `TrialSearchFilters.age` field from `u32` to `f32`
+so fractional year inputs (e.g. `0.5` for 6 months) are accepted without truncation.
+Remove the redundant `age as f32` casts inside `verify_age_eligibility`. Update the
+help text and EXAMPLES block. Add a spec regression contract for `--age 0.5`.
 
 ---
 
 ## Architecture Decisions
 
-### AD-1: Change `parse_age_years` to `Option<f32>`
+**Why f32 and not f64?**
+Age comparisons use `parse_age_years` which already returns `f32`. The existing
+`age as f32` casts in `verify_age_eligibility` confirm the internal contract is f32.
+Matching that type eliminates the casts and keeps precision consistent throughout.
 
-Fractional years are required for month/week/day inputs. Keeping `u32` would
-force truncation or rounding in the wrong domain.
+**Shared filter struct still needs fixture/test updates.**
+`TrialSearchFilters.age` is only used for numeric matching on the CTGov post-filter
+path, but the shared struct is also constructed in CLI summary tests and in the NCI
+validation test that rejects `--age` for `--source nci`. Widening the field to `f32`
+therefore requires updating those helper/test literals too, even though the NCI runtime
+behavior does not change.
 
-Implementation requirements:
-
-- parse the leading numeric token as `f32`
-- read the first unit token case-insensitively
-- support `year|years|month|months|week|weeks|day|days`
-- treat a missing unit as years
-- return `None` for empty/unknown inputs such as `""` or `N/A`
-
-Comparison sites in `verify_age_eligibility` must compare `age as f32` against
-the parsed bounds.
-
-### AD-2: Keep `contains_keyword_tokens` implementation unchanged
-
-The code already handles `PD-L1+`. Only add tests that prove the intended
-behavior and prevent regressions.
-
-### AD-3: Keep CTGov `next_page` as the upstream token format
-
-Do not introduce `CtGovCursorToken`, JSON cursor wrapping, or any new parsing
-logic in `trial.rs`.
-
-Instead, add one faithful regression test around the current cursor contract:
-
-- offset may reduce the number of rows returned from a fetched page
-- when the fetched page is fully consumed, the returned cursor must still be
-  the upstream `nextPageToken`
-
-If trial pagination is ever refactored to use a fixed CTGov page size larger
-than `limit`, then a compound cursor design may become necessary. That is not
-the current architecture and should not be pre-implemented here.
-
-### AD-4: No `spec/` change for this ticket
-
-This repo is spec-driven, but this ticket does not need a new executable spec.
-
-Reasoning:
-
-- the age-unit behavior is exercised through private helper logic fed by CTGov
-  age strings, not a stable public CLI string contract
-- the PD-L1+ gap is a private tokenizer boundary case
-- the corrected cursor regression is about preserving an upstream token in a
-  mocked pagination flow, not a stable live-API spec scenario
-
-`spec/04-trial.md` already covers the outside-in trial search surface. The
-faithful proof for this ticket belongs in focused Rust tests in
-`src/entities/trial.rs`.
+**Clap parses f32 natively.**
+Replacing `Option<u32>` with `Option<f32>` in the `#[arg]` declaration is sufficient;
+clap will accept `0.5`, `6.5`, `67`, etc. and emit a user-friendly error for non-numeric
+input.
 
 ---
 
 ## File Disposition
 
-| File | Action | Notes |
-|------|--------|-------|
-| `src/entities/trial.rs` | Modify | age parsing code fix, age/token/cursor regression tests |
-
-No `spec/`, docs, CLI, renderer, or source-client files should change.
+| File | Change |
+|---|---|
+| `src/cli/mod.rs:478` | `age: Option<u32>` → `Option<f32>`; update `#[arg]` doc comment |
+| `src/cli/mod.rs:444–452` | Add `--age 0.5` example to `Trial` EXAMPLES block |
+| `src/cli/mod.rs:5057` | Update `trial_search_query_summary_includes_geo_filters` fixture literal to `Some(67.0)` |
+| `src/cli/mod.rs:5448` | Change the existing `search_trial_parses_new_filter_flags` regression to parse `--age 0.5` and assert `Some(0.5_f32)` |
+| `src/entities/trial.rs:128` | `pub age: Option<u32>` → `Option<f32>` |
+| `src/entities/trial.rs:1046` | `fn verify_age_eligibility(…, age: u32)` → `age: f32`; drop `age as f32` casts at lines 1057, 1061 |
+| `src/entities/trial.rs:2039` | Update the sub-year eligibility tests to pass fractional literals (`0.0_f32`, `0.5_f32`, `1.0_f32`) instead of only integers |
+| `src/entities/trial.rs:2396` | Update `nci_source_rejects_age_filter` fixture literal to `Some(67.0)` |
+| `src/entities/trial.rs:2507` | Update `age_filtered_ctgov_filters()` helper to `age: Some(51.0)` so downstream CTGov pagination/count tests still compile unchanged |
+| `spec/04-trial.md` | Insert **Fractional Age Filter** immediately after **Age Filter Count Stability** |
 
 ---
 
-## Implementation Notes
+## Code Sketches
 
-### Age parsing
-
-Preferred shape:
+### cli/mod.rs — arg declaration (line 476–478)
 
 ```rust
-fn parse_age_years(value: &str) -> Option<f32>
+/// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months)
+#[arg(long)]
+age: Option<f32>,
 ```
 
-Use a parser that is tolerant of normal CTGov strings:
+### cli/mod.rs — EXAMPLES block (line 447)
 
-- `"18 Years"`
-- `"6 Months"`
-- `"2 Weeks"`
-- `"30 Days"`
+Insert after the `--age 67` example line:
 
-The implementation should parse the first numeric token and the first unit
-token rather than depending on trimming all non-digits from the tail.
+```
+  biomcp search trial --age 0.5 --count-only          # infants eligible (6 months)
+```
 
-### Age comparison
+Full block becomes:
+```
+EXAMPLES:
+  biomcp search trial -c melanoma -s recruiting
+  biomcp search trial -p 3 -i pembrolizumab
+  biomcp search trial -c melanoma --facility \"MD Anderson\" --age 67 --limit 5
+  biomcp search trial --age 0.5 --count-only          # infants eligible (6 months)
+  biomcp search trial --mutation \"BRAF V600E\" --status recruiting --study-type interventional --has-results --limit 5
+  biomcp search trial -c \"endometrial cancer\" --criteria \"mismatch repair deficient\" -s recruiting
+```
 
-Update these two checks only:
+### entities/trial.rs — TrialSearchFilters field (line 128)
 
 ```rust
-.is_none_or(|min| age as f32 >= min)
-.is_none_or(|max| age as f32 <= max)
+pub age: Option<f32>,
 ```
 
-### Token tests
+### entities/trial.rs — verify_age_eligibility (line 1046)
 
-Add tests near the existing `contains_keyword_tokens_*` cases:
+```rust
+fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: f32) -> Vec<CtGovStudy> {
+    studies
+        .into_iter()
+        .filter(|study| {
+            let module = study
+                .protocol_section
+                .as_ref()
+                .and_then(|s| s.eligibility_module.as_ref());
+            let min_ok = module
+                .and_then(|m| m.minimum_age.as_deref())
+                .and_then(parse_age_years)
+                .is_none_or(|min| age >= min);
+            let max_ok = module
+                .and_then(|m| m.maximum_age.as_deref())
+                .and_then(parse_age_years)
+                .is_none_or(|max| age <= max);
+            min_ok && max_ok
+        })
+        .collect()
+}
+```
 
-- `contains_keyword_tokens_matches_hyphenated_plus_token`
-- `contains_keyword_tokens_rejects_hyphenated_token_without_plus_suffix`
+### Unit test updates — entities/trial.rs (~2039)
 
-### Cursor regression
+```rust
+// verify_age_eligibility_handles_sub_year_minimum_age
+assert!(verify_age_eligibility(vec![study.clone()], 0.0_f32).is_empty());
+assert_eq!(verify_age_eligibility(vec![study], 0.5_f32).len(), 1);
 
-Add one async mock test using the existing `MockServer` pattern. Use a faithful
-response shape where `pageSize == limit`.
+// verify_age_eligibility_handles_sub_year_maximum_age
+assert_eq!(verify_age_eligibility(vec![study.clone()], 0.5_f32).len(), 1);
+assert!(verify_age_eligibility(vec![study], 1.0_f32).is_empty());
+```
 
-Suggested scenario:
+### Unit test updates — cli/mod.rs (~5057, ~5448)
 
-1. call `search_page_with_ctgov_client(..., limit = 3, offset = 1, next_page = None)`
-2. first mocked CTGov page returns exactly 3 studies and `nextPageToken = "p2"`
-3. because one row is skipped by offset, 2 rows are returned
-4. because the fetched page was fully consumed, returned `next_page_token` is
-   still `"p2"`
+```rust
+// trial_search_query_summary_includes_geo_filters
+age: Some(67.0),
 
-This proves the current cursor boundary without inventing a new cursor format.
+// search_trial_parses_new_filter_flags
+assert_eq!(age, Some(0.5_f32));
+```
+
+### Fixture/helper updates — entities/trial.rs (~2396, ~2507)
+
+```rust
+nci_source_rejects_age_filter => age: Some(67.0)
+age_filtered_ctgov_filters() => age: Some(51.0)
+```
+
+---
+
+## spec/04-trial.md — New Section
+
+Insert after the existing **Age Filter Count Stability** section in `spec/04-trial.md`
+so the trial spec keeps all age-related behavior together:
+
+````markdown
+## Fractional Age Filter
+
+Fractional year input matters because ClinicalTrials.gov eligibility often uses
+months for pediatric studies. This regression guards the `u32` truncation bug that
+silently converted `--age 0.5` into `--age 0`.
+
+```bash
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial --age 0.5 --count-only)"
+echo "$out" | mustmatch like "Total: "
+echo "$out" | grep -qE "^Total: [0-9]+"
+```
+````
 
 ---
 
 ## Acceptance Criteria
 
-### 1. Age unit conversion
-
-- `parse_age_years("18 Years")` returns `Some(18.0)`
-- `parse_age_years("6 Months")` returns `Some(0.5)`
-- `parse_age_years("2 Weeks")` returns a value close to `2.0 / 52.0`
-- `parse_age_years("30 Days")` returns a value close to `30.0 / 365.0`
-- `parse_age_years("N/A")` returns `None`
-- `parse_age_years("")` returns `None`
-- `verify_age_eligibility` excludes age `0` for a trial with minimum age
-  `"6 Months"`
-- `verify_age_eligibility` includes age `1` for that same trial
-
-### 2. PD-L1+ token coverage
-
-- `contains_keyword_tokens("PD-L1+ expression level >= 1%", "PD-L1+")` is `true`
-- `contains_keyword_tokens("PD-L1 positive", "PD-L1+")` is `false`
-- existing plus-token and hyphen-token tests continue to pass
-
-### 3. Faithful CTGov cursor regression
-
-- with `limit = 3`, `offset = 1`, and a mocked CTGov response containing
-  exactly 3 studies plus `nextPageToken = "p2"`, the returned page contains
-  2 results
-- the returned `next_page_token` is `Some("p2".into())`
-- no new JSON cursor envelope is introduced
-- `validate_search_page_args` remains unchanged
+1. `biomcp search trial --age 0.5 --count-only` exits 0 and prints a line matching `Total: [0-9]+`.
+2. `biomcp search trial --age 67 --count-only` continues to work (whole-number strings still parse as `f32`, so existing integer workflows remain valid).
+3. `biomcp search trial --age abc` emits a clap parse error (non-numeric rejected).
+4. `verify_age_eligibility` called with `0.0_f32` excludes studies whose minimum age is `"6 Months"`.
+5. `verify_age_eligibility` called with `0.5_f32` includes a study with minimum age `"6 Months"` and a study with maximum age `"6 Months"`.
+6. `--help` output for `--age` mentions decimals and gives `0.5` as an example.
+7. The existing NCI validation path still rejects `--age` for `--source nci` after the shared filter type change.
+8. All existing unit tests pass after the field-type changes.
+9. The new `spec/04-trial.md` **Fractional Age Filter** case passes.
 
 ---
 
-## Dev Verification Plan
+## Success Checklist Coverage
 
-Run in the P051 worktree:
+| Item | Covered by |
+|---|---|
+| Writes the required ticket state | All u32→f32 changes, helper/test fixture updates, help text, EXAMPLES, and the age-focused spec section defined above |
+| Preserves queue consistency | No structural change to TrialSearchFilters layout; f32 is same size as u32 |
+| Leaves the operator-visible result clear | EXAMPLES block updated; spec contract is explicit and runnable |
 
-```bash
-cd /home/ian/workspace/worktrees/P051-biomcp
-
-cargo test --lib entities::trial
-
-cargo test parse_age_years -- --nocapture
-cargo test contains_keyword_tokens_matches_hyphenated_plus_token -- --nocapture
-cargo test ctgov_cursor_preserves_next_page_token_after_offset_full_page_consumption -- --nocapture
-```
-
-Baseline check during review-design: `cargo test --lib entities::trial` is
-already green on the current branch before implementation.
+All three checklist items fully addressed.
 
 ---
 
 ## Proof Matrix
 
-| Proof type | Coverage |
-|------------|----------|
-| Spec proof | Not applicable for this ticket; behavior is private-helper/mock driven rather than a stable outside-in CLI contract |
-| Unit test - age conversion | `parse_age_years_*` coverage for years, months, weeks, days, and invalid inputs |
-| Unit/integration test - age eligibility | focused `verify_age_eligibility` coverage for sub-year minimum age |
-| Unit test - PD-L1+ token | the two new `contains_keyword_tokens_*` cases plus the existing plus/hyphen tests |
-| Async mock test - cursor | faithful offset/full-page-consumption regression preserving upstream `nextPageToken` |
-| Dev proof | `cargo test --lib entities::trial` |
+| Layer | Proof |
+|---|---|
+| Spec | `spec/04-trial.md` Fractional Age Filter — exits 0, output matches `Total: [0-9]+` |
+| Unit (entities) | Updated `verify_age_eligibility_handles_sub_year_*` tests prove `0.0_f32` excludes `"6 Months"` and `0.5_f32` includes it; no casts remain |
+| Unit (cli parse) | Existing `search_trial_parses_new_filter_flags` case now parses `--age 0.5` and asserts `Some(0.5_f32)` |
+| Unit (shared filter fixtures) | `trial_search_query_summary_includes_geo_filters`, `nci_source_rejects_age_filter`, and `age_filtered_ctgov_filters()` compile and preserve prior behavior with `f32` literals |
+| Dev smoke | `cargo test` passes; `./target/release/biomcp search trial --age 0.5 --count-only` exits 0 |
+| Clippy | `cargo clippy` clean — no `age as f32` casts remain |
 
 ---
 
-## Out Of Scope
+## Dev Verification Plan
 
-- any change to trial CLI flags or query summaries
-- any change to markdown/json pagination rendering
-- any change to CTGov source client request/response types
-- introducing a new CTGov cursor serialization format
-- speculative fixes for a future trial pagination architecture that does not
-  exist in the current codebase
+```bash
+cd /home/ian/workspace/worktrees/T068-biomcp
+cargo test 2>&1 | tail -10
+cargo clippy -- -D warnings 2>&1 | tail -5
+cargo build --release 2>&1 | tail -3
+./target/release/biomcp search trial --age 0.5 --count-only
+./target/release/biomcp search trial --age 67 --count-only
+./target/release/biomcp search trial --help | grep -A2 '\-\-age'
+```
