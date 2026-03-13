@@ -6432,3 +6432,356 @@ mod next_commands_validity {
         assert_parses(r#"biomcp search adverse-event --type recall --classification "Class I""#);
     }
 }
+
+#[cfg(test)]
+mod next_commands_json_property {
+    use super::Cli;
+    use clap::Parser;
+    use serde::Serialize;
+
+    use crate::entities::adverse_event::{AdverseEvent, AdverseEventReport, DeviceEvent};
+    use crate::entities::article::{AnnotationCount, Article, ArticleAnnotations};
+    use crate::entities::disease::Disease;
+    use crate::entities::drug::Drug;
+    use crate::entities::gene::Gene;
+    use crate::entities::pathway::Pathway;
+    use crate::entities::pgx::Pgx;
+    use crate::entities::protein::Protein;
+    use crate::entities::trial::Trial;
+    use crate::entities::variant::Variant;
+
+    fn assert_json_next_commands_parse(label: &str, json: &str) {
+        let value: serde_json::Value =
+            serde_json::from_str(json).unwrap_or_else(|e| panic!("{label}: invalid json: {e}"));
+        let cmds = value["_meta"]["next_commands"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: missing _meta.next_commands"));
+        assert!(
+            !cmds.is_empty(),
+            "{label}: expected at least one next_command"
+        );
+        for cmd in cmds {
+            let cmd = cmd
+                .as_str()
+                .unwrap_or_else(|| panic!("{label}: next_command was not a string"));
+            let argv =
+                shlex::split(cmd).unwrap_or_else(|| panic!("{label}: shlex failed on: {cmd}"));
+            Cli::try_parse_from(argv)
+                .unwrap_or_else(|e| panic!("{label}: failed to parse '{cmd}': {e}"));
+        }
+    }
+
+    fn assert_entity_json_next_commands<T: Serialize>(
+        label: &str,
+        entity: &T,
+        evidence_urls: Vec<(&'static str, String)>,
+        next_commands: Vec<String>,
+    ) {
+        let json = crate::render::json::to_entity_json(entity, evidence_urls, next_commands)
+            .unwrap_or_else(|e| panic!("{label}: failed to render entity json: {e}"));
+        assert_json_next_commands_parse(label, &json);
+    }
+
+    #[test]
+    fn gene_json_next_commands_parse() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: Some("ENSG00000157764".to_string()),
+            location: Some("7q34".to_string()),
+            genomic_coordinates: None,
+            omim_id: Some("164757".to_string()),
+            uniprot_id: Some("P15056".to_string()),
+            summary: None,
+            gene_type: None,
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            druggability: None,
+            clingen: None,
+        };
+
+        assert_entity_json_next_commands(
+            "gene",
+            &gene,
+            crate::render::markdown::gene_evidence_urls(&gene),
+            crate::render::markdown::related_gene(&gene),
+        );
+    }
+
+    #[test]
+    fn article_json_next_commands_parse() {
+        let article = Article {
+            pmid: Some("22663011".to_string()),
+            pmcid: Some("PMC9984800".to_string()),
+            doi: Some("10.1056/NEJMoa1203421".to_string()),
+            title: "Example".to_string(),
+            authors: Vec::new(),
+            journal: None,
+            date: None,
+            citation_count: None,
+            publication_type: None,
+            open_access: None,
+            abstract_text: None,
+            full_text_path: None,
+            full_text_note: None,
+            annotations: Some(ArticleAnnotations {
+                genes: vec![AnnotationCount {
+                    text: "EGFR".to_string(),
+                    count: 1,
+                }],
+                diseases: vec![AnnotationCount {
+                    text: "melanoma".to_string(),
+                    count: 1,
+                }],
+                chemicals: vec![AnnotationCount {
+                    text: "osimertinib".to_string(),
+                    count: 1,
+                }],
+                mutations: Vec::new(),
+            }),
+            pubtator_fallback: false,
+        };
+
+        assert_entity_json_next_commands(
+            "article",
+            &article,
+            crate::render::markdown::article_evidence_urls(&article),
+            crate::render::markdown::related_article(&article),
+        );
+    }
+
+    #[test]
+    fn disease_json_next_commands_parse() {
+        let disease = Disease {
+            id: "MONDO:0004992".to_string(),
+            name: "melanoma".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        assert_entity_json_next_commands(
+            "disease",
+            &disease,
+            crate::render::markdown::disease_evidence_urls(&disease),
+            crate::render::markdown::related_disease(&disease),
+        );
+    }
+
+    #[test]
+    fn pgx_json_next_commands_parse() {
+        let pgx = Pgx {
+            query: "CYP2D6".to_string(),
+            gene: Some("CYP2D6".to_string()),
+            drug: Some("warfarin sodium".to_string()),
+            interactions: Vec::new(),
+            recommendations: Vec::new(),
+            frequencies: Vec::new(),
+            guidelines: Vec::new(),
+            annotations: Vec::new(),
+            annotations_note: None,
+        };
+
+        assert_entity_json_next_commands(
+            "pgx",
+            &pgx,
+            crate::render::markdown::pgx_evidence_urls(&pgx),
+            crate::render::markdown::related_pgx(&pgx),
+        );
+    }
+
+    #[test]
+    fn trial_json_next_commands_parse() {
+        let trial = Trial {
+            nct_id: "NCT01234567".to_string(),
+            source: None,
+            title: "Example trial".to_string(),
+            status: "Recruiting".to_string(),
+            phase: None,
+            study_type: None,
+            age_range: None,
+            conditions: vec!["melanoma".to_string()],
+            interventions: vec!["dabrafenib".to_string()],
+            sponsor: None,
+            enrollment: None,
+            summary: None,
+            start_date: None,
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        assert_entity_json_next_commands(
+            "trial",
+            &trial,
+            crate::render::markdown::trial_evidence_urls(&trial),
+            crate::render::markdown::related_trial(&trial),
+        );
+    }
+
+    #[test]
+    fn variant_json_next_commands_parse() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "rs113488022",
+            "gene": "BRAF",
+            "hgvs_p": "p.V600E",
+            "rsid": "rs113488022"
+        }))
+        .expect("variant should deserialize");
+
+        assert_entity_json_next_commands(
+            "variant",
+            &variant,
+            crate::render::markdown::variant_evidence_urls(&variant),
+            crate::render::markdown::related_variant(&variant),
+        );
+    }
+
+    #[test]
+    fn drug_json_next_commands_parse() {
+        let drug = Drug {
+            name: "osimertinib".to_string(),
+            drugbank_id: Some("DB09330".to_string()),
+            chembl_id: Some("CHEMBL3353410".to_string()),
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: vec!["EGFR".to_string()],
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            label: None,
+            shortage: None,
+            approvals: None,
+            civic: None,
+        };
+
+        assert_entity_json_next_commands(
+            "drug",
+            &drug,
+            crate::render::markdown::drug_evidence_urls(&drug),
+            crate::render::markdown::related_drug(&drug),
+        );
+    }
+
+    #[test]
+    fn pathway_json_next_commands_parse() {
+        let pathway = Pathway {
+            id: "R-HSA-5673001".to_string(),
+            name: "RAF/MAP kinase cascade".to_string(),
+            species: None,
+            summary: None,
+            genes: Vec::new(),
+            events: Vec::new(),
+            enrichment: Vec::new(),
+        };
+
+        assert_entity_json_next_commands(
+            "pathway",
+            &pathway,
+            crate::render::markdown::pathway_evidence_urls(&pathway),
+            crate::render::markdown::related_pathway(&pathway),
+        );
+    }
+
+    #[test]
+    fn protein_json_next_commands_parse() {
+        let protein = Protein {
+            accession: "P00533".to_string(),
+            entry_id: Some("EGFR_HUMAN".to_string()),
+            name: "Epidermal growth factor receptor".to_string(),
+            gene_symbol: Some("EGFR".to_string()),
+            organism: None,
+            length: None,
+            function: None,
+            structures: Vec::new(),
+            structure_count: None,
+            domains: Vec::new(),
+            interactions: Vec::new(),
+        };
+
+        assert_entity_json_next_commands(
+            "protein",
+            &protein,
+            crate::render::markdown::protein_evidence_urls(&protein),
+            crate::render::markdown::related_protein(&protein),
+        );
+    }
+
+    #[test]
+    fn faers_json_next_commands_parse() {
+        let faers = AdverseEvent {
+            report_id: "1001".to_string(),
+            drug: "osimertinib".to_string(),
+            reactions: Vec::new(),
+            outcomes: Vec::new(),
+            patient: None,
+            concomitant_medications: Vec::new(),
+            reporter_type: None,
+            reporter_country: None,
+            indication: None,
+            serious: true,
+            date: None,
+        };
+        let report = AdverseEventReport::Faers(faers.clone());
+
+        assert_entity_json_next_commands(
+            "adverse-event-faers",
+            &report,
+            crate::render::markdown::adverse_event_evidence_urls(&faers),
+            crate::render::markdown::related_adverse_event(&faers),
+        );
+    }
+
+    #[test]
+    fn device_event_json_next_commands_parse() {
+        let device = DeviceEvent {
+            report_id: "MDR-123".to_string(),
+            report_number: None,
+            device: "HeartValve".to_string(),
+            manufacturer: None,
+            event_type: None,
+            date: None,
+            description: None,
+        };
+        let report = AdverseEventReport::Device(device.clone());
+
+        assert_entity_json_next_commands(
+            "adverse-event-device",
+            &report,
+            crate::render::markdown::device_event_evidence_urls(&device),
+            crate::render::markdown::related_device_event(&device),
+        );
+    }
+}

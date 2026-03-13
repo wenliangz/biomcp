@@ -201,6 +201,7 @@ const MAX_SEARCH_LIMIT: usize = 50;
 const EUROPE_PMC_PAGE_SIZE: usize = 25;
 const PUBTATOR_PAGE_SIZE: usize = 25;
 const MAX_PAGE_FETCHES: usize = 50;
+const WARN_PAGE_THRESHOLD: usize = 20;
 const FEDERATED_PAGE_SIZE_CAP: usize = if EUROPE_PMC_PAGE_SIZE < PUBTATOR_PAGE_SIZE {
     EUROPE_PMC_PAGE_SIZE
 } else {
@@ -210,7 +211,7 @@ const MAX_FEDERATED_FETCH_RESULTS: usize = MAX_PAGE_FETCHES * FEDERATED_PAGE_SIZ
 const INVALID_ARTICLE_ID_MSG: &str = "\
 Unsupported identifier format. BioMCP resolves PMID (digits only, e.g., 22663011), \
 PMCID (starts with PMC, e.g., PMC9984800), and DOI (starts with 10., \
-e.g., 10.1056/NEJMoa1203421), and publisher PIIs (e.g., S1535610826000103) are not \
+e.g., 10.1056/NEJMoa1203421). publisher PIIs (e.g., S1535610826000103) are not \
 indexed by PubMed or Europe PMC and cannot be resolved.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -889,9 +890,9 @@ async fn search_europepmc_page(
     let mut fetched_pages = 0usize;
     while out.len() < limit && fetched_pages < MAX_PAGE_FETCHES {
         fetched_pages = fetched_pages.saturating_add(1);
-        if fetched_pages == 21 {
+        if fetched_pages == WARN_PAGE_THRESHOLD + 1 {
             tracing::warn!(
-                "article search exceeded 20 API page fetches, continuing up to {MAX_PAGE_FETCHES}"
+                "article search is deep (>{WARN_PAGE_THRESHOLD} page fetches); continuing up to {MAX_PAGE_FETCHES} — consider narrowing your query"
             );
         }
         let resp = europe
@@ -1364,6 +1365,15 @@ mod tests {
             parse_article_id("S1535610826000103"),
             ArticleIdType::Invalid
         ));
+    }
+
+    #[test]
+    fn article_error_copy_and_warn_threshold_match_contract() {
+        assert_eq!(WARN_PAGE_THRESHOLD, 20);
+        assert_eq!(
+            INVALID_ARTICLE_ID_MSG,
+            "Unsupported identifier format. BioMCP resolves PMID (digits only, e.g., 22663011), PMCID (starts with PMC, e.g., PMC9984800), and DOI (starts with 10., e.g., 10.1056/NEJMoa1203421). publisher PIIs (e.g., S1535610826000103) are not indexed by PubMed or Europe PMC and cannot be resolved."
+        );
     }
 
     #[test]
