@@ -219,7 +219,7 @@ fn list_trial() -> String {
 - `--status <status>` (or `-s`)
 - `--phase <NA|1|1/2|2|3|4>` (or `-p`)
 - `--facility <name>`
-- `--age <years>`
+- `--age <years>` (decimals accepted, e.g. `0.5`)
 - `--sex <female|male|all>`
 - `--mutation <text>`
 - `--criteria <text>`

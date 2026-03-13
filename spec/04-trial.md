@@ -47,6 +47,18 @@ test "$t10" = "$t20"
 test "$t20" = "$t50"
 ```
 
+## Fractional Age Filter
+
+Fractional year input matters because ClinicalTrials.gov eligibility often uses
+months for pediatric studies. This regression guards the truncation bug that
+rejected `--age 0.5`.
+
+```bash timeout=180
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial --age 0.5 --count-only)"
+echo "$out" | mustmatch like "Total: "
+echo "$out" | grep -qE "^Total: [0-9]+"
+```
+
 ## Filtering by Phase
 
 Trial phase helps separate exploratory from confirmatory evidence. The phase-specific query marker should be present with the standard trial table.
