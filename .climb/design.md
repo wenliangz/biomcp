@@ -1,32 +1,104 @@
-# Design: T068 — Fix --age fractional year support (u32 -> f32)
+# Design: T070 — Minor code quality polish
 
-## Summary
+This ticket remains three independent edits in the current codebase:
 
-Change the `--age` CLI flag and `TrialSearchFilters.age` field from `u32` to `f32`
-so fractional year inputs (e.g. `0.5` for 6 months) are accepted without truncation.
-Remove the redundant `age as f32` casts inside `verify_age_eligibility`. Update the
-help text and EXAMPLES block. Add a spec regression contract for `--age 0.5`.
+1. `src/entities/article.rs`: replace the hard-coded deep-fetch warning threshold with a named constant and clearer advisory copy.
+2. `src/cli/mod.rs`: add a property-level parser test for `_meta.next_commands` emitted by entity JSON output.
+3. `src/entities/article.rs`: split `INVALID_ARTICLE_ID_MSG` into two sentences without changing the supported/unsupported identifier contract.
+
+The initial design was directionally correct but under-covered the JSON command surface. The current CLI emits `_meta.next_commands` from 11 get-JSON paths, not 8, and the new property test should validate the JSON-rendered commands rather than bypassing `_meta`.
+
+---
+
+## Verified Current Code
+
+- `src/entities/article.rs:200-214` defines pagination constants plus `INVALID_ARTICLE_ID_MSG`.
+- `src/entities/article.rs:890-895` emits the current Europe PMC deep-fetch warning on the 21st fetch with the literals `21` and `20`.
+- `src/cli/mod.rs:6344-6445` already has a `next_commands_validity` module with static parser checks for 11 surfaces:
+  gene, variant, article, trial, disease, pgx, drug, pathway, protein, adverse-event, device-event.
+- Entity JSON output is rendered through `crate::render::json::to_entity_json(...)`, not by the markdown helpers alone. Current get-JSON call sites are in `src/cli/mod.rs` for:
+  gene, article, disease, pgx, trial, variant, drug, pathway, protein, and adverse-event/device-event.
+- `spec/06-article.md` already covers invalid article identifier rejection at the outside-in level.
+- `spec/11-evidence-urls.md` already covers that get-JSON responses contain `_meta.next_commands`; it does not prove those commands are parseable.
 
 ---
 
 ## Architecture Decisions
 
-**Why f32 and not f64?**
-Age comparisons use `parse_age_years` which already returns `f32`. The existing
-`age as f32` casts in `verify_age_eligibility` confirm the internal contract is f32.
-Matching that type eliminates the casts and keeps precision consistent throughout.
+### ARCH-02 / UX-02 — Name the deep-fetch advisory threshold
 
-**Shared filter struct still needs fixture/test updates.**
-`TrialSearchFilters.age` is only used for numeric matching on the CTGov post-filter
-path, but the shared struct is also constructed in CLI summary tests and in the NCI
-validation test that rejects `--age` for `--source nci`. Widening the field to `f32`
-therefore requires updating those helper/test literals too, even though the NCI runtime
-behavior does not change.
+Add `const WARN_PAGE_THRESHOLD: usize = 20;` beside the other article pagination constants in `src/entities/article.rs`, immediately after `MAX_PAGE_FETCHES`.
 
-**Clap parses f32 natively.**
-Replacing `Option<u32>` with `Option<f32>` in the `#[arg]` declaration is sufficient;
-clap will accept `0.5`, `6.5`, `67`, etc. and emit a user-friendly error for non-numeric
-input.
+Keep the warning one-shot by replacing:
+
+```rust
+if fetched_pages == 21
+```
+
+with:
+
+```rust
+if fetched_pages == WARN_PAGE_THRESHOLD + 1
+```
+
+That preserves the current behavior exactly: the warning still fires once, on the 21st fetch, which is the first fetch beyond the 20-page advisory threshold.
+
+Use the clarified warning copy from ticket scope:
+
+```rust
+"article search is deep (>{WARN_PAGE_THRESHOLD} page fetches); continuing up to {MAX_PAGE_FETCHES} — consider narrowing your query"
+```
+
+This is advisory only. No paging behavior, fetch cap, or search result semantics change.
+
+### ARCH-03 — Property-test the JSON `_meta.next_commands` surface
+
+The new test should validate the same surface users get from `biomcp get <entity> --json`: JSON output with `_meta.next_commands`, followed by parser validation of each emitted command.
+
+Do not call `execute()` or live network-backed `get`/`search` functions in unit tests. That would make `cargo test` network-dependent and non-deterministic. Instead:
+
+1. Construct minimal valid entity fixtures in-process.
+2. Render JSON with the same helpers the CLI uses today:
+   `crate::render::json::to_entity_json(...)`
+3. Parse the JSON string into `serde_json::Value`.
+4. Extract `value["_meta"]["next_commands"]`.
+5. For each command, run `shlex::split(...)` and `Cli::try_parse_from(...)`.
+
+This is the closest CI-safe approximation of `get <entity> --json` because it exercises:
+
+- the real `related_*` generator
+- the real JSON metadata wrapper
+- the real `_meta.next_commands` extraction path
+- the real CLI parser
+
+The property module should cover every current get-JSON surface that emits `_meta.next_commands`:
+
+- gene
+- article
+- disease
+- pgx
+- trial
+- variant
+- drug
+- pathway
+- protein
+- adverse-event (FAERS report)
+- adverse-event (device report)
+
+Notes:
+
+- `variant` output may or may not include the optional `variant oncokb` command depending on `ONCOKB_TOKEN`. The test should not assert an exact command count, only that every emitted command parses.
+- For the adverse-event branch, render the actual enum shapes used by the CLI (`AdverseEventReport::Faers` and `AdverseEventReport::Device`) so the JSON structure matches the shipped get-JSON path.
+- `trial_locations_json(...)` already has dedicated coverage in `src/cli/mod.rs` proving `location_pagination` coexists with `_meta`; this ticket does not need a second property test for that special case.
+
+### ARCH-05 / UX-06 — Split invalid article ID guidance into two sentences
+
+Keep the content contract but rewrite `INVALID_ARTICLE_ID_MSG` into two sentences:
+
+1. Sentence 1 lists supported types: PMID, PMCID, DOI.
+2. Sentence 2 names publisher PIIs as unsupported because PubMed and Europe PMC do not index them.
+
+The existing unit test in `src/entities/article.rs` only asserts for the presence of the supported-type labels and the PII/publisher limitation, so no test rewrite is required unless the implementation chooses to strengthen that assertion.
 
 ---
 
@@ -34,154 +106,103 @@ input.
 
 | File | Change |
 |---|---|
-| `src/cli/mod.rs:478` | `age: Option<u32>` → `Option<f32>`; update `#[arg]` doc comment |
-| `src/cli/mod.rs:444–452` | Add `--age 0.5` example to `Trial` EXAMPLES block |
-| `src/cli/mod.rs:5057` | Update `trial_search_query_summary_includes_geo_filters` fixture literal to `Some(67.0)` |
-| `src/cli/mod.rs:5448` | Change the existing `search_trial_parses_new_filter_flags` regression to parse `--age 0.5` and assert `Some(0.5_f32)` |
-| `src/entities/trial.rs:128` | `pub age: Option<u32>` → `Option<f32>` |
-| `src/entities/trial.rs:1046` | `fn verify_age_eligibility(…, age: u32)` → `age: f32`; drop `age as f32` casts at lines 1057, 1061 |
-| `src/entities/trial.rs:2039` | Update the sub-year eligibility tests to pass fractional literals (`0.0_f32`, `0.5_f32`, `1.0_f32`) instead of only integers |
-| `src/entities/trial.rs:2396` | Update `nci_source_rejects_age_filter` fixture literal to `Some(67.0)` |
-| `src/entities/trial.rs:2507` | Update `age_filtered_ctgov_filters()` helper to `age: Some(51.0)` so downstream CTGov pagination/count tests still compile unchanged |
-| `spec/04-trial.md` | Insert **Fractional Age Filter** immediately after **Age Filter Count Stability** |
+| `src/entities/article.rs` | Add `WARN_PAGE_THRESHOLD`, replace the hard-coded warning threshold check, update warning copy, split `INVALID_ARTICLE_ID_MSG` into two sentences |
+| `src/cli/mod.rs` | Add a new `#[cfg(test)]` module that renders entity JSON, extracts `_meta.next_commands`, and validates every emitted command through `Cli::try_parse_from` |
+
+No `spec/` file changes are required for this ticket.
+
+Why no spec change:
+
+- The warning-string change is internal logging, not a documented CLI contract.
+- The invalid-ID change tightens prose but preserves the outside-in contract already covered by `spec/06-article.md`.
+- The new parser property is an internal quality gate on `_meta.next_commands`; `spec/11-evidence-urls.md` already covers presence of `_meta.next_commands`, and the new unit test adds parser-validity proof without changing user-visible flow shape.
+
+This matches the `spec-writing` skill guidance: keep representative outside-in behavior in `spec/`, and add exhaustive/internal contract checks in Rust tests.
 
 ---
 
-## Code Sketches
+## Implementation Notes
 
-### cli/mod.rs — arg declaration (line 476–478)
+### Article warning constant
 
-```rust
-/// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months)
-#[arg(long)]
-age: Option<f32>,
-```
+Target the existing constant block in `src/entities/article.rs:200-214`.
 
-### cli/mod.rs — EXAMPLES block (line 447)
-
-Insert after the `--age 67` example line:
-
-```
-  biomcp search trial --age 0.5 --count-only          # infants eligible (6 months)
-```
-
-Full block becomes:
-```
-EXAMPLES:
-  biomcp search trial -c melanoma -s recruiting
-  biomcp search trial -p 3 -i pembrolizumab
-  biomcp search trial -c melanoma --facility \"MD Anderson\" --age 67 --limit 5
-  biomcp search trial --age 0.5 --count-only          # infants eligible (6 months)
-  biomcp search trial --mutation \"BRAF V600E\" --status recruiting --study-type interventional --has-results --limit 5
-  biomcp search trial -c \"endometrial cancer\" --criteria \"mismatch repair deficient\" -s recruiting
-```
-
-### entities/trial.rs — TrialSearchFilters field (line 128)
+Add:
 
 ```rust
-pub age: Option<f32>,
+const WARN_PAGE_THRESHOLD: usize = 20;
 ```
 
-### entities/trial.rs — verify_age_eligibility (line 1046)
+and update the warning block in `src/entities/article.rs:890-895` to:
 
 ```rust
-fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: f32) -> Vec<CtGovStudy> {
-    studies
-        .into_iter()
-        .filter(|study| {
-            let module = study
-                .protocol_section
-                .as_ref()
-                .and_then(|s| s.eligibility_module.as_ref());
-            let min_ok = module
-                .and_then(|m| m.minimum_age.as_deref())
-                .and_then(parse_age_years)
-                .is_none_or(|min| age >= min);
-            let max_ok = module
-                .and_then(|m| m.maximum_age.as_deref())
-                .and_then(parse_age_years)
-                .is_none_or(|max| age <= max);
-            min_ok && max_ok
-        })
-        .collect()
+if fetched_pages == WARN_PAGE_THRESHOLD + 1 {
+    tracing::warn!(
+        "article search is deep (>{WARN_PAGE_THRESHOLD} page fetches); continuing up to {MAX_PAGE_FETCHES} — consider narrowing your query"
+    );
 }
 ```
 
-### Unit test updates — entities/trial.rs (~2039)
+### Invalid article identifier copy
+
+Rewrite `INVALID_ARTICLE_ID_MSG` so it remains a single Rust string constant but reads as two sentences. The message should still include:
+
+- `PMID`
+- `PMCID`
+- `DOI`
+- `PII` or `publisher`
+
+### JSON next-command property helper
+
+Add a helper in the new `src/cli/mod.rs` test module along these lines:
 
 ```rust
-// verify_age_eligibility_handles_sub_year_minimum_age
-assert!(verify_age_eligibility(vec![study.clone()], 0.0_f32).is_empty());
-assert_eq!(verify_age_eligibility(vec![study], 0.5_f32).len(), 1);
-
-// verify_age_eligibility_handles_sub_year_maximum_age
-assert_eq!(verify_age_eligibility(vec![study.clone()], 0.5_f32).len(), 1);
-assert!(verify_age_eligibility(vec![study], 1.0_f32).is_empty());
+fn assert_json_next_commands_parse(label: &str, json: &str) {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .unwrap_or_else(|e| panic!("{label}: invalid json: {e}"));
+    let cmds = value["_meta"]["next_commands"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{label}: missing _meta.next_commands"));
+    assert!(!cmds.is_empty(), "{label}: expected at least one next_command");
+    for cmd in cmds {
+        let cmd = cmd
+            .as_str()
+            .unwrap_or_else(|| panic!("{label}: next_command was not a string"));
+        let argv = shlex::split(cmd)
+            .unwrap_or_else(|| panic!("{label}: shlex failed on: {cmd}"));
+        Cli::try_parse_from(argv)
+            .unwrap_or_else(|e| panic!("{label}: failed to parse '{cmd}': {e}"));
+    }
+}
 ```
 
-### Unit test updates — cli/mod.rs (~5057, ~5448)
+Each test should then:
 
-```rust
-// trial_search_query_summary_includes_geo_filters
-age: Some(67.0),
+1. Build a minimal valid fixture for one entity surface.
+2. Render JSON with `to_entity_json(...)` plus the matching `*_evidence_urls(...)` and `related_* (...)` helpers already used in production code.
+3. Pass the JSON string to `assert_json_next_commands_parse(...)`.
 
-// search_trial_parses_new_filter_flags
-assert_eq!(age, Some(0.5_f32));
-```
+Fixture guidance:
 
-### Fixture/helper updates — entities/trial.rs (~2396, ~2507)
-
-```rust
-nci_source_rejects_age_filter => age: Some(67.0)
-age_filtered_ctgov_filters() => age: Some(51.0)
-```
-
----
-
-## spec/04-trial.md — New Section
-
-Insert after the existing **Age Filter Count Stability** section in `spec/04-trial.md`
-so the trial spec keeps all age-related behavior together:
-
-````markdown
-## Fractional Age Filter
-
-Fractional year input matters because ClinicalTrials.gov eligibility often uses
-months for pediatric studies. This regression guards the `u32` truncation bug that
-silently converted `--age 0.5` into `--age 0`.
-
-```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial --age 0.5 --count-only)"
-echo "$out" | mustmatch like "Total: "
-echo "$out" | grep -qE "^Total: [0-9]+"
-```
-````
+- Prefer explicit Rust literals where the structs are already used that way in nearby tests.
+- Prefer `serde_json::from_value(...)` for larger or more volatile structs where a minimal deserializable shape is easier to maintain.
+- Reuse nearby test fixture patterns from `src/render/markdown.rs` and `src/cli/mod.rs` instead of inventing new exhaustive struct literals.
 
 ---
 
 ## Acceptance Criteria
 
-1. `biomcp search trial --age 0.5 --count-only` exits 0 and prints a line matching `Total: [0-9]+`.
-2. `biomcp search trial --age 67 --count-only` continues to work (whole-number strings still parse as `f32`, so existing integer workflows remain valid).
-3. `biomcp search trial --age abc` emits a clap parse error (non-numeric rejected).
-4. `verify_age_eligibility` called with `0.0_f32` excludes studies whose minimum age is `"6 Months"`.
-5. `verify_age_eligibility` called with `0.5_f32` includes a study with minimum age `"6 Months"` and a study with maximum age `"6 Months"`.
-6. `--help` output for `--age` mentions decimals and gives `0.5` as an example.
-7. The existing NCI validation path still rejects `--age` for `--source nci` after the shared filter type change.
-8. All existing unit tests pass after the field-type changes.
-9. The new `spec/04-trial.md` **Fractional Age Filter** case passes.
-
----
-
-## Success Checklist Coverage
-
-| Item | Covered by |
-|---|---|
-| Writes the required ticket state | All u32→f32 changes, helper/test fixture updates, help text, EXAMPLES, and the age-focused spec section defined above |
-| Preserves queue consistency | No structural change to TrialSearchFilters layout; f32 is same size as u32 |
-| Leaves the operator-visible result clear | EXAMPLES block updated; spec contract is explicit and runnable |
-
-All three checklist items fully addressed.
+1. `src/entities/article.rs` defines `WARN_PAGE_THRESHOLD` with value `20`.
+2. The Europe PMC warning check uses `WARN_PAGE_THRESHOLD + 1`, preserving the current one-time warning on the 21st fetch.
+3. The warning message reads as an advisory, includes the advisory threshold and `MAX_PAGE_FETCHES`, and tells users to narrow the query.
+4. `INVALID_ARTICLE_ID_MSG` is two sentences: supported identifier types first, unsupported publisher PIIs second.
+5. A new property-level test module in `src/cli/mod.rs` renders JSON and parses `_meta.next_commands`, rather than validating hard-coded strings only.
+6. That module covers all current get-JSON next-command emitters:
+   gene, article, disease, pgx, trial, variant, drug, pathway, protein, adverse-event/faers, adverse-event/device.
+7. Every emitted command extracted from `_meta.next_commands` is validated with `shlex::split` plus `Cli::try_parse_from`.
+8. Existing article identifier contract checks still pass.
+9. `cargo test` passes.
+10. `make spec` passes.
 
 ---
 
@@ -189,23 +210,33 @@ All three checklist items fully addressed.
 
 | Layer | Proof |
 |---|---|
-| Spec | `spec/04-trial.md` Fractional Age Filter — exits 0, output matches `Total: [0-9]+` |
-| Unit (entities) | Updated `verify_age_eligibility_handles_sub_year_*` tests prove `0.0_f32` excludes `"6 Months"` and `0.5_f32` includes it; no casts remain |
-| Unit (cli parse) | Existing `search_trial_parses_new_filter_flags` case now parses `--age 0.5` and asserts `Some(0.5_f32)` |
-| Unit (shared filter fixtures) | `trial_search_query_summary_includes_geo_filters`, `nci_source_rejects_age_filter`, and `age_filtered_ctgov_filters()` compile and preserve prior behavior with `f32` literals |
-| Dev smoke | `cargo test` passes; `./target/release/biomcp search trial --age 0.5 --count-only` exits 0 |
-| Clippy | `cargo clippy` clean — no `age as f32` casts remain |
+| Spec proof | `spec/06-article.md::Invalid Identifier Rejection` stays green; `spec/11-evidence-urls.md::JSON Metadata Contract` stays green |
+| Test proof | New `src/cli/mod.rs` JSON `_meta.next_commands` property tests for all current get-JSON emitters |
+| Test proof | Existing `src/entities/article.rs` invalid-identifier unit test remains green |
+| Dev proof | `cargo test` |
+| Dev proof | `make spec` |
+
+No browser proof, shared-runtime smoke proof, or merged-main artifact proof applies to this ticket.
 
 ---
 
 ## Dev Verification Plan
 
+Run from `/home/ian/workspace/worktrees/T070-biomcp`:
+
 ```bash
-cd /home/ian/workspace/worktrees/T068-biomcp
-cargo test 2>&1 | tail -10
-cargo clippy -- -D warnings 2>&1 | tail -5
-cargo build --release 2>&1 | tail -3
-./target/release/biomcp search trial --age 0.5 --count-only
-./target/release/biomcp search trial --age 67 --count-only
-./target/release/biomcp search trial --help | grep -A2 '\-\-age'
+cargo test
+make spec
 ```
+
+Spot-check during development:
+
+- `cargo test next_commands_validity`
+- `cargo test next_commands`
+- `cargo test invalid_article_id_error_names_supported_types_and_publisher_limit`
+
+Expected outcomes:
+
+- the new JSON property tests pass across all covered entity surfaces
+- the invalid article ID tests still find the supported types and publisher/PII limitation
+- specs remain unchanged and green
