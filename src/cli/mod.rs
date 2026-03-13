@@ -4201,13 +4201,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         if cli.json {
                             #[derive(serde::Serialize)]
                             struct TrialCountOnlyJson {
-                                total: usize,
+                                total: Option<usize>,
                             }
                             return Ok(crate::render::json::to_pretty(&TrialCountOnlyJson {
                                 total,
                             })?);
                         }
-                        return Ok(format!("Total: {total}"));
+                        return Ok(match total {
+                            Some(total) => format!("Total: {total}"),
+                            None => "Total: unknown (traversal limit reached)".to_string(),
+                        });
                     }
                     let page = crate::entities::trial::search_page(
                         &filters,

@@ -1384,7 +1384,7 @@ struct CtGovSearchContext {
     agg_filters: Option<String>,
     eligibility_keywords: Vec<String>,
     facility_geo_verification: Option<(String, f64, f64, u32)>,
-    uses_post_filters: bool,
+    uses_expensive_post_filters: bool,
     has_explicit_status: bool,
 }
 
@@ -1489,9 +1489,8 @@ fn prepare_ctgov_search_context(
         .map(|(((facility_name, lat), lon), distance)| {
             (facility_name.to_string(), lat, lon, distance)
         });
-    let uses_post_filters = facility_geo_verification.is_some()
-        || !eligibility_keywords.is_empty()
-        || filters.age.is_some();
+    let uses_expensive_post_filters =
+        facility_geo_verification.is_some() || !eligibility_keywords.is_empty();
 
     Ok(CtGovSearchContext {
         normalized_status: normalized.normalized_status.clone(),
@@ -1500,7 +1499,7 @@ fn prepare_ctgov_search_context(
         agg_filters,
         eligibility_keywords,
         facility_geo_verification,
-        uses_post_filters,
+        uses_expensive_post_filters,
         has_explicit_status,
     })
 }
@@ -1585,7 +1584,7 @@ async fn search_page_with_ctgov_client(
         }
 
         studies = apply_ctgov_post_filters(client, filters, &context, studies).await;
-        if context.uses_post_filters {
+        if context.uses_expensive_post_filters {
             verified_total = verified_total.saturating_add(studies.len());
         }
 
@@ -1645,7 +1644,7 @@ async fn search_page_with_ctgov_client(
     }
 
     rows.truncate(limit);
-    let returned_total = if context.uses_post_filters {
+    let returned_total = if context.uses_expensive_post_filters {
         exhausted.then_some(verified_total)
     } else {
         total.or_else(|| Some(offset.saturating_add(rows.len())))
@@ -1657,8 +1656,9 @@ async fn search_page_with_ctgov_client(
 async fn count_all_with_ctgov_client(
     client: &ClinicalTrialsClient,
     filters: &TrialSearchFilters,
-) -> Result<usize, BioMcpError> {
+) -> Result<Option<usize>, BioMcpError> {
     const COUNT_PAGE_SIZE: usize = 1000;
+    const COUNT_TRAVERSAL_PAGE_CAP: usize = 50;
 
     if !matches!(filters.source, TrialSource::ClinicalTrialsGov) {
         return Err(BioMcpError::InvalidArgument(
@@ -1669,7 +1669,7 @@ async fn count_all_with_ctgov_client(
     let normalized = validate_trial_search(filters)?;
     let context = prepare_ctgov_search_context(filters, &normalized)?;
 
-    if !context.uses_post_filters {
+    if !context.uses_expensive_post_filters {
         let resp = client
             .search(&CtGovSearchParams {
                 condition: filters.condition.clone(),
@@ -1689,13 +1689,18 @@ async fn count_all_with_ctgov_client(
                 distance_miles: filters.distance,
             })
             .await?;
-        return Ok(resp.total_count.unwrap_or(0) as usize);
+        return Ok(Some(resp.total_count.unwrap_or(0) as usize));
     }
 
     let mut verified_total = 0usize;
     let mut page_token: Option<String> = None;
+    let mut page_count = 0usize;
 
     loop {
+        if page_count >= COUNT_TRAVERSAL_PAGE_CAP {
+            return Ok(None);
+        }
+
         let resp = client
             .search(&CtGovSearchParams {
                 condition: filters.condition.clone(),
@@ -1715,6 +1720,7 @@ async fn count_all_with_ctgov_client(
                 distance_miles: filters.distance,
             })
             .await?;
+        page_count += 1;
 
         let next_page_token = resp.next_page_token;
         let studies = apply_ctgov_post_filters(client, filters, &context, resp.studies).await;
@@ -1726,10 +1732,10 @@ async fn count_all_with_ctgov_client(
         page_token = next_page_token;
     }
 
-    Ok(verified_total)
+    Ok(Some(verified_total))
 }
 
-pub async fn count_all(filters: &TrialSearchFilters) -> Result<usize, BioMcpError> {
+pub async fn count_all(filters: &TrialSearchFilters) -> Result<Option<usize>, BioMcpError> {
     match filters.source {
         TrialSource::ClinicalTrialsGov => {
             let client = ClinicalTrialsClient::new()?;
@@ -1737,7 +1743,7 @@ pub async fn count_all(filters: &TrialSearchFilters) -> Result<usize, BioMcpErro
         }
         TrialSource::NciCts => {
             let page = search_page(filters, 1, 0, None).await?;
-            Ok(page.total.unwrap_or(page.results.len()))
+            Ok(Some(page.total.unwrap_or(page.results.len())))
         }
     }
 }
@@ -2504,6 +2510,19 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
         })
     }
 
+    fn ctgov_eligibility_detail_fixture(nct_id: &str, criteria: &str) -> serde_json::Value {
+        json!({
+            "protocolSection": {
+                "identificationModule": {
+                    "nctId": nct_id
+                },
+                "eligibilityModule": {
+                    "eligibilityCriteria": criteria
+                }
+            }
+        })
+    }
+
     fn age_filtered_ctgov_filters() -> TrialSearchFilters {
         TrialSearchFilters {
             condition: Some("melanoma".into()),
@@ -2531,7 +2550,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
     }
 
     #[tokio::test]
-    async fn age_filter_total_semantics_do_not_change_with_limit() {
+    async fn age_filter_uses_native_total_semantics_across_limits() {
         let server = MockServer::start().await;
         let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
 
@@ -2587,21 +2606,21 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
                 .await
                 .expect("page")
                 .total,
-            None
+            Some(200)
         );
         assert_eq!(
             search_page_with_ctgov_client(&client, &filters, 20, 0, None)
                 .await
                 .expect("page")
                 .total,
-            None
+            Some(200)
         );
         assert_eq!(
             search_page_with_ctgov_client(&client, &filters, 50, 0, None)
                 .await
                 .expect("page")
                 .total,
-            None
+            Some(200)
         );
     }
 
@@ -2636,7 +2655,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
     }
 
     #[tokio::test]
-    async fn age_filter_total_is_exact_when_exhausted_even_if_limit_hits_on_last_page() {
+    async fn age_filter_total_returns_native_total_when_exhausted() {
         let server = MockServer::start().await;
         let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
 
@@ -2714,19 +2733,19 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
                 .await
                 .expect("page")
                 .total,
-            Some(12)
+            Some(20)
         );
         assert_eq!(
             search_page_with_ctgov_client(&client, &filters, 50, 0, None)
                 .await
                 .expect("page")
                 .total,
-            Some(12)
+            Some(20)
         );
     }
 
     #[tokio::test]
-    async fn count_all_traverses_all_ctgov_pages_for_age_filter() {
+    async fn count_all_uses_native_total_for_age_only_filters() {
         let server = MockServer::start().await;
         let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
 
@@ -2735,42 +2754,10 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             .and(query_param("query.cond", "melanoma"))
             .and(query_param("filter.overallStatus", "RECRUITING"))
             .and(query_param("countTotal", "true"))
-            .and(query_param("pageSize", "1000"))
+            .and(query_param("pageSize", "1"))
             .and(query_param_is_missing("pageToken"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "studies": studies_with_age_matches(100, 30, "51"),
-                "nextPageToken": "p2",
-                "totalCount": 250
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/studies"))
-            .and(query_param("query.cond", "melanoma"))
-            .and(query_param("filter.overallStatus", "RECRUITING"))
-            .and(query_param("countTotal", "true"))
-            .and(query_param("pageSize", "1000"))
-            .and(query_param("pageToken", "p2"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "studies": studies_with_age_matches(100, 40, "52"),
-                "nextPageToken": "p3",
-                "totalCount": 250
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/studies"))
-            .and(query_param("query.cond", "melanoma"))
-            .and(query_param("filter.overallStatus", "RECRUITING"))
-            .and(query_param("countTotal", "true"))
-            .and(query_param("pageSize", "1000"))
-            .and(query_param("pageToken", "p3"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "studies": studies_with_age_matches(50, 20, "53"),
+                "studies": [],
                 "nextPageToken": null,
                 "totalCount": 250
             })))
@@ -2783,7 +2770,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             count_all_with_ctgov_client(&client, &filters)
                 .await
                 .expect("count"),
-            90
+            Some(250)
         );
     }
 
@@ -2818,7 +2805,51 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             count_all_with_ctgov_client(&client, &filters)
                 .await
                 .expect("count"),
-            494
+            Some(494)
+        );
+    }
+
+    #[tokio::test]
+    async fn count_all_returns_unknown_when_expensive_post_filter_hits_page_cap() {
+        let server = MockServer::start().await;
+        let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
+
+        Mock::given(method("GET"))
+            .and(path("/studies"))
+            .and(query_param("query.cond", "melanoma"))
+            .and(query_param("countTotal", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "studies": [ctgov_search_study_fixture("NCT99999999", "18 Years", "75 Years")],
+                "nextPageToken": "still-more",
+                "totalCount": 60000
+            })))
+            .expect(50)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/studies/NCT99999999"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                ctgov_eligibility_detail_fixture(
+                    "NCT99999999",
+                    "Inclusion Criteria:\nMust have mismatch repair deficient disease",
+                ),
+            ))
+            .expect(50)
+            .mount(&server)
+            .await;
+
+        let filters = TrialSearchFilters {
+            condition: Some("melanoma".into()),
+            criteria: Some("mismatch repair deficient".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            count_all_with_ctgov_client(&client, &filters)
+                .await
+                .expect("count"),
+            None
         );
     }
 }
