@@ -445,6 +445,7 @@ EXAMPLES:
   biomcp search trial -c melanoma -s recruiting
   biomcp search trial -p 3 -i pembrolizumab
   biomcp search trial -c melanoma --facility \"MD Anderson\" --age 67 --limit 5
+  biomcp search trial --age 0.5 --count-only          # infants eligible (6 months)
   biomcp search trial --mutation \"BRAF V600E\" --status recruiting --study-type interventional --has-results --limit 5
   biomcp search trial -c \"endometrial cancer\" --criteria \"mismatch repair deficient\" -s recruiting
 
@@ -473,9 +474,9 @@ See also: biomcp list trial")]
         #[arg(long = "study-type")]
         study_type: Option<String>,
 
-        /// Patient age in years for eligibility matching
+        /// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months)
         #[arg(long)]
-        age: Option<u32>,
+        age: Option<f32>,
 
         /// Eligible sex [values: female, male, all]
         #[arg(long)]
@@ -5059,7 +5060,7 @@ mod tests {
             &crate::entities::trial::TrialSearchFilters {
                 condition: Some("melanoma".into()),
                 facility: Some("MD Anderson".into()),
-                age: Some(67),
+                age: Some(67.0),
                 sex: Some("female".into()),
                 criteria: Some("mismatch repair deficient".into()),
                 sponsor_type: Some("nih".into()),
@@ -5455,7 +5456,7 @@ mod tests {
             "--facility",
             "MD Anderson",
             "--age",
-            "67",
+            "0.5",
             "--sex",
             "female",
             "--criteria",
@@ -5483,7 +5484,7 @@ mod tests {
                     },
             } => {
                 assert_eq!(facility, vec!["MD Anderson".to_string()]);
-                assert_eq!(age, Some(67));
+                assert_eq!(age, Some(0.5));
                 assert_eq!(sex.as_deref(), Some("female"));
                 assert_eq!(criteria, vec!["mismatch repair deficient".to_string()]);
                 assert_eq!(sponsor_type.as_deref(), Some("nih"));
@@ -5492,6 +5493,17 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn search_trial_rejects_non_numeric_age() {
+        let err =
+            Cli::try_parse_from(["biomcp", "search", "trial", "--age", "abc", "--count-only"])
+                .expect_err("non-numeric age should fail to parse");
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("invalid value 'abc' for '--age <AGE>'"));
+        assert!(rendered.contains("invalid float literal"));
     }
 
     #[test]

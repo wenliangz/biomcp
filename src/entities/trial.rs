@@ -125,7 +125,7 @@ pub struct TrialSearchFilters {
     pub status: Option<String>,
     pub phase: Option<String>,
     pub study_type: Option<String>,
-    pub age: Option<u32>,
+    pub age: Option<f32>,
     pub sex: Option<String>,
     pub sponsor: Option<String>,
     pub sponsor_type: Option<String>,
@@ -1043,7 +1043,7 @@ fn parse_age_years(value: &str) -> Option<f32> {
     }
 }
 
-fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: u32) -> Vec<CtGovStudy> {
+fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: f32) -> Vec<CtGovStudy> {
     studies
         .into_iter()
         .filter(|study| {
@@ -1054,11 +1054,11 @@ fn verify_age_eligibility(studies: Vec<CtGovStudy>, age: u32) -> Vec<CtGovStudy>
             let min_ok = module
                 .and_then(|m| m.minimum_age.as_deref())
                 .and_then(parse_age_years)
-                .is_none_or(|min| age as f32 >= min);
+                .is_none_or(|min| age >= min);
             let max_ok = module
                 .and_then(|m| m.maximum_age.as_deref())
                 .and_then(parse_age_years)
-                .is_none_or(|max| age as f32 <= max);
+                .is_none_or(|max| age <= max);
             min_ok && max_ok
         })
         .collect()
@@ -2044,8 +2044,8 @@ mod tests {
         ))
         .expect("study fixture should deserialize");
 
-        assert!(verify_age_eligibility(vec![study.clone()], 0).is_empty());
-        assert_eq!(verify_age_eligibility(vec![study], 1).len(), 1);
+        assert!(verify_age_eligibility(vec![study.clone()], 0.0).is_empty());
+        assert_eq!(verify_age_eligibility(vec![study], 0.5).len(), 1);
     }
 
     #[test]
@@ -2054,8 +2054,8 @@ mod tests {
             serde_json::from_value(ctgov_search_study_fixture("NCT00000002", "N/A", "6 Months"))
                 .expect("study fixture should deserialize");
 
-        assert_eq!(verify_age_eligibility(vec![study.clone()], 0).len(), 1);
-        assert!(verify_age_eligibility(vec![study], 1).is_empty());
+        assert_eq!(verify_age_eligibility(vec![study.clone()], 0.5).len(), 1);
+        assert!(verify_age_eligibility(vec![study], 1.0).is_empty());
     }
 
     #[test]
@@ -2397,7 +2397,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
         let filters = TrialSearchFilters {
             source: TrialSource::NciCts,
             condition: Some("melanoma".into()),
-            age: Some(67),
+            age: Some(67.0),
             ..Default::default()
         };
 
@@ -2508,7 +2508,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
         TrialSearchFilters {
             condition: Some("melanoma".into()),
             status: Some("recruiting".into()),
-            age: Some(51),
+            age: Some(51.0),
             ..Default::default()
         }
     }
