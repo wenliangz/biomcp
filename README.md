@@ -228,6 +228,11 @@ Full documentation at [biomcp.org](https://biomcp.org/).
 - [Quick Reference](docs/reference/quick-reference.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
+## Citation
+
+If you use BioMCP in research, cite it via [`CITATION.cff`](CITATION.cff).
+GitHub also exposes `Cite this repository` in the repository sidebar when that file is present.
+
 ## License
 
 MIT

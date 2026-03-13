@@ -172,6 +172,11 @@ catalog. Read it with `biomcp skill`, install it with
 - [Quick Reference](reference/quick-reference.md)
 - [Troubleshooting](troubleshooting.md)
 
+## Citation
+
+If you use BioMCP in research, cite it via [`CITATION.cff`](https://github.com/genomoncology/biomcp/blob/main/CITATION.cff).
+GitHub also exposes `Cite this repository` in the repository sidebar when that file is present.
+
 ## License
 
 MIT
