@@ -1,0 +1,68 @@
+# Protein Queries
+
+Protein is a first-class entity backed by UniProt. These checks verify search and
+get behavior using stable structural markers — headings, table columns, and metadata
+keys — rather than volatile upstream record values.
+
+| Section | Command focus | Why it matters |
+|---|---|---|
+| Positional search | `search protein BRAF` | Confirms positional arg accepted (no `-q` flag) |
+| Table structure | `search protein BRAF` | Confirms stable result schema with Accession column |
+| Detail card | `get protein P15056` | Confirms card sections: Gene, Function, `More:`, UniProt link, related hints |
+| JSON metadata | `get protein P15056 --json` | Confirms `_meta.evidence_urls` and `_meta.next_commands` are present |
+
+## Positional Search Query
+
+Protein search accepts a positional gene/keyword argument without the `-q` flag.
+The heading should echo the query token and the result table should be non-empty.
+
+```bash
+out="$(biomcp search protein BRAF --limit 3)"
+echo "$out" | mustmatch like "# Proteins: BRAF"
+echo "$out" | mustmatch like "Found "
+```
+
+## Search Table Structure
+
+Search results expose a consistent table with an Accession column that callers use to
+look up detail cards. The canonical BRAF protein (P15056) should appear in the top
+results, and a usage hint should guide the next step.
+
+```bash
+out="$(biomcp search protein BRAF --limit 3)"
+echo "$out" | mustmatch like "| Accession | Name | Gene | Species |"
+echo "$out" | mustmatch like "P15056"
+echo "$out" | mustmatch like "get protein <accession>"
+```
+
+## Getting Protein Details
+
+`get protein` should return a card with the key identity and biology fields. We assert
+on stable structural markers: Gene line, Function section heading, the `More:` helper,
+the related-command block, and the UniProt evidence link. Literal protein names or
+functional annotations are not asserted as they drift with upstream record updates.
+
+```bash
+out="$(biomcp get protein P15056)"
+echo "$out" | mustmatch like "Accession: P15056"
+echo "$out" | mustmatch like "Gene: BRAF"
+echo "$out" | mustmatch like "## Function"
+echo "$out" | mustmatch like "More:"
+echo "$out" | mustmatch like "[UniProt]("
+echo "$out" | mustmatch like "See also:"
+```
+
+## JSON Metadata Contract
+
+JSON output must carry `_meta.evidence_urls` and `_meta.next_commands`, and both must
+be non-empty. The UniProt source label is stable because it is the only evidence URL
+emitted for protein entities.
+
+```bash
+out="$(biomcp get protein P15056 --json)"
+echo "$out" | mustmatch like '"_meta": {'
+echo "$out" | mustmatch like '"evidence_urls": ['
+echo "$out" | mustmatch like '"label": "UniProt"'
+echo "$out" | mustmatch like '"next_commands": ['
+echo "$out" | mustmatch like 'biomcp get protein P15056'
+```
