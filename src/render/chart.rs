@@ -633,7 +633,9 @@ fn suggest_bins(sample_count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::entities::study::{
         CnaDistributionResult, CoOccurrencePair, CoOccurrenceResult, MutationComparisonResult,
@@ -660,10 +662,39 @@ mod tests {
         }
     }
 
-    fn svg_options(path: &str) -> ChartRenderOptions {
+    struct TestOutputDir {
+        path: PathBuf,
+    }
+
+    impl TestOutputDir {
+        fn new() -> Self {
+            let suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "biomcp-chart-tests-{}-{suffix}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("temp chart dir");
+            Self { path }
+        }
+
+        fn svg_path(&self, name: &str) -> PathBuf {
+            self.path.join(name)
+        }
+    }
+
+    impl Drop for TestOutputDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn svg_options(path: PathBuf) -> ChartRenderOptions {
         ChartRenderOptions {
             terminal: false,
-            output: Some(PathBuf::from(path)),
+            output: Some(path),
             title: Some("Example".into()),
             theme: Some("minimal".into()),
             palette: Some("wong".into()),
@@ -706,6 +737,7 @@ mod tests {
 
     #[test]
     fn bar_family_renderers_produce_svg() {
+        let output_dir = TestOutputDir::new();
         let mutation = MutationFrequencyResult {
             study_id: "demo".into(),
             gene: "TP53".into(),
@@ -778,35 +810,46 @@ mod tests {
             ],
             log_rank_p: Some(0.02),
         };
+        let mutation_path = output_dir.svg_path("mutation.svg");
+        let cna_path = output_dir.svg_path("cna.svg");
+        let compare_path = output_dir.svg_path("compare.svg");
+        let survival_path = output_dir.svg_path("survival.svg");
 
         assert!(
             render_mutation_frequency_chart(
                 &mutation,
                 ChartType::Bar,
-                &svg_options("mutation.svg")
+                &svg_options(mutation_path.clone())
             )
             .expect("mutation svg")
-            .contains("mutation.svg")
+            .contains(mutation_path.to_string_lossy().as_ref())
         );
         assert!(
-            render_cna_chart(&cna, ChartType::Bar, &svg_options("cna.svg"))
+            render_cna_chart(&cna, ChartType::Bar, &svg_options(cna_path.clone()))
                 .expect("cna svg")
-                .contains("cna.svg")
+                .contains(cna_path.to_string_lossy().as_ref())
         );
         assert!(
             render_mutation_compare_chart(
                 &mutation_compare,
                 ChartType::Bar,
-                &svg_options("compare.svg"),
+                &svg_options(compare_path.clone()),
             )
             .expect("compare svg")
-            .contains("compare.svg")
+            .contains(compare_path.to_string_lossy().as_ref())
         );
         assert!(
-            render_survival_chart(&survival, ChartType::Bar, &svg_options("survival.svg"))
-                .expect("survival svg")
-                .contains("survival.svg")
+            render_survival_chart(
+                &survival,
+                ChartType::Bar,
+                &svg_options(survival_path.clone())
+            )
+            .expect("survival svg")
+            .contains(survival_path.to_string_lossy().as_ref())
         );
+        for path in [mutation_path, cna_path, compare_path, survival_path] {
+            assert!(path.exists(), "expected {} to exist", path.display());
+        }
     }
 
     #[test]
