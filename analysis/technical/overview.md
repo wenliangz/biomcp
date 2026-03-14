@@ -86,8 +86,10 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
      `version-sync` (`bash scripts/check-version-sync.sh`),
      `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and
      `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`,
-     `uv run mkdocs build --strict`), and `spec` (`cargo build --release --locked`,
-     then `make spec`).
+     `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`,
+     then `make spec-pr`).
+   - Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`,
+     which runs the full `make spec` suite on a schedule and by manual dispatch.
    - Release validation runs the Rust checks again, then
      `uv run pytest tests/ -v --mcp-cmd "biomcp serve"` and
      `uv run mkdocs build --strict`.
@@ -105,9 +107,11 @@ BioMCP has three verification layers:
 
 ### 1. GitHub Workflows
 
-CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`), and `spec` (`cargo build --release --locked`, then `make spec`).
+CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`, then `make spec-pr`).
 Contract smoke checks run in `.github/workflows/contracts.yml` on a schedule
 and by manual dispatch via `bash scripts/contract-smoke.sh`.
+Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`
+via the full `make spec` suite.
 release validation runs `pytest tests/` and `mkdocs build --strict` after the
 Rust checks before packaging and publishing artifacts.
 
@@ -118,10 +122,11 @@ exercises CLI output at the command level using stable structural markers
 (headers, table columns, query echoes) rather than brittle upstream data
 values.
 
-PR CI now runs `make spec` via the `spec` job in `.github/workflows/ci.yml`.
+PR CI now runs `make spec-pr` via the `spec-stable` job in `.github/workflows/ci.yml`.
 That job builds the release binary first, then relies on the Makefile's
 `target/release`-first `PATH` handling so specs do not accidentally execute a
-stale `.venv/bin/biomcp`.
+stale `.venv/bin/biomcp`. Volatile live-network headings run in the separate
+`Spec smoke (volatile live-network)` workflow instead.
 
 Run locally with `make spec`.
 
