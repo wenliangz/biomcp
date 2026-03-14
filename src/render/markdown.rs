@@ -2808,7 +2808,7 @@ mod tests {
                 citation_count: Some(10),
                 source: ArticleSource::PubTator,
                 score: Some(99.1),
-                is_retracted: false,
+                is_retracted: Some(false),
             },
             ArticleSearchResult {
                 pmid: "2".into(),
@@ -2818,7 +2818,7 @@ mod tests {
                 citation_count: Some(12),
                 source: ArticleSource::EuropePmc,
                 score: None,
-                is_retracted: false,
+                is_retracted: Some(false),
             },
         ];
 

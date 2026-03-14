@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -82,7 +82,7 @@ pub struct ArticleSearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
     #[serde(default)]
-    pub is_retracted: bool,
+    pub is_retracted: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -540,7 +540,7 @@ fn matches_result_filters(
     if filters.no_preprints && row.journal.as_deref().is_some_and(is_preprint_journal) {
         return false;
     }
-    if filters.exclude_retracted && row.is_retracted {
+    if filters.exclude_retracted && row.is_retracted.unwrap_or(true) {
         return false;
     }
     if !matches_optional_journal_filter(row.journal.as_deref(), filters.journal.as_deref()) {
@@ -553,10 +553,15 @@ fn matches_result_filters(
 }
 
 fn dedup_by_pmid_preserve_order(results: Vec<ArticleSearchResult>) -> Vec<ArticleSearchResult> {
-    let mut deduped = Vec::with_capacity(results.len());
-    let mut seen = HashSet::with_capacity(results.len());
+    let mut deduped: Vec<ArticleSearchResult> = Vec::with_capacity(results.len());
+    let mut seen: HashMap<String, usize> = HashMap::with_capacity(results.len());
     for row in results {
-        if seen.insert(row.pmid.clone()) {
+        if let Some(existing_idx) = seen.get(&row.pmid).copied() {
+            if deduped[existing_idx].is_retracted.is_none() && row.is_retracted.is_some() {
+                deduped[existing_idx].is_retracted = row.is_retracted;
+            }
+        } else {
+            seen.insert(row.pmid.clone(), deduped.len());
             deduped.push(row);
         }
     }
@@ -944,7 +949,7 @@ async fn search_europepmc_page(
     // try adding one matched retracted publication if available.
     if !filters.exclude_retracted
         && filters.sort == ArticleSort::Date
-        && !out.iter().any(|row| row.is_retracted)
+        && !out.iter().any(|row| row.is_retracted == Some(true))
     {
         let retracted_query = format!("({query}) AND PUB_TYPE:\"retracted publication\"");
         if let Ok(resp) = europe
@@ -958,7 +963,7 @@ async fn search_europepmc_page(
                 .into_iter()
                 .filter_map(|hit| transform::article::from_europepmc_search_result(&hit))
                 .find(|row| {
-                    row.is_retracted
+                    row.is_retracted == Some(true)
                         && !seen_pmids.contains(&row.pmid)
                         && matches_result_filters(
                             row,
@@ -1553,7 +1558,7 @@ mod tests {
     }
 
     fn row(pmid: &str, source: ArticleSource) -> ArticleSearchResult {
-        row_with(pmid, source, Some("2025-01-01"), Some(1), false)
+        row_with(pmid, source, Some("2025-01-01"), Some(1), Some(false))
     }
 
     fn row_with(
@@ -1561,7 +1566,7 @@ mod tests {
         source: ArticleSource,
         date: Option<&str>,
         citation_count: Option<u64>,
-        is_retracted: bool,
+        is_retracted: Option<bool>,
     ) -> ArticleSearchResult {
         ArticleSearchResult {
             pmid: pmid.to_string(),
@@ -1686,21 +1691,21 @@ mod tests {
                     ArticleSource::EuropePmc,
                     Some("2024-01-01"),
                     Some(1),
-                    false,
+                    Some(false),
                 ),
                 row_with(
                     "200",
                     ArticleSource::EuropePmc,
                     Some("2025-01-01"),
                     Some(1),
-                    false,
+                    Some(false),
                 ),
                 row_with(
                     "300",
                     ArticleSource::EuropePmc,
                     Some("2023-01-01"),
                     Some(1),
-                    false,
+                    Some(false),
                 ),
             ],
             Some(3),
@@ -1778,14 +1783,14 @@ mod tests {
                     ArticleSource::PubTator,
                     Some("2025-02-01"),
                     Some(50),
-                    false,
+                    Some(false),
                 ),
                 row_with(
                     "200",
                     ArticleSource::PubTator,
                     Some("2024-01-01"),
                     Some(5),
-                    false,
+                    Some(false),
                 ),
             ],
             Some(2),
@@ -1797,14 +1802,14 @@ mod tests {
                     ArticleSource::EuropePmc,
                     Some("2025-03-01"),
                     Some(100),
-                    false,
+                    Some(false),
                 ),
                 row_with(
                     "400",
                     ArticleSource::EuropePmc,
                     Some("2024-06-01"),
                     Some(10),
-                    false,
+                    Some(false),
                 ),
             ],
             Some(2),
@@ -1832,14 +1837,14 @@ mod tests {
                     ArticleSource::PubTator,
                     Some("2025"),
                     Some(25),
-                    false,
+                    Some(false),
                 ),
                 row_with(
                     "600",
                     ArticleSource::PubTator,
                     Some("2024-12-31"),
                     Some(30),
-                    false,
+                    Some(false),
                 ),
             ],
             Some(2),
@@ -1851,9 +1856,9 @@ mod tests {
                     ArticleSource::EuropePmc,
                     Some("2025-06-01"),
                     Some(10),
-                    false,
+                    Some(false),
                 ),
-                row_with("800", ArticleSource::EuropePmc, None, Some(99), false),
+                row_with("800", ArticleSource::EuropePmc, None, Some(99), Some(false)),
             ],
             Some(2),
         );
@@ -1907,7 +1912,7 @@ mod tests {
             ArticleSource::PubTator,
             Some("2025-01-01"),
             Some(1),
-            true,
+            Some(true),
         );
         let exclude_filters = ArticleSearchFilters {
             exclude_retracted: true,
@@ -1920,5 +1925,79 @@ mod tests {
 
         assert!(!matches_result_filters(&row, &exclude_filters, None, None));
         assert!(matches_result_filters(&row, &include_filters, None, None));
+    }
+
+    #[test]
+    fn exclude_retracted_excludes_unknown_retraction_status_by_default() {
+        let row = row_with(
+            "100",
+            ArticleSource::PubTator,
+            Some("2025-01-01"),
+            Some(1),
+            None,
+        );
+        let exclude_filters = ArticleSearchFilters {
+            exclude_retracted: true,
+            ..empty_filters()
+        };
+        let include_filters = ArticleSearchFilters {
+            exclude_retracted: false,
+            ..empty_filters()
+        };
+
+        assert!(!matches_result_filters(&row, &exclude_filters, None, None));
+        assert!(matches_result_filters(&row, &include_filters, None, None));
+    }
+
+    #[test]
+    fn merge_federated_pages_preserves_known_retraction_status_from_later_duplicate() {
+        let pubtator_page = SearchPage::offset(
+            vec![row_with(
+                "200",
+                ArticleSource::PubTator,
+                Some("2025-01-01"),
+                Some(1),
+                None,
+            )],
+            Some(1),
+        );
+        let europe_page = SearchPage::offset(
+            vec![row_with(
+                "200",
+                ArticleSource::EuropePmc,
+                Some("2025-01-01"),
+                Some(10),
+                Some(true),
+            )],
+            Some(1),
+        );
+
+        let merged = merge_federated_pages(
+            Ok(pubtator_page),
+            Ok(europe_page),
+            10,
+            0,
+            ArticleSort::Relevance,
+        )
+        .expect("federated merge should succeed");
+
+        assert_eq!(merged.results.len(), 1);
+        assert_eq!(merged.results[0].source, ArticleSource::PubTator);
+        assert_eq!(merged.results[0].is_retracted, Some(true));
+    }
+
+    #[test]
+    fn article_search_result_serializes_unknown_retraction_as_null() {
+        let row = row_with(
+            "100",
+            ArticleSource::PubTator,
+            Some("2025-01-01"),
+            Some(1),
+            None,
+        );
+
+        let value = serde_json::to_value(&row).expect("search row should serialize");
+        assert!(value.get("is_retracted").is_some());
+        assert!(value["is_retracted"].is_null());
     }
 }
