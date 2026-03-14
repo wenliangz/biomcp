@@ -1504,6 +1504,31 @@ fn prepare_ctgov_search_context(
     })
 }
 
+fn build_ctgov_search_params(
+    filters: &TrialSearchFilters,
+    context: &CtGovSearchContext,
+    page_token: Option<String>,
+    page_size: usize,
+) -> CtGovSearchParams {
+    CtGovSearchParams {
+        condition: filters.condition.clone(),
+        intervention: filters
+            .intervention
+            .as_deref()
+            .map(normalize_intervention_query),
+        facility: context.facility.clone(),
+        status: context.normalized_status.clone(),
+        agg_filters: context.agg_filters.clone(),
+        query_term: context.query_term.clone(),
+        count_total: true,
+        page_token,
+        page_size,
+        lat: filters.lat,
+        lon: filters.lon,
+        distance_miles: filters.distance,
+    }
+}
+
 async fn apply_ctgov_post_filters(
     client: &ClinicalTrialsClient,
     filters: &TrialSearchFilters,
@@ -1553,23 +1578,12 @@ async fn search_page_with_ctgov_client(
 
     for _ in 0..CTGOV_MAX_PAGE_FETCHES {
         let resp = client
-            .search(&CtGovSearchParams {
-                condition: filters.condition.clone(),
-                intervention: filters
-                    .intervention
-                    .as_deref()
-                    .map(normalize_intervention_query),
-                facility: context.facility.clone(),
-                status: context.normalized_status.clone(),
-                agg_filters: context.agg_filters.clone(),
-                query_term: context.query_term.clone(),
-                count_total: true,
-                page_token: page_token.clone(),
+            .search(&build_ctgov_search_params(
+                filters,
+                &context,
+                page_token.clone(),
                 page_size,
-                lat: filters.lat,
-                lon: filters.lon,
-                distance_miles: filters.distance,
-            })
+            ))
             .await?;
 
         if total.is_none() {
@@ -1671,23 +1685,7 @@ async fn count_all_with_ctgov_client(
 
     if !context.uses_expensive_post_filters {
         let resp = client
-            .search(&CtGovSearchParams {
-                condition: filters.condition.clone(),
-                intervention: filters
-                    .intervention
-                    .as_deref()
-                    .map(normalize_intervention_query),
-                facility: context.facility.clone(),
-                status: context.normalized_status.clone(),
-                agg_filters: context.agg_filters.clone(),
-                query_term: context.query_term.clone(),
-                count_total: true,
-                page_token: None,
-                page_size: 1,
-                lat: filters.lat,
-                lon: filters.lon,
-                distance_miles: filters.distance,
-            })
+            .search(&build_ctgov_search_params(filters, &context, None, 1))
             .await?;
         return Ok(Some(resp.total_count.unwrap_or(0) as usize));
     }
@@ -1702,23 +1700,12 @@ async fn count_all_with_ctgov_client(
         }
 
         let resp = client
-            .search(&CtGovSearchParams {
-                condition: filters.condition.clone(),
-                intervention: filters
-                    .intervention
-                    .as_deref()
-                    .map(normalize_intervention_query),
-                facility: context.facility.clone(),
-                status: context.normalized_status.clone(),
-                agg_filters: context.agg_filters.clone(),
-                query_term: context.query_term.clone(),
-                count_total: true,
-                page_token: page_token.clone(),
-                page_size: COUNT_PAGE_SIZE,
-                lat: filters.lat,
-                lon: filters.lon,
-                distance_miles: filters.distance,
-            })
+            .search(&build_ctgov_search_params(
+                filters,
+                &context,
+                page_token.clone(),
+                COUNT_PAGE_SIZE,
+            ))
             .await?;
         page_count += 1;
 
@@ -2287,6 +2274,152 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             normalize_intervention_query("immune checkpoint inhibitor"),
             "immune checkpoint inhibitor"
         );
+    }
+
+    #[test]
+    fn build_ctgov_search_params_maps_all_shared_fields() {
+        let filters = TrialSearchFilters {
+            condition: Some("melanoma".into()),
+            intervention: Some("HRS 4642".into()),
+            facility: Some("Mayo Clinic".into()),
+            status: Some("active".into()),
+            phase: Some("1/2".into()),
+            study_type: Some("Interventional".into()),
+            sex: Some("female".into()),
+            sponsor: Some("Acme Oncology".into()),
+            sponsor_type: Some("industry".into()),
+            mutation: Some("MSI-H".into()),
+            criteria: Some("mismatch repair deficient".into()),
+            results_available: true,
+            lat: Some(42.3601),
+            lon: Some(-71.0589),
+            distance: Some(25),
+            ..Default::default()
+        };
+        let normalized = validate_trial_search(&filters).expect("filters should validate");
+        let context =
+            prepare_ctgov_search_context(&filters, &normalized).expect("context should build");
+
+        let params = build_ctgov_search_params(&filters, &context, Some("cursor-1".into()), 37);
+
+        assert_eq!(params.condition, filters.condition);
+        assert_eq!(params.intervention.as_deref(), Some("HRS-4642"));
+        assert_eq!(params.facility, context.facility);
+        assert_eq!(params.status, context.normalized_status);
+        assert_eq!(params.agg_filters, context.agg_filters);
+        assert_eq!(params.query_term, context.query_term);
+        assert!(params.count_total);
+        assert_eq!(params.page_token.as_deref(), Some("cursor-1"));
+        assert_eq!(params.page_size, 37);
+        assert_eq!(params.lat, filters.lat);
+        assert_eq!(params.lon, filters.lon);
+        assert_eq!(params.distance_miles, filters.distance);
+    }
+
+    #[test]
+    fn build_ctgov_search_params_preserves_none_values_without_defaults() {
+        let filters = TrialSearchFilters {
+            condition: Some("melanoma".into()),
+            ..Default::default()
+        };
+        let normalized = validate_trial_search(&filters).expect("filters should validate");
+        let context =
+            prepare_ctgov_search_context(&filters, &normalized).expect("context should build");
+
+        let params = build_ctgov_search_params(&filters, &context, None, 10);
+
+        assert_eq!(params.condition, Some("melanoma".into()));
+        assert_eq!(params.intervention, None);
+        assert_eq!(params.facility, None);
+        assert_eq!(params.status, None);
+        assert_eq!(params.agg_filters, None);
+        assert_eq!(params.query_term, None);
+        assert!(params.count_total);
+        assert_eq!(params.page_token, None);
+        assert_eq!(params.page_size, 10);
+        assert_eq!(params.lat, None);
+        assert_eq!(params.lon, None);
+        assert_eq!(params.distance_miles, None);
+    }
+
+    #[test]
+    fn build_ctgov_search_params_keeps_search_and_count_call_shapes_aligned() {
+        let filters = TrialSearchFilters {
+            condition: Some("melanoma".into()),
+            intervention: Some("HRS 4642".into()),
+            facility: Some("Dana-Farber Cancer Institute".into()),
+            status: Some("recruiting".into()),
+            phase: Some("2".into()),
+            sex: Some("all".into()),
+            sponsor_type: Some("nih".into()),
+            mutation: Some("BRAF V600E".into()),
+            criteria: Some("prior anti-braf therapy".into()),
+            lat: Some(42.3355),
+            lon: Some(-71.1041),
+            distance: Some(15),
+            ..Default::default()
+        };
+        let normalized = validate_trial_search(&filters).expect("filters should validate");
+        let context =
+            prepare_ctgov_search_context(&filters, &normalized).expect("context should build");
+
+        let search_page_params =
+            build_ctgov_search_params(&filters, &context, Some("page-1".into()), 25);
+        let fast_count_params = build_ctgov_search_params(&filters, &context, None, 1);
+        let slow_count_params =
+            build_ctgov_search_params(&filters, &context, Some("page-2".into()), 1000);
+
+        assert_eq!(search_page_params.condition, fast_count_params.condition);
+        assert_eq!(search_page_params.condition, slow_count_params.condition);
+        assert_eq!(
+            search_page_params.intervention,
+            fast_count_params.intervention
+        );
+        assert_eq!(
+            search_page_params.intervention,
+            slow_count_params.intervention
+        );
+        assert_eq!(search_page_params.facility, fast_count_params.facility);
+        assert_eq!(search_page_params.facility, slow_count_params.facility);
+        assert_eq!(search_page_params.status, fast_count_params.status);
+        assert_eq!(search_page_params.status, slow_count_params.status);
+        assert_eq!(
+            search_page_params.agg_filters,
+            fast_count_params.agg_filters
+        );
+        assert_eq!(
+            search_page_params.agg_filters,
+            slow_count_params.agg_filters
+        );
+        assert_eq!(search_page_params.query_term, fast_count_params.query_term);
+        assert_eq!(search_page_params.query_term, slow_count_params.query_term);
+        assert_eq!(
+            search_page_params.count_total,
+            fast_count_params.count_total
+        );
+        assert_eq!(
+            search_page_params.count_total,
+            slow_count_params.count_total
+        );
+        assert_eq!(search_page_params.lat, fast_count_params.lat);
+        assert_eq!(search_page_params.lat, slow_count_params.lat);
+        assert_eq!(search_page_params.lon, fast_count_params.lon);
+        assert_eq!(search_page_params.lon, slow_count_params.lon);
+        assert_eq!(
+            search_page_params.distance_miles,
+            fast_count_params.distance_miles
+        );
+        assert_eq!(
+            search_page_params.distance_miles,
+            slow_count_params.distance_miles
+        );
+
+        assert_eq!(search_page_params.page_token.as_deref(), Some("page-1"));
+        assert_eq!(search_page_params.page_size, 25);
+        assert_eq!(fast_count_params.page_token, None);
+        assert_eq!(fast_count_params.page_size, 1);
+        assert_eq!(slow_count_params.page_token.as_deref(), Some("page-2"));
+        assert_eq!(slow_count_params.page_size, 1000);
     }
 
     #[test]
