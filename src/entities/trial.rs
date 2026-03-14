@@ -183,6 +183,7 @@ const ELIGIBILITY_MAX_CHARS: usize = 12_000;
 const FACILITY_GEO_VERIFY_CONCURRENCY: usize = 8;
 const ELIGIBILITY_VERIFY_CONCURRENCY: usize = 8;
 const CTGOV_MAX_PAGE_FETCHES: usize = 20;
+const CTGOV_COUNT_PAGE_SIZE: usize = 1000;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct TrialSections {
@@ -1671,7 +1672,6 @@ async fn count_all_with_ctgov_client(
     client: &ClinicalTrialsClient,
     filters: &TrialSearchFilters,
 ) -> Result<Option<usize>, BioMcpError> {
-    const COUNT_PAGE_SIZE: usize = 1000;
     const COUNT_TRAVERSAL_PAGE_CAP: usize = 50;
 
     if !matches!(filters.source, TrialSource::ClinicalTrialsGov) {
@@ -1704,7 +1704,7 @@ async fn count_all_with_ctgov_client(
                 filters,
                 &context,
                 page_token.clone(),
-                COUNT_PAGE_SIZE,
+                CTGOV_COUNT_PAGE_SIZE,
             ))
             .await?;
         page_count += 1;
@@ -2366,8 +2366,12 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
         let search_page_params =
             build_ctgov_search_params(&filters, &context, Some("page-1".into()), 25);
         let fast_count_params = build_ctgov_search_params(&filters, &context, None, 1);
-        let slow_count_params =
-            build_ctgov_search_params(&filters, &context, Some("page-2".into()), 1000);
+        let slow_count_params = build_ctgov_search_params(
+            &filters,
+            &context,
+            Some("page-2".into()),
+            CTGOV_COUNT_PAGE_SIZE,
+        );
 
         assert_eq!(search_page_params.condition, fast_count_params.condition);
         assert_eq!(search_page_params.condition, slow_count_params.condition);
@@ -2419,7 +2423,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
         assert_eq!(fast_count_params.page_token, None);
         assert_eq!(fast_count_params.page_size, 1);
         assert_eq!(slow_count_params.page_token.as_deref(), Some("page-2"));
-        assert_eq!(slow_count_params.page_size, 1000);
+        assert_eq!(slow_count_params.page_size, CTGOV_COUNT_PAGE_SIZE);
     }
 
     #[test]
