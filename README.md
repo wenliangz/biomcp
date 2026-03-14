@@ -108,6 +108,9 @@ search all [slot filters]    → unified fan-out across all entities
 
 Pivot between related entities without rebuilding filters:
 
+See the [cross-entity pivot guide](docs/how-to/cross-entity-pivots.md) for when
+to use a helper versus a fresh search.
+
 ```bash
 biomcp variant trials "BRAF V600E" --limit 5
 biomcp variant articles "BRAF V600E"
@@ -224,6 +227,7 @@ biomcp uninstall        # remove biomcp from ~/.local/bin
 Full documentation at [biomcp.org](https://biomcp.org/).
 
 - [Getting Started](docs/getting-started/installation.md)
+- [Cross-Entity Pivot Guide](docs/how-to/cross-entity-pivots.md)
 - [Data Sources](docs/reference/data-sources.md)
 - [Quick Reference](docs/reference/quick-reference.md)
 - [Troubleshooting](docs/troubleshooting.md)
