@@ -39,12 +39,28 @@ of display limit. This guards the regression where age was incorrectly grouped
 with expensive detail-verified post-filters and `Total:` changed with `--limit`.
 
 ```bash
-t10="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 10 --count-only | sed -n 's/^Total: //p')"
-t20="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 20 --count-only | sed -n 's/^Total: //p')"
-t50="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 50 --count-only | sed -n 's/^Total: //p')"
+t10="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 10 --count-only | sed -n 's/^Total: \([0-9]*\).*/\1/p')"
+t20="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 20 --count-only | sed -n 's/^Total: \([0-9]*\).*/\1/p')"
+t50="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --limit 50 --count-only | sed -n 's/^Total: \([0-9]*\).*/\1/p')"
 test -n "$t10"
 test "$t10" = "$t20"
 test "$t20" = "$t50"
+```
+
+## Age-Only Count Approximation Signal
+
+When age is the only non-API filter, `--count-only` must signal that the total
+comes from the upstream CTGov fast-count path and is only approximate after
+BioMCP's client-side age post-filter.
+
+```bash timeout=180
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --count-only)"
+echo "$out" | mustmatch like "Total: "
+echo "$out" | mustmatch like "(approximate, age post-filtered)"
+
+json_out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --count-only --json)"
+echo "$json_out" | mustmatch like "\"total\":"
+echo "$json_out" | mustmatch like "\"approximate\": true"
 ```
 
 ## Expensive Count Traversal Cap
@@ -157,4 +173,5 @@ echo "$out" | mustmatch like "materially more expensive"
 echo "$out" | mustmatch like "combined Phase 1/Phase 2 label"
 echo "$out" | mustmatch like "not Phase 1 OR Phase 2"
 echo "$out" | mustmatch like "no sex restriction"
+echo "$out" | tr '\n' ' ' | mustmatch like "age-only CTGov searches report an approximate upstream total"
 ```

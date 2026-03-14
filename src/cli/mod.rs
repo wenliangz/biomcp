@@ -579,7 +579,11 @@ See also: biomcp list trial")]
         #[arg(long = "study-type")]
         study_type: Option<String>,
 
-        /// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months)
+        /// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months).
+        ///
+        /// With `--count-only`, age-only CTGov searches report an approximate
+        /// upstream total because BioMCP applies the age filter during full
+        /// search, not the fast count path.
         #[arg(long)]
         age: Option<f32>,
 
@@ -4497,19 +4501,36 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     let query =
                         trial_search_query_summary(&filters, offset, next_page.as_deref());
                     if count_only {
-                        let total = crate::entities::trial::count_all(&filters).await?;
+                        let count = crate::entities::trial::count_all(&filters).await?;
                         if cli.json {
+                            use crate::entities::trial::TrialCount;
+
                             #[derive(serde::Serialize)]
                             struct TrialCountOnlyJson {
                                 total: Option<usize>,
+                                #[serde(skip_serializing_if = "Option::is_none")]
+                                approximate: Option<bool>,
                             }
+                            let (total, approximate) = match count {
+                                TrialCount::Exact(total) => (Some(total), None),
+                                TrialCount::Approximate(total) => (Some(total), Some(true)),
+                                TrialCount::Unknown => (None, None),
+                            };
                             return Ok(crate::render::json::to_pretty(&TrialCountOnlyJson {
                                 total,
+                                approximate,
                             })?);
                         }
-                        return Ok(match total {
-                            Some(total) => format!("Total: {total}"),
-                            None => "Total: unknown (traversal limit reached)".to_string(),
+                        return Ok(match count {
+                            crate::entities::trial::TrialCount::Exact(total) => {
+                                format!("Total: {total}")
+                            }
+                            crate::entities::trial::TrialCount::Approximate(total) => {
+                                format!("Total: {total} (approximate, age post-filtered)")
+                            }
+                            crate::entities::trial::TrialCount::Unknown => {
+                                "Total: unknown (traversal limit reached)".to_string()
+                            }
                         });
                     }
                     let page = crate::entities::trial::search_page(
@@ -5284,6 +5305,13 @@ mod tests {
 
         assert!(help.contains("all"));
         assert!(help.contains("no sex restriction"));
+    }
+
+    #[test]
+    fn trial_age_help_explains_age_only_count_is_approximate() {
+        let help = render_trial_search_long_help();
+
+        assert!(help.contains("age-only CTGov searches report an approximate upstream total"));
     }
 
     #[test]
