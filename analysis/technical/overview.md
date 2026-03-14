@@ -85,9 +85,10 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
      (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`),
      `version-sync` (`bash scripts/check-version-sync.sh`),
      `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and
-     `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`,
-     `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`,
-     then `make spec-pr`).
+     `contracts` (`cargo build --release --locked`, `uv sync --extra dev`,
+     `uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`,
+     `uv run mkdocs build --strict`), and `spec-stable`
+     (`cargo build --release --locked`, then `make spec-pr`).
    - Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`,
      which runs the full `make spec` suite on a schedule and by manual dispatch.
    - Release validation runs the Rust checks again, then
@@ -107,7 +108,7 @@ BioMCP has three verification layers:
 
 ### 1. GitHub Workflows
 
-CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), `contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`, then `make spec-pr`).
+CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), `contracts` (`cargo build --release --locked`, `uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`, then `make spec-pr`).
 Contract smoke checks run in `.github/workflows/contracts.yml` on a schedule
 and by manual dispatch via `bash scripts/contract-smoke.sh`.
 Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`
