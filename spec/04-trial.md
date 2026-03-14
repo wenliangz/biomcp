@@ -141,3 +141,20 @@ out="$(biomcp get trial NCT02576665 locations --limit 3)"
 echo "$out" | mustmatch like "## Locations"
 echo "$out" | mustmatch like "| Facility | City | Country | Status | Contact |"
 ```
+
+## Trial Help Explains Special Filter Semantics
+
+The trial help output should explain the three non-obvious filter behaviors that
+otherwise surprise operators: facility text-search versus geo-verify cost,
+ClinicalTrials.gov's combined `1/2` phase label, and `--sex all` meaning no sex
+restriction.
+
+```bash
+out="$(biomcp search trial --help)"
+echo "$out" | mustmatch like "text-search mode"
+echo "$out" | mustmatch like "geo-verify mode"
+echo "$out" | mustmatch like "materially more expensive"
+echo "$out" | mustmatch like "combined Phase 1/Phase 2 label"
+echo "$out" | mustmatch like "not Phase 1 OR Phase 2"
+echo "$out" | mustmatch like "no sex restriction"
+```
