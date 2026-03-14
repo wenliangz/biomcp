@@ -40,6 +40,15 @@ nav:
       - Predict Effects: how-to/predict-effects.md
       - Reproduce Papers: how-to/reproduce-papers.md
       - Skill Validation: how-to/skill-validation.md
+  - Study Charts:
+      - Overview: charts/index.md
+      - Bar: charts/bar.md
+      - Pie: charts/pie.md
+      - Histogram: charts/histogram.md
+      - Density: charts/density.md
+      - Box: charts/box.md
+      - Violin: charts/violin.md
+      - Ridgeline: charts/ridgeline.md
   - Reference:
       - Quick Reference: reference/quick-reference.md
       - Data Sources: reference/data-sources.md
@@ -52,6 +61,7 @@ nav:
       - CIViC Sections: reference/civic-sections.md
       - Drug Approvals & AE Summary: reference/drug-approvals-and-ae-summary.md
   - Blog:
+      - "Native Study Charts in BioMCP with Kuva": blog/biomcp-kuva-charts.md
       - "We Deleted 35 Tools and Our Agent Got Better": blog/we-deleted-35-tools.md
   - Policies: policies.md
   - Troubleshooting: troubleshooting.md
