@@ -184,6 +184,18 @@ const FACILITY_GEO_VERIFY_CONCURRENCY: usize = 8;
 const ELIGIBILITY_VERIFY_CONCURRENCY: usize = 8;
 const CTGOV_MAX_PAGE_FETCHES: usize = 20;
 const CTGOV_COUNT_PAGE_SIZE: usize = 1000;
+const COUNT_TRAVERSAL_PAGE_CAP: usize = 50;
+
+/// Describes the precision of a trial `--count-only` result.
+#[derive(Debug, PartialEq)]
+pub enum TrialCount {
+    /// Exact post-filtered count.
+    Exact(usize),
+    /// Upstream CTGov total before client-side age post-filtering.
+    Approximate(usize),
+    /// Traversal cap was hit, so the exact total is unknown.
+    Unknown,
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct TrialSections {
@@ -1680,9 +1692,7 @@ async fn search_page_with_ctgov_client(
 async fn count_all_with_ctgov_client(
     client: &ClinicalTrialsClient,
     filters: &TrialSearchFilters,
-) -> Result<Option<usize>, BioMcpError> {
-    const COUNT_TRAVERSAL_PAGE_CAP: usize = 50;
-
+) -> Result<TrialCount, BioMcpError> {
     if !matches!(filters.source, TrialSource::ClinicalTrialsGov) {
         return Err(BioMcpError::InvalidArgument(
             "internal ctgov count helper requires --source ctgov".into(),
@@ -1696,7 +1706,12 @@ async fn count_all_with_ctgov_client(
         let resp = client
             .search(&build_ctgov_search_params(filters, &context, None, 1))
             .await?;
-        return Ok(Some(resp.total_count.unwrap_or(0) as usize));
+        let total = resp.total_count.unwrap_or(0) as usize;
+        return Ok(if filters.age.is_some() {
+            TrialCount::Approximate(total)
+        } else {
+            TrialCount::Exact(total)
+        });
     }
 
     let mut verified_total = 0usize;
@@ -1705,7 +1720,7 @@ async fn count_all_with_ctgov_client(
 
     loop {
         if page_count >= COUNT_TRAVERSAL_PAGE_CAP {
-            return Ok(None);
+            return Ok(TrialCount::Unknown);
         }
 
         let resp = client
@@ -1728,10 +1743,10 @@ async fn count_all_with_ctgov_client(
         page_token = next_page_token;
     }
 
-    Ok(Some(verified_total))
+    Ok(TrialCount::Exact(verified_total))
 }
 
-pub async fn count_all(filters: &TrialSearchFilters) -> Result<Option<usize>, BioMcpError> {
+pub async fn count_all(filters: &TrialSearchFilters) -> Result<TrialCount, BioMcpError> {
     match filters.source {
         TrialSource::ClinicalTrialsGov => {
             let client = ClinicalTrialsClient::new()?;
@@ -1739,7 +1754,7 @@ pub async fn count_all(filters: &TrialSearchFilters) -> Result<Option<usize>, Bi
         }
         TrialSource::NciCts => {
             let page = search_page(filters, 1, 0, None).await?;
-            Ok(Some(page.total.unwrap_or(page.results.len())))
+            Ok(TrialCount::Exact(page.total.unwrap_or(page.results.len())))
         }
     }
 }
@@ -2899,7 +2914,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
     }
 
     #[tokio::test]
-    async fn count_all_uses_native_total_for_age_only_filters() {
+    async fn count_all_returns_approximate_for_age_only_filters() {
         let server = MockServer::start().await;
         let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
 
@@ -2924,12 +2939,12 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             count_all_with_ctgov_client(&client, &filters)
                 .await
                 .expect("count"),
-            Some(250)
+            TrialCount::Approximate(250)
         );
     }
 
     #[tokio::test]
-    async fn count_all_uses_native_total_without_post_filters() {
+    async fn count_all_returns_exact_for_no_post_filters() {
         let server = MockServer::start().await;
         let client = ClinicalTrialsClient::new_for_test(server.uri()).expect("client");
 
@@ -2959,7 +2974,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             count_all_with_ctgov_client(&client, &filters)
                 .await
                 .expect("count"),
-            Some(494)
+            TrialCount::Exact(494)
         );
     }
 
@@ -3003,7 +3018,7 @@ AREA[OfficialTitle](\"G12D\") OR AREA[BriefSummary](\"G12D\") OR AREA[Keyword](\
             count_all_with_ctgov_client(&client, &filters)
                 .await
                 .expect("count"),
-            None
+            TrialCount::Unknown
         );
     }
 }
