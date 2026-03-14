@@ -40,6 +40,7 @@ nav:
       - Predict Effects: how-to/predict-effects.md
       - Reproduce Papers: how-to/reproduce-papers.md
       - Skill Validation: how-to/skill-validation.md
+      - Guide Workflows: how-to/guide-workflows.md
   - Study Charts:
       - Overview: charts/index.md
       - Bar: charts/bar.md
