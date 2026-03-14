@@ -25,8 +25,9 @@ test:
 	cargo test
 
 test-contracts:
+	cargo build --release --locked
 	uv sync --extra dev
-	uv run pytest tests/ -v --mcp-cmd "biomcp serve"
+	uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"
 	uv run mkdocs build --strict
 
 check:
