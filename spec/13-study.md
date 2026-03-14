@@ -219,3 +219,87 @@ out="$(biomcp study query --study missing_study --gene TP53 --type mutations 2>&
 echo "$out" | mustmatch like "study 'missing_study' not found"
 echo "$out" | mustmatch like "biomcp study list"
 ```
+
+## Chart Flag: Mutation Bar Chart
+
+`--chart bar --terminal` on a mutation query should produce terminal chart output instead of the standard markdown heading. The output should be non-empty and not contain the standard markdown heading.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart bar --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Mutation Frequency"
+```
+
+## Chart Flag: Expression Histogram
+
+`--chart histogram --terminal` on an expression query should produce terminal chart output.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type expression --chart histogram --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Expression Distribution"
+```
+
+## Chart Flag: Co-occurrence Pie Chart
+
+`--chart pie --terminal` on co-occurrence should produce terminal chart output.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS --chart pie --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Co-occurrence"
+```
+
+## Chart Flag: Compare Violin Plot
+
+`--chart violin --terminal` on compare expression should produce terminal chart output.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2 --chart violin --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Group Comparison"
+```
+
+## Chart Flag: Survival Bar Chart
+
+`--chart bar --terminal` on survival should produce terminal chart output instead of the standard survival markdown heading. The fixture-backed proof only checks that chart mode is active; the rendered bar heights are covered by Rust tests and later real-data verification.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53 --chart bar --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Survival"
+```
+
+## Chart Flag: Invalid Chart Type Error
+
+Incompatible chart type and query type combinations should fail with a clear error listing valid options.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart violin --terminal 2>&1 || true)"
+echo "$out" | mustmatch like "violin"
+echo "$out" | mustmatch like "bar"
+echo "$out" | mustmatch like "pie"
+```
+
+## Chart Subcommand: Documentation
+
+`biomcp chart` should show chart overview documentation. `biomcp chart bar` should show bar chart specific docs.
+
+```bash
+out="$(biomcp chart)"
+test -n "$out"
+echo "$out" | mustmatch like "bar"
+echo "$out" | mustmatch like "violin"
+```
+
+```bash
+out="$(biomcp chart bar)"
+test -n "$out"
+echo "$out" | mustmatch like "Bar"
+```

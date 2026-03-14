@@ -93,10 +93,7 @@ Run the Python/docs contract gate (same as PR CI `contracts` job):
 make test-contracts
 ```
 
-`make test-contracts` runs `uv sync --extra dev`, `pytest tests/`, and
-`mkdocs build --strict` - the same steps that PR CI and release validation
-require. Use this to catch docs-contract and Python regressions before
-pushing.
+`make test-contracts` runs `cargo build --release --locked`, `uv sync --extra dev`, `pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, and `mkdocs build --strict` - the same steps that PR CI `contracts` requires. Use this to catch docs-contract and Python regressions before pushing.
 
 ## Smoke Checks
 
