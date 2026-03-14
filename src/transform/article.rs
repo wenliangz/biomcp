@@ -353,7 +353,7 @@ pub fn from_europepmc_search_result(hit: &EuropePmcResult) -> Option<ArticleSear
         citation_count: parse_citation_count(hit.cited_by_count.as_ref()),
         source: ArticleSource::EuropePmc,
         score: None,
-        is_retracted: is_retracted_publication(hit),
+        is_retracted: Some(is_retracted_publication(hit)),
     })
 }
 
@@ -382,7 +382,7 @@ pub fn from_pubtator_search_result(hit: &PubTatorSearchResult) -> Option<Article
         citation_count: None,
         source: ArticleSource::PubTator,
         score: hit.score,
-        is_retracted: false,
+        is_retracted: None,
     })
 }
 
@@ -678,7 +678,7 @@ mod tests {
         .expect("valid Europe PMC hit");
 
         let row = from_europepmc_search_result(&hit).expect("search row should map");
-        assert!(row.is_retracted);
+        assert_eq!(row.is_retracted, Some(true));
     }
 
     #[test]
@@ -698,6 +698,6 @@ mod tests {
         assert_eq!(row.source, ArticleSource::PubTator);
         assert_eq!(row.score, Some(255.9));
         assert_eq!(row.citation_count, None);
-        assert!(!row.is_retracted);
+        assert_eq!(row.is_retracted, None);
     }
 }

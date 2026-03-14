@@ -328,10 +328,19 @@ fn essie_escape_boolean_expression(value: &str) -> String {
     }
 
     let mut rendered = String::new();
+    let has_leading_unary_operator = operators.len() == terms.len();
     for (idx, term) in terms.iter().enumerate() {
-        if idx > 0 {
+        if idx == 0 && has_leading_unary_operator {
+            rendered.push_str(&operators[0]);
             rendered.push(' ');
-            rendered.push_str(&operators[idx - 1]);
+        } else if idx > 0 {
+            rendered.push(' ');
+            let operator_idx = if has_leading_unary_operator {
+                idx
+            } else {
+                idx - 1
+            };
+            rendered.push_str(&operators[operator_idx]);
             rendered.push(' ');
         }
         rendered.push_str(&quote_essie_literal(term));
@@ -2105,6 +2114,14 @@ mod tests {
         assert_eq!(
             essie_escape_boolean_expression("dMMR OR MSI-H"),
             "\"dMMR\" OR \"MSI\\-H\""
+        );
+    }
+
+    #[test]
+    fn essie_escape_boolean_expression_handles_leading_not() {
+        assert_eq!(
+            essie_escape_boolean_expression("NOT MSI-H"),
+            "NOT \"MSI\\-H\""
         );
     }
 
