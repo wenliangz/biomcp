@@ -70,7 +70,9 @@ jobs:
       - run: uv run pytest tests/ -v --mcp-cmd "biomcp serve"
       - run: uv run mkdocs build --strict
 
-  spec:
+  # Stable PR-blocking executable spec gate. Volatile live-network headings
+  # are excluded here and covered by spec-smoke.yml.
+  spec-stable:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,4 +100,4 @@ jobs:
       # Build the release binary first so make spec exercises target/release/biomcp,
       # not a stale editable install from .venv/bin.
       - run: cargo build --release --locked
-      - run: make spec
+      - run: make spec-pr
