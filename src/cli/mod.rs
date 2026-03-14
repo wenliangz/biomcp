@@ -463,11 +463,20 @@ See also: biomcp list trial")]
         #[arg(short = 'i', long, num_args = 1..)]
         intervention: Vec<String>,
 
-        /// Filter by institution/facility name
+        /// Filter by institution/facility name (text-search mode by default).
+        ///
+        /// Without `--lat`/`--lon`/`--distance`, this uses cheap CTGov
+        /// `query.locn` text-search mode. With all three geo flags, it enters
+        /// geo-verify mode and performs extra per-study location fetches to
+        /// confirm the facility match within the requested distance. Geo-verify
+        /// mode is materially more expensive, especially with `--count-only`.
         #[arg(long, num_args = 1..)]
         facility: Vec<String>,
 
-        /// Filter by phase [values: NA, 1, 1/2, 2, 3, 4, EARLY_PHASE1, PHASE1-PHASE4]
+        /// Filter by phase [values: NA, 1, 1/2, 2, 3, 4, EARLY_PHASE1, PHASE1, PHASE2, PHASE3, PHASE4].
+        ///
+        /// `1/2` matches the ClinicalTrials.gov combined Phase 1/Phase 2 label
+        /// (studies tagged as both phases), not Phase 1 OR Phase 2.
         #[arg(short = 'p', long)]
         phase: Option<String>,
         /// Study type (e.g., interventional, observational)
@@ -478,7 +487,11 @@ See also: biomcp list trial")]
         #[arg(long)]
         age: Option<f32>,
 
-        /// Eligible sex [values: female, male, all]
+        /// Eligible sex filter [values: female, male, all].
+        ///
+        /// `all` (also `any`/`both`) resolves to no sex restriction, so no sex
+        /// filter is sent to ClinicalTrials.gov. Use `female` or `male` to
+        /// apply an actual restriction.
         #[arg(long)]
         sex: Option<String>,
 
@@ -4942,6 +4955,47 @@ mod tests {
         assert!(help.contains("serve-sse"));
         assert!(help.contains("removed"));
         assert!(help.contains("serve-http"));
+    }
+
+    fn render_trial_search_long_help() -> String {
+        let mut command = Cli::command();
+        let search = command
+            .find_subcommand_mut("search")
+            .expect("search subcommand should exist");
+        let trial = search
+            .find_subcommand_mut("trial")
+            .expect("trial subcommand should exist");
+        let mut help = Vec::new();
+        trial
+            .write_long_help(&mut help)
+            .expect("trial help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    #[test]
+    fn trial_facility_help_names_text_search_and_geo_verify_modes() {
+        let help = render_trial_search_long_help();
+
+        assert!(help.contains("text-search mode"));
+        assert!(help.contains("geo-verify mode"));
+        assert!(help.contains("materially more expensive"));
+    }
+
+    #[test]
+    fn trial_phase_help_explains_combined_phase_label() {
+        let help = render_trial_search_long_help();
+
+        assert!(help.contains("1/2"));
+        assert!(help.contains("combined Phase 1/Phase 2 label"));
+        assert!(help.contains("not Phase 1 OR Phase 2"));
+    }
+
+    #[test]
+    fn trial_sex_help_explains_all_means_no_restriction() {
+        let help = render_trial_search_long_help();
+
+        assert!(help.contains("all"));
+        assert!(help.contains("no sex restriction"));
     }
 
     #[test]
