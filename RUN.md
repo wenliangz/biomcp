@@ -25,6 +25,7 @@ The shared target path is `./target/release/biomcp`.
 ```bash
 ./target/release/biomcp health --apis-only
 ./target/release/biomcp get gene BRAF
+./target/release/biomcp get article 22663011 tldr   # requires S2_API_KEY
 ```
 
 Use `docs/user-guide/cli-reference.md` for the full command grammar and entity
@@ -73,6 +74,7 @@ Owned routes:
 |----------|---------|
 | `BIOMCP_CACHE_MODE` | Set `infinite` to replay cached responses locally |
 | `NCBI_API_KEY` | Higher rate limits for PubTator3, PMC OA, and NCBI helpers |
+| `S2_API_KEY` | Optional Semantic Scholar TLDR, citation graph, and recommendations |
 | `OPENFDA_API_KEY` | Higher OpenFDA rate limits |
 | `NCI_API_KEY` | Required for NCI CTS trial queries |
 | `ONCOKB_TOKEN` | Canonical OncoKB production token |
@@ -104,6 +106,8 @@ pushing.
 BIOMCP_BIN=./target/release/biomcp ./scripts/genegpt-demo.sh
 BIOMCP_BIN=./target/release/biomcp ./scripts/geneagent-demo.sh
 ./scripts/contract-smoke.sh --fast
+# Optional keyed article proof:
+./target/release/biomcp article citations 22663011 --limit 3
 ```
 
 Use `analysis/technical/staging-demo.md` for the promotion contract and

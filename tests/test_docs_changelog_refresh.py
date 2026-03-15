@@ -184,6 +184,8 @@ def test_article_guide_documents_federated_search_and_source_flag() -> None:
 
     assert "PubTator3 and Europe PMC" in article_guide
     assert "deduplicated by PMID" in article_guide
+    assert "Semantic Scholar" in article_guide
+    assert "S2_API_KEY" in article_guide
     assert "--source pubtator" in article_guide
     assert "--source europepmc" in article_guide
 
@@ -196,7 +198,9 @@ def test_data_sources_reference_covers_new_gene_and_article_sources() -> None:
     assert "https://dgidb.org/api/graphql" in data_sources
     assert "https://search.clinicalgenome.org" in data_sources
     assert "| Article search & metadata | PubTator3 + Europe PMC |" in data_sources
+    assert "| Article enrichment and graph helpers | Semantic Scholar |" in data_sources
     assert "PubTator3 + Europe PMC for federated search" in data_sources
+    assert "1 request / second" in data_sources
 
 
 def test_cli_and_quick_reference_cover_search_all_and_gene_sections() -> None:

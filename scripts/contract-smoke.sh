@@ -34,6 +34,7 @@ CURL_BASE=(curl -sS -L --max-time 40)
 PASS=0
 FAIL=0
 ONCOKB_TOKEN_VALUE="${ONCOKB_TOKEN:-${ONCOKB_API_TOKEN:-}}"
+S2_API_KEY_VALUE="${S2_API_KEY:-}"
 
 probe_get() {
   local name="$1"
@@ -78,6 +79,39 @@ probe_post_json() {
   tmp=$(mktemp)
   local code
   code=$("${CURL_BASE[@]}" -H "content-type: application/json" -X POST -d "$payload" -o "$tmp" -w "%{http_code}" "$url" || true)
+  local body
+  body=$(cat "$tmp")
+  rm -f "$tmp"
+
+  local ok=1
+  if [[ ! "$code" =~ $code_re ]]; then
+    ok=0
+  fi
+  if [[ -n "$body_re" ]] && ! printf '%s' "$body" | grep -qE "$body_re"; then
+    ok=0
+  fi
+
+  if [[ $ok -eq 1 ]]; then
+    echo "[PASS] $name (code=$code)"
+    PASS=$((PASS + 1))
+  else
+    echo "[FAIL] $name (code=$code)"
+    echo "        url: $url"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+probe_get_with_header() {
+  local name="$1"
+  local code_re="$2"
+  local body_re="$3"
+  local header_value="$4"
+  local url="$5"
+
+  local tmp
+  tmp=$(mktemp)
+  local code
+  code=$("${CURL_BASE[@]}" -H "$header_value" -o "$tmp" -w "%{http_code}" "$url" || true)
   local body
   body=$(cat "$tmp")
   rm -f "$tmp"
@@ -181,6 +215,27 @@ else
   probe_get "InterPro happy" '^200$' 'results|entries|metadata' "https://www.ebi.ac.uk/interpro/api/protein/uniprot/P15056/entry/interpro/?page_size=5"
   probe_get "InterPro edge" '^(200|404)$' '' "https://www.ebi.ac.uk/interpro/api/protein/uniprot/P99999/entry/interpro/?page_size=5"
   probe_get "InterPro invalid endpoint" '^404$' '' "https://www.ebi.ac.uk/interpro/api/protein/uniprot/P15056/not-a-real-resource/"
+fi
+
+# Semantic Scholar (optional)
+if [[ -z "$S2_API_KEY_VALUE" ]]; then
+  echo "[SKIP] Semantic Scholar (set S2_API_KEY to probe optional article enrichment)"
+else
+  probe_get_with_header \
+    "Semantic Scholar detail" \
+    '^200$' \
+    'paperId|title' \
+    "x-api-key: $S2_API_KEY_VALUE" \
+    "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011?fields=paperId,title"
+  if [[ $FAST -ne 1 ]]; then
+    sleep 1
+    probe_get_with_header \
+      "Semantic Scholar citations" \
+      '^200$' \
+      'data' \
+      "x-api-key: $S2_API_KEY_VALUE" \
+      "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011/citations?fields=contexts,intents,isInfluential&limit=1"
+  fi
 fi
 
 # Existing variant-support sources

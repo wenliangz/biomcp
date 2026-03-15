@@ -9,6 +9,9 @@ Article commands provide literature retrieval and annotation-focused enrichment 
 | Article detail | `get article 22663011` | Confirms canonical article card output |
 | Annotation section | `get article ... annotations` | Confirms PubTator integration |
 | Entity helper | `article entities 22663011` | Confirms entity extraction pivot |
+| Semantic Scholar detail | `get article 22663011 tldr` | Confirms optional-key enrichment section |
+| Semantic Scholar graph | `article citations|references 22663011` | Confirms citation graph pivots |
+| Semantic Scholar recommendations | `article recommendations ...` | Confirms related-paper pivots |
 
 ## Searching by Gene
 
@@ -58,6 +61,92 @@ echo "$out" | mustmatch like "Genes:"
 out="$(biomcp article entities 22663011)"
 echo "$out" | mustmatch like "# Entities in PMID 22663011"
 echo "$out" | mustmatch like "## Genes"
+```
+
+## Optional-Key Get Article Path
+
+Ordinary `get article` must still work when Semantic Scholar is unavailable. We
+force the no-key path even on keyed machines and assert that the PubMed card
+still renders without the Semantic Scholar section.
+
+```bash
+out="$(env -u S2_API_KEY biomcp get article 22663011)"
+echo "$out" | mustmatch like "PMID: 22663011"
+echo "$out" | mustmatch like "Journal:"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Semantic Scholar TLDR Section
+
+When `S2_API_KEY` is present, `get article ... tldr` isolates the Semantic
+Scholar enrichment section and exposes stable markers for TLDR and influence
+metrics.
+
+```bash
+out="$(biomcp get article 22663011 tldr)"
+echo "$out" | mustmatch like "# "
+echo "$out" | mustmatch like "Semantic Scholar"
+echo "$out" | mustmatch like "TLDR:"
+echo "$out" | mustmatch like "Influential citations:"
+```
+
+## Semantic Scholar Citations
+
+Citation traversal should expose a graph table with contexts, intents, and the
+influential flag visible to the user.
+
+```bash
+out="$(biomcp article citations 22663011 --limit 3)"
+echo "$out" | mustmatch like "# Citations for"
+echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |"
+```
+
+## Semantic Scholar References
+
+Reference traversal should expose the same visible graph columns.
+
+```bash
+out="$(biomcp article references 22663011 --limit 3)"
+echo "$out" | mustmatch like "# References for"
+echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |"
+```
+
+## Semantic Scholar Recommendations (Single Seed)
+
+Single-seed recommendations should render related papers with stable table
+columns.
+
+```bash
+out="$(biomcp article recommendations 22663011 --limit 3)"
+echo "$out" | mustmatch like "# Recommendations for"
+echo "$out" | mustmatch like "| PMID | Title | Journal | Year |"
+```
+
+## Semantic Scholar Recommendations (Multi Seed)
+
+Multi-paper recommendation requests should accept repeated positive seeds plus a
+negative set and still render the recommendation table.
+
+```bash
+out="$(biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 3)"
+echo "$out" | mustmatch like "# Recommendations for"
+echo "$out" | mustmatch like "| PMID | Title | Journal | Year |"
+echo "$out" | mustmatch like "Negative seeds:"
+```
+
+## Semantic Scholar Requires API Key For Native Helpers
+
+The new Semantic Scholar-native helper commands are explicit optional-key
+surfaces. Without the key they should fail clearly instead of silently falling
+back.
+
+```bash
+status=0
+out="$(env -u S2_API_KEY biomcp article citations 22663011 --limit 3 2>&1)" || status=$?
+test "$status" -ne 0
+echo "$out" | mustmatch like "API key required"
+echo "$out" | mustmatch like "S2_API_KEY"
+echo "$out" | mustmatch like "Semantic Scholar"
 ```
 
 ## Invalid Identifier Rejection

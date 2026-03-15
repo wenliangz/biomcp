@@ -127,6 +127,7 @@ pub fn from_pubtator_document(doc: &PubTatorDocument) -> Article {
         full_text_path: None,
         full_text_note: None,
         annotations: None,
+        semantic_scholar: None,
         pubtator_fallback: false,
     }
 }
@@ -291,6 +292,7 @@ pub fn from_europepmc_result(hit: &EuropePmcResult) -> Article {
         full_text_path: None,
         full_text_note: None,
         annotations: None,
+        semantic_scholar: None,
         pubtator_fallback: false,
     }
 }

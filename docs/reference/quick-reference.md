@@ -44,6 +44,7 @@ biomcp get gene BRAF pathways
 biomcp get variant "BRAF V600E"
 biomcp get variant "BRAF V600E" clinvar
 biomcp get article 22663011
+biomcp get article 22663011 tldr
 biomcp get article 22663011 fulltext
 biomcp get trial NCT02576665
 biomcp get trial NCT02576665 eligibility
@@ -98,6 +99,8 @@ biomcp pathway articles R-HSA-5673001 --limit 3
 biomcp pathway trials R-HSA-5673001 --limit 3
 biomcp protein structures P15056
 biomcp article entities 22663011
+biomcp article citations 22663011 --limit 3
+biomcp article recommendations 22663011 --limit 3
 ```
 
 ## Study commands

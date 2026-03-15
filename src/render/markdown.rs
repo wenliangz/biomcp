@@ -8,7 +8,10 @@ use crate::entities::adverse_event::{
     AdverseEvent, AdverseEventCountBucket, AdverseEventSearchResult, AdverseEventSearchSummary,
     DeviceEvent, DeviceEventSearchResult, RecallSearchResult,
 };
-use crate::entities::article::{Article, ArticleAnnotations, ArticleSearchResult, ArticleSource};
+use crate::entities::article::{
+    Article, ArticleAnnotations, ArticleGraphResult, ArticleRecommendationsResult,
+    ArticleRelatedPaper, ArticleSearchResult, ArticleSource,
+};
 use crate::entities::disease::{Disease, DiseaseSearchResult, PhenotypeSearchResult};
 use crate::entities::drug::{Drug, DrugSearchResult};
 use crate::entities::gene::{Gene, GeneSearchResult};
@@ -611,6 +614,48 @@ fn format_related_block(commands: Vec<String>) -> String {
     out
 }
 
+fn markdown_cell(value: &str) -> String {
+    let value = value.replace(['\n', '\r'], " ").replace('|', "\\|");
+    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if value.is_empty() {
+        "-".to_string()
+    } else {
+        value
+    }
+}
+
+fn article_related_id(paper: &ArticleRelatedPaper) -> String {
+    paper
+        .pmid
+        .as_deref()
+        .or(paper.doi.as_deref())
+        .or(paper.arxiv_id.as_deref())
+        .or(paper.paper_id.as_deref())
+        .map(markdown_cell)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn article_related_label(paper: &ArticleRelatedPaper) -> String {
+    paper
+        .pmid
+        .as_deref()
+        .map(|pmid| format!("PMID {pmid}"))
+        .or_else(|| paper.doi.as_deref().map(|doi| format!("DOI {doi}")))
+        .or_else(|| {
+            paper
+                .arxiv_id
+                .as_deref()
+                .map(|arxiv| format!("arXiv {arxiv}"))
+        })
+        .or_else(|| {
+            paper
+                .paper_id
+                .as_deref()
+                .map(|paper_id| format!("paper {paper_id}"))
+        })
+        .unwrap_or_else(|| markdown_cell(&paper.title))
+}
+
 fn sections_for(requested: &[String], available: &[&str]) -> Vec<String> {
     if has_all_section(requested) {
         return Vec::new();
@@ -787,6 +832,9 @@ pub(crate) fn related_article(article: &Article) -> Vec<String> {
         .filter(|v| !v.is_empty())
     {
         out.push(format!("biomcp article entities {pmid}"));
+        out.push(format!("biomcp article citations {pmid} --limit 3"));
+        out.push(format!("biomcp article references {pmid} --limit 3"));
+        out.push(format!("biomcp article recommendations {pmid} --limit 3"));
     }
     out
 }
@@ -988,6 +1036,7 @@ pub fn article_markdown(
     let has_requested = |name: &str| requested.iter().any(|s| s.eq_ignore_ascii_case(name));
     let show_annotations_section = include_all || has_requested("annotations");
     let show_fulltext_section = include_all || has_requested("fulltext");
+    let show_semantic_scholar_section = !section_only || include_all || has_requested("tldr");
     let article_label = if article.title.trim().is_empty() {
         "Article"
     } else {
@@ -1010,9 +1059,11 @@ pub fn article_markdown(
         full_text_path => &article.full_text_path,
         full_text_note => &article.full_text_note,
         annotations => &article.annotations,
+        semantic_scholar => &article.semantic_scholar,
         pubtator_fallback => article.pubtator_fallback,
         show_annotations_section => show_annotations_section,
         show_fulltext_section => show_fulltext_section,
+        show_semantic_scholar_section => show_semantic_scholar_section,
         sections_block => format_sections_block("article", article.pmid.as_deref().or(article.pmcid.as_deref()).or(article.doi.as_deref()).unwrap_or(""), sections_article(article, requested_sections)),
         related_block => format_related_block(related_article(article)),
     })?;
@@ -1108,6 +1159,95 @@ pub fn article_entities_markdown(
         chemicals => chemicals,
         mutations => mutations,
     })?)
+}
+
+pub fn article_graph_markdown(
+    kind: &str,
+    result: &ArticleGraphResult,
+) -> Result<String, BioMcpError> {
+    let mut out = format!(
+        "# {} for {}\n\n",
+        markdown_cell(kind),
+        markdown_cell(&article_related_label(&result.article))
+    );
+    out.push_str("| PMID | Title | Intents | Influential | Context |\n");
+    out.push_str("| --- | --- | --- | --- | --- |\n");
+    if result.edges.is_empty() {
+        out.push_str("| - | - | - | - | No related papers returned |\n");
+        return Ok(out);
+    }
+    for edge in &result.edges {
+        let intents = if edge.intents.is_empty() {
+            "-".to_string()
+        } else {
+            markdown_cell(&edge.intents.join(", "))
+        };
+        let context = edge
+            .contexts
+            .first()
+            .map(|value| markdown_cell(value))
+            .unwrap_or_else(|| "-".to_string());
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n",
+            article_related_id(&edge.paper),
+            markdown_cell(&edge.paper.title),
+            intents,
+            if edge.is_influential { "yes" } else { "no" },
+            context,
+        ));
+    }
+    Ok(out)
+}
+
+pub fn article_recommendations_markdown(
+    result: &ArticleRecommendationsResult,
+) -> Result<String, BioMcpError> {
+    let positives = if result.positive_seeds.is_empty() {
+        "article".to_string()
+    } else {
+        result
+            .positive_seeds
+            .iter()
+            .map(article_related_label)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut out = format!("# Recommendations for {}\n\n", markdown_cell(&positives));
+    if !result.negative_seeds.is_empty() {
+        let negatives = result
+            .negative_seeds
+            .iter()
+            .map(article_related_label)
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "Negative seeds: {}\n\n",
+            markdown_cell(&negatives)
+        ));
+    }
+    out.push_str("| PMID | Title | Journal | Year |\n");
+    out.push_str("| --- | --- | --- | --- |\n");
+    if result.recommendations.is_empty() {
+        out.push_str("| - | No recommendations returned | - | - |\n");
+        return Ok(out);
+    }
+    for paper in &result.recommendations {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            article_related_id(paper),
+            markdown_cell(&paper.title),
+            paper
+                .journal
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            paper
+                .year
+                .map(|year| year.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+        ));
+    }
+    Ok(out)
 }
 
 pub fn article_search_markdown(
@@ -2640,12 +2780,93 @@ mod tests {
                 chemicals: Vec::new(),
                 mutations: Vec::new(),
             }),
+            semantic_scholar: None,
             pubtator_fallback: false,
         };
 
         let related = related_article(&article);
         assert!(related.contains(&"biomcp article entities 22663011".to_string()));
+        assert!(related.contains(&"biomcp article citations 22663011 --limit 3".to_string()));
+        assert!(related.contains(&"biomcp article references 22663011 --limit 3".to_string()));
+        assert!(related.contains(&"biomcp article recommendations 22663011 --limit 3".to_string()));
         assert!(!related.iter().any(|cmd| cmd.contains("biomcp get article")));
+    }
+
+    #[test]
+    fn article_markdown_renders_semantic_scholar_section() {
+        let article = Article {
+            pmid: Some("22663011".to_string()),
+            pmcid: None,
+            doi: Some("10.1000/example".to_string()),
+            title: "Example".to_string(),
+            authors: Vec::new(),
+            journal: Some("Example Journal".to_string()),
+            date: Some("2024-01-01".to_string()),
+            citation_count: Some(12),
+            publication_type: None,
+            open_access: Some(true),
+            abstract_text: None,
+            full_text_path: None,
+            full_text_note: None,
+            annotations: None,
+            semantic_scholar: Some(crate::entities::article::ArticleSemanticScholar {
+                paper_id: Some("paper-1".to_string()),
+                tldr: Some("A concise summary.".to_string()),
+                citation_count: Some(20),
+                influential_citation_count: Some(4),
+                reference_count: Some(10),
+                is_open_access: Some(true),
+                open_access_pdf: Some(crate::entities::article::ArticleSemanticScholarPdf {
+                    url: "https://example.org/paper.pdf".to_string(),
+                    status: Some("GREEN".to_string()),
+                    license: Some("CC-BY".to_string()),
+                }),
+            }),
+            pubtator_fallback: false,
+        };
+
+        let markdown =
+            article_markdown(&article, &["tldr".to_string()]).expect("markdown should render");
+        assert!(markdown.contains("## Semantic Scholar"));
+        assert!(markdown.contains("TLDR: A concise summary."));
+        assert!(markdown.contains("Influential citations: 4"));
+        assert!(markdown.contains("Open-access PDF: https://example.org/paper.pdf"));
+    }
+
+    #[test]
+    fn article_graph_markdown_renders_expected_table_headers() {
+        let result = crate::entities::article::ArticleGraphResult {
+            article: crate::entities::article::ArticleRelatedPaper {
+                paper_id: Some("paper-1".to_string()),
+                pmid: Some("22663011".to_string()),
+                doi: None,
+                arxiv_id: None,
+                title: "Seed".to_string(),
+                journal: None,
+                year: Some(2012),
+            },
+            edges: vec![crate::entities::article::ArticleGraphEdge {
+                paper: crate::entities::article::ArticleRelatedPaper {
+                    paper_id: Some("paper-2".to_string()),
+                    pmid: Some("24200969".to_string()),
+                    doi: None,
+                    arxiv_id: None,
+                    title: "Related paper".to_string(),
+                    journal: Some("Nature".to_string()),
+                    year: Some(2014),
+                },
+                intents: vec!["Background".to_string()],
+                contexts: vec!["Important supporting context".to_string()],
+                is_influential: true,
+            }],
+        };
+
+        let markdown = article_graph_markdown("Citations", &result).expect("graph markdown");
+        assert!(markdown.contains("# Citations for PMID 22663011"));
+        assert!(markdown.contains("| PMID | Title | Intents | Influential | Context |"));
+        assert!(markdown.contains(
+            "| 24200969 | Related paper | Background | yes | Important supporting context |"
+        ));
     }
 
     #[test]

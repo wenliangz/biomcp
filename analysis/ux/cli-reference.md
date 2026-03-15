@@ -39,6 +39,7 @@ biomcp get gene BRAF civic interactions   # + multiple sections
 biomcp get gene BRAF all                  # everything
 
 biomcp get variant "BRAF V600E" clinvar population conservation
+biomcp get article 22663011 tldr
 biomcp get drug pembrolizumab label targets civic approvals
 biomcp get disease "Lynch syndrome" genes phenotypes variants
 biomcp get trial NCT02576665 eligibility locations outcomes
@@ -81,6 +82,9 @@ biomcp protein structures P15056
 
 # Article pivots
 biomcp article entities 22663011
+biomcp article citations 22663011 --limit 3
+biomcp article references 22663011 --limit 3
+biomcp article recommendations 22663011 --limit 3
 ```
 
 ## `search all` Contract
