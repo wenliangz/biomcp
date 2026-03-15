@@ -47,6 +47,7 @@ biomcp get trial NCT02576665 eligibility
 
 ## What to do next
 
+- Read the [cross-entity pivot guide](../how-to/cross-entity-pivots.md).
 - Read [progressive disclosure](../concepts/progressive-disclosure.md).
 - Open an entity guide in `docs/user-guide/`.
 - Configure optional keys in [API keys](api-keys.md).

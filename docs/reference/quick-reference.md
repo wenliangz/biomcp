@@ -236,6 +236,7 @@ Use these with `biomcp search variant --consequence <value>`.
 
 ## Related references
 
+- [Cross-Entity Pivot Guide](../how-to/cross-entity-pivots.md)
 - [CLI Reference](../user-guide/cli-reference.md)
 - [Data Sources](data-sources.md)
 - [Troubleshooting](../troubleshooting.md)

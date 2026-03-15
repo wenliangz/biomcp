@@ -35,6 +35,7 @@ nav:
       - Phenotype: user-guide/phenotype.md
   - How-To:
       - Annotate Variants: how-to/annotate-variants.md
+      - Cross-Entity Pivots: how-to/cross-entity-pivots.md
       - Find Articles: how-to/find-articles.md
       - Find Trials: how-to/find-trials.md
       - Predict Effects: how-to/predict-effects.md
