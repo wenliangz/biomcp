@@ -80,7 +80,7 @@ get <entity> <id> [sections] → focused detail
 <entity> <helper> <id>       → cross-entity pivots
 enrich <GENE1,GENE2,...>     → gene-set enrichment
 batch <entity> <id1,id2,...> → parallel gets
-search all [slot filters]    → unified fan-out across all entities
+search all [slot filters]    → counts-first cross-entity orientation
 ```
 
 ## Entities and sources

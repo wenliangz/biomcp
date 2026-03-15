@@ -41,9 +41,10 @@ def test_readme_teaches_search_all_as_unified_entry_point() -> None:
     )
 
     assert "batch <entity> <id1,id2,...> → parallel gets" in grammar
-    assert "search all [slot filters]    → unified fan-out across all entities" in grammar
+    assert "search all [slot filters]    → counts-first cross-entity orientation" in grammar
+    assert "across all entities" not in grammar
     assert grammar.index("batch <entity> <id1,id2,...> → parallel gets") < grammar.index(
-        "search all [slot filters]    → unified fan-out across all entities"
+        "search all [slot filters]    → counts-first cross-entity orientation"
     )
 
 
@@ -70,9 +71,10 @@ def test_docs_index_teaches_search_all_as_unified_entry_point() -> None:
     )
 
     assert "batch <entity> <id1,id2,...> → parallel gets" in grammar
-    assert "search all [slot filters]    → unified fan-out across all entities" in grammar
+    assert "search all [slot filters]    → counts-first cross-entity orientation" in grammar
+    assert "across all entities" not in grammar
     assert grammar.index("batch <entity> <id1,id2,...> → parallel gets") < grammar.index(
-        "search all [slot filters]    → unified fan-out across all entities"
+        "search all [slot filters]    → counts-first cross-entity orientation"
     )
 
 
