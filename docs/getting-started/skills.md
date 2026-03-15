@@ -14,6 +14,14 @@ biomcp skill install ~/.claude
 you want the current BioMCP workflow guidance without installing anything into
 an agent directory.
 
+## Learn the workflows
+
+The embedded guide teaches three core deterministic workflows. You can read
+them directly in the public docs without installing into an agent directory:
+
+- [Guide Workflows](../how-to/guide-workflows.md) - variant pathogenicity,
+  drug safety, and broad gene-disease investigation
+
 ## Install into an agent directory
 
 Install the embedded `skills/` tree into your agent directory:
