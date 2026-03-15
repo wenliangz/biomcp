@@ -595,6 +595,10 @@ fn pubtator_sort(sort: ArticleSort) -> Option<&'static str> {
     }
 }
 
+fn pubtator_source_can_satisfy(filters: &ArticleSearchFilters) -> bool {
+    !filters.exclude_retracted
+}
+
 fn parse_row_date(value: Option<&str>) -> Option<String> {
     let value = value.map(str::trim).filter(|v| !v.is_empty())?;
     let truncated = value.get(0..10).unwrap_or(value);
@@ -1313,6 +1317,10 @@ async fn search_pubtator_page(
     limit: usize,
     offset: usize,
 ) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
+    if !pubtator_source_can_satisfy(filters) {
+        return Ok(SearchPage::offset(Vec::new(), Some(0)));
+    }
+
     let pubtator = PubTatorClient::new()?;
     let query = build_pubtator_query(filters, &pubtator).await?;
     let sort = pubtator_sort(filters.sort);
@@ -1986,6 +1994,18 @@ mod tests {
         let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
             .expect_err("planner should reject strict-only filter on pubtator");
         assert!(err.to_string().contains("--type"));
+    }
+
+    #[test]
+    fn pubtator_source_cannot_satisfy_exclude_retracted() {
+        let include_filters = empty_filters();
+        let exclude_filters = ArticleSearchFilters {
+            exclude_retracted: true,
+            ..empty_filters()
+        };
+
+        assert!(pubtator_source_can_satisfy(&include_filters));
+        assert!(!pubtator_source_can_satisfy(&exclude_filters));
     }
 
     #[test]
