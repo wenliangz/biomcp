@@ -104,6 +104,9 @@ search all [slot filters]    → counts-first cross-entity orientation
 
 Pivot between related entities without rebuilding filters:
 
+See the [cross-entity pivot guide](how-to/cross-entity-pivots.md) for when to
+use a helper versus a fresh search.
+
 ```bash
 biomcp variant trials "BRAF V600E" --limit 5
 biomcp variant articles "BRAF V600E"

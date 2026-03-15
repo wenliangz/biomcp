@@ -35,12 +35,14 @@ nav:
       - Phenotype: user-guide/phenotype.md
   - How-To:
       - Annotate Variants: how-to/annotate-variants.md
+      - Cross-Entity Pivots: how-to/cross-entity-pivots.md
       - Find Articles: how-to/find-articles.md
       - Find Trials: how-to/find-trials.md
       - Predict Effects: how-to/predict-effects.md
       - Reproduce Papers: how-to/reproduce-papers.md
       - Search All Workflow: how-to/search-all-workflow.md
       - Skill Validation: how-to/skill-validation.md
+      - Guide Workflows: how-to/guide-workflows.md
   - Study Charts:
       - Overview: charts/index.md
       - Bar: charts/bar.md
