@@ -41,9 +41,10 @@ def test_readme_teaches_search_all_as_unified_entry_point() -> None:
     )
 
     assert "batch <entity> <id1,id2,...> → parallel gets" in grammar
-    assert "search all [slot filters]    → unified fan-out across all entities" in grammar
+    assert "search all [slot filters]    → counts-first cross-entity orientation" in grammar
+    assert "across all entities" not in grammar
     assert grammar.index("batch <entity> <id1,id2,...> → parallel gets") < grammar.index(
-        "search all [slot filters]    → unified fan-out across all entities"
+        "search all [slot filters]    → counts-first cross-entity orientation"
     )
 
 
@@ -70,7 +71,108 @@ def test_docs_index_teaches_search_all_as_unified_entry_point() -> None:
     )
 
     assert "batch <entity> <id1,id2,...> → parallel gets" in grammar
-    assert "search all [slot filters]    → unified fan-out across all entities" in grammar
+    assert "search all [slot filters]    → counts-first cross-entity orientation" in grammar
+    assert "across all entities" not in grammar
     assert grammar.index("batch <entity> <id1,id2,...> → parallel gets") < grammar.index(
-        "search all [slot filters]    → unified fan-out across all entities"
+        "search all [slot filters]    → counts-first cross-entity orientation"
     )
+
+
+def test_search_all_workflow_guide_has_required_sections_and_examples() -> None:
+    guide = _read("docs/how-to/search-all-workflow.md")
+    lower = guide.lower()
+
+    assert "# how to:" in lower
+    assert "## start with typed slots" in lower
+    assert "## use `--counts-only` for a low-noise orientation pass" in lower
+    assert "## narrow the next command intentionally" in lower
+    assert "## positional compatibility syntax" in lower
+
+    assert "biomcp search all --gene BRAF --disease melanoma" in guide
+    assert "biomcp search all --drug pembrolizumab" in guide
+    assert 'biomcp search all --keyword "checkpoint inhibitor"' in guide
+    assert 'biomcp search all --variant "BRAF V600E"' in guide
+    assert "biomcp search all --gene BRAF --counts-only" in guide
+
+
+def test_search_all_workflow_guide_frames_positional_as_keyword_compatibility() -> None:
+    guide = _read("docs/how-to/search-all-workflow.md")
+    compat = _markdown_section_block(
+        guide,
+        "## Positional compatibility syntax",
+        "\n## Related",
+    )
+
+    assert "biomcp search all BRAF" in compat
+    assert "biomcp search all --keyword BRAF" in compat
+    assert "--gene BRAF" not in compat
+
+
+def test_search_all_workflow_guide_teaches_typed_slots_before_compatibility() -> None:
+    guide = _read("docs/how-to/search-all-workflow.md")
+
+    assert guide.index("## Start with typed slots") < guide.index(
+        "## Positional compatibility syntax"
+    )
+
+
+def test_cli_reference_links_search_all_workflow_guide_from_cross_entity_block() -> None:
+    cli_reference = _read("docs/user-guide/cli-reference.md")
+    all_block = _markdown_section_block(
+        cli_reference,
+        "### All (cross-entity)",
+        "\n### Gene",
+    )
+
+    assert (
+        "[Search All Workflow](../how-to/search-all-workflow.md)"
+        in all_block
+    )
+
+
+def test_docs_index_links_search_all_workflow_guide_from_documentation_section() -> None:
+    docs_index = _read("docs/index.md")
+    documentation = _markdown_section_block(
+        docs_index,
+        "## Documentation",
+        "\n## Citation",
+    )
+
+    assert "[Search All Workflow](how-to/search-all-workflow.md)" in documentation
+
+
+def test_readme_links_search_all_workflow_guide_from_documentation_section() -> None:
+    readme = _read("README.md")
+    documentation = _markdown_section_block(
+        readme,
+        "## Documentation",
+        "\n## Citation",
+    )
+
+    assert "[Search All Workflow](docs/how-to/search-all-workflow.md)" in documentation
+
+
+def test_quick_reference_links_search_all_workflow_guide_near_search_all_examples() -> None:
+    quick_reference = _read("docs/reference/quick-reference.md")
+    common_searches = _markdown_section_block(
+        quick_reference,
+        "## Common searches",
+        "\n## Output modes and discovery commands",
+    )
+
+    assert "biomcp search all --gene BRAF --disease melanoma" in common_searches
+    assert (
+        "[Search All Workflow](../how-to/search-all-workflow.md)"
+        in common_searches
+    )
+
+
+def test_mkdocs_nav_contains_search_all_workflow_under_how_to() -> None:
+    mkdocs = _read("mkdocs.yml")
+    how_to = _markdown_section_block(
+        mkdocs,
+        "  - How-To:\n",
+        "  - Study Charts:\n",
+    )
+
+    assert "      - Search All Workflow: how-to/search-all-workflow.md" in how_to

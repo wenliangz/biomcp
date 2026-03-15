@@ -84,7 +84,7 @@ get <entity> <id> [sections] → focused detail
 <entity> <helper> <id>       → cross-entity pivots
 enrich <GENE1,GENE2,...>     → gene-set enrichment
 batch <entity> <id1,id2,...> → parallel gets
-search all [slot filters]    → unified fan-out across all entities
+search all [slot filters]    → counts-first cross-entity orientation
 ```
 
 ## Entities and sources
@@ -227,6 +227,7 @@ biomcp uninstall        # remove biomcp from ~/.local/bin
 Full documentation at [biomcp.org](https://biomcp.org/).
 
 - [Getting Started](docs/getting-started/installation.md)
+- [Search All Workflow](docs/how-to/search-all-workflow.md)
 - [Cross-Entity Pivot Guide](docs/how-to/cross-entity-pivots.md)
 - [Data Sources](docs/reference/data-sources.md)
 - [Quick Reference](docs/reference/quick-reference.md)
