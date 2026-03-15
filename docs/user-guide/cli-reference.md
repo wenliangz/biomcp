@@ -178,7 +178,12 @@ biomcp get pgx warfarin annotations
 ```bash
 biomcp get article 22663011
 biomcp get article 22663011 fulltext
+biomcp get article 22663011 tldr
 ```
+
+`S2_API_KEY` is optional. It unlocks `get article ... tldr` plus the explicit
+`article citations|references|recommendations` helpers; `search article`
+remains PubTator3 + Europe PMC.
 
 ### Trial
 

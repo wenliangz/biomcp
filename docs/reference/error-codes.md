@@ -25,6 +25,7 @@ This reference maps each `BioMcpError` variant to likely causes and practical re
 | Variable | Used by |
 |----------|---------|
 | `ALPHAGENOME_API_KEY` | Variant `predict` section |
+| `S2_API_KEY` | Semantic Scholar article TLDR/citation/reference/recommendation helpers |
 | `NCI_API_KEY` | Trial source `--source nci` |
 | `ONCOKB_TOKEN` | Production OncoKB enrichment |
 | `OPENFDA_API_KEY` | Optional OpenFDA quota stability |

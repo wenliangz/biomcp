@@ -93,7 +93,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 |--------|---------|---------|
 | gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, CIViC | `biomcp get gene BRAF pathways` |
 | variant | MyVariant.info, ClinVar, gnomAD, CIViC, OncoKB, cBioPortal, GWAS Catalog, AlphaGenome | `biomcp get variant "BRAF V600E" clinvar` |
-| article | PubMed, PubTator3, Europe PMC | `biomcp search article -g BRAF --limit 5` |
+| article | PubMed, PubTator3, Europe PMC, Semantic Scholar (optional) | `biomcp search article -g BRAF --limit 5` |
 | trial | ClinicalTrials.gov, NCI CTS API | `biomcp search trial -c melanoma -s recruiting` |
 | drug | MyChem.info, ChEMBL, OpenTargets, Drugs\@FDA, CIViC | `biomcp get drug pembrolizumab targets` |
 | disease | Monarch Initiative, MONDO, CIViC, OpenTargets | `biomcp get disease "Lynch syndrome" genes` |
@@ -128,6 +128,8 @@ biomcp pathway articles R-HSA-5673001
 biomcp pathway trials R-HSA-5673001
 biomcp protein structures P15056
 biomcp article entities 22663011
+biomcp article citations 22663011 --limit 3
+biomcp article recommendations 22663011 --limit 3
 ```
 
 ## Gene-set enrichment
@@ -147,6 +149,7 @@ biomcp get gene BRAF civic interactions # multiple sections
 biomcp get gene BRAF all                # everything
 
 biomcp get variant "BRAF V600E" clinvar population conservation
+biomcp get article 22663011 tldr
 biomcp get drug pembrolizumab label targets civic approvals
 biomcp get disease "Lynch syndrome" genes phenotypes variants
 biomcp get trial NCT02576665 eligibility locations outcomes
@@ -158,11 +161,15 @@ Most commands work without credentials. Optional keys improve rate limits:
 
 ```bash
 export NCBI_API_KEY="..."      # PubTator, PMC OA, NCBI ID converter
+export S2_API_KEY="..."        # optional Semantic Scholar TLDR/citation graph/recommendations
 export OPENFDA_API_KEY="..."   # OpenFDA rate limits
 export NCI_API_KEY="..."       # NCI CTS trial search (--source nci)
 export ONCOKB_TOKEN="..."      # OncoKB variant helper
 export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction
 ```
+
+`search article` still uses PubTator3 + Europe PMC. `S2_API_KEY` only unlocks
+optional article enrichment and explicit Semantic Scholar helper commands.
 
 ## Multi-worker deployment
 

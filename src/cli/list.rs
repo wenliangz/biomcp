@@ -167,10 +167,14 @@ fn list_article() -> String {
 ## Commands
 
 - `get article <id>` - get by PMID/PMCID/DOI
+- `get article <id> tldr` - Semantic Scholar TLDR/influence section (`S2_API_KEY`)
 - `get article <id> annotations` - PubTator entity mentions
 - `get article <id> fulltext` - download/cache full text
 - `get article <id> all` - include all article sections
 - `article entities <pmid> --limit <N>` - annotated entities with next commands
+- `article citations <id> --limit <N>` - citation graph with contexts/intents (`S2_API_KEY`)
+- `article references <id> --limit <N>` - reference graph with contexts/intents (`S2_API_KEY`)
+- `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` - related papers (`S2_API_KEY`)
 
 ## Search
 
@@ -193,6 +197,8 @@ fn list_article() -> String {
 ## Notes
 
 - Set `NCBI_API_KEY` to increase throughput for NCBI-backed article enrichment.
+- Set `S2_API_KEY` to unlock optional Semantic Scholar TLDR, citation graph, and recommendation helpers.
+- `search article` remains PubTator3 + Europe PMC only; Semantic Scholar is enrichment/navigation, not search fan-out.
 "#
     .to_string()
 }

@@ -44,6 +44,18 @@ export NCBI_API_KEY="..."
 biomcp search article -g BRAF --limit 5
 ```
 
+### `S2_API_KEY`
+
+Unlocks optional Semantic Scholar article enrichment and navigation. Use it for
+`get article ... tldr`, `article citations`, `article references`, and
+`article recommendations`.
+
+```bash
+export S2_API_KEY="..."
+biomcp get article 22663011 tldr
+biomcp article citations 22663011 --limit 3
+```
+
 ### `OPENFDA_API_KEY`
 
 Improves OpenFDA rate limits for drug safety lookups.
@@ -59,3 +71,4 @@ biomcp search adverse-event --drug pembrolizumab --limit 5
 - Do not commit secrets into source control.
 - Set keys in the same environment used by your MCP client.
 - Rotate keys when sharing machines or CI runners.
+- `S2_API_KEY` is optional; when absent, `search article` and ordinary `get article` still work.

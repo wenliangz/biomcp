@@ -312,6 +312,8 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "GET /readyz" in staging_demo
     assert "GET /" in staging_demo
     assert "tests/test_mcp_http_transport.py" in staging_demo
+    assert "S2_API_KEY" in staging_demo
+    assert "article citations 22663011 --limit 3" in staging_demo
 
     assert "# BioMCP Runbook" in runbook
     assert "cargo build --release --locked" in runbook
@@ -325,6 +327,8 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "tests/test_mcp_http_transport.py" in runbook
     assert "make spec" in runbook
     assert "make test-contracts" in runbook
+    assert "S2_API_KEY" in runbook
+    assert "./target/release/biomcp article citations 22663011 --limit 3" in runbook
     assert (
         '`make test-contracts` runs `cargo build --release --locked`, '
         '`uv sync --extra dev`, `pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, '
@@ -336,6 +340,8 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
 
     assert "analysis/technical/staging-demo.md" in technical
     assert "RUN.md" in technical
+    assert "S2_API_KEY" in technical
+    assert "Semantic Scholar article enrichment/navigation" in technical
     assert "No `RUN.md` or staging-demo runbook exists" not in technical
 
     assert "current BioMCP operator command layer" in scripts_readme
@@ -345,10 +351,14 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "# BioMCP Source Contract Probes" in source_contracts
     assert "source-facing API contract probes" in source_contracts
     assert "ONCOKB_TOKEN" in source_contracts
+    assert "Semantic Scholar" in source_contracts
+    assert "S2_API_KEY" in source_contracts
     assert "091 expansion scope" not in source_contracts
 
     assert "ONCOKB_TOKEN" in contract_smoke
     assert "ONCOKB_API_TOKEN" in contract_smoke
+    assert "S2_API_KEY" in contract_smoke
+    assert "Semantic Scholar" in contract_smoke
     assert "set ONCOKB_TOKEN to enable" in contract_smoke
 
     for demo_script in (genegpt_demo, geneagent_demo):

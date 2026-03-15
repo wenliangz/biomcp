@@ -70,6 +70,12 @@ impl RateLimiter {
                 "https://api.pharmgkb.org/v1",
                 Duration::from_millis(500),
             ),
+            policy(
+                "semantic-scholar",
+                "BIOMCP_S2_BASE",
+                "https://api.semanticscholar.org",
+                Duration::from_secs(1),
+            ),
         ];
         Self::new(policies, Duration::from_millis(100))
     }
@@ -278,5 +284,26 @@ mod tests {
     fn pubtator_interval_uses_key_aware_values() {
         assert_eq!(pubtator_min_interval(false), Duration::from_millis(334));
         assert_eq!(pubtator_min_interval(true), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn semantic_scholar_policy_uses_one_second_interval() {
+        let limiter = RateLimiter::from_env();
+        let policy = limiter
+            .policies
+            .iter()
+            .find(|policy| policy.key == "semantic-scholar")
+            .expect("semantic-scholar policy should be registered");
+        assert_eq!(policy.min_interval, Duration::from_secs(1));
+        assert_eq!(policy.prefix.as_ref(), "https://api.semanticscholar.org");
+    }
+
+    #[test]
+    fn semantic_scholar_urls_resolve_to_semantic_scholar_policy() {
+        let limiter = RateLimiter::from_env();
+        let key = limiter
+            .resolve_key_for_str("https://api.semanticscholar.org/graph/v1/paper/PMID%3A22663011")
+            .expect("semantic scholar URL should parse");
+        assert_eq!(key, "policy:semantic-scholar");
     }
 }

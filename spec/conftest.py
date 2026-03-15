@@ -13,9 +13,21 @@ OPENFDA_SPEC_NODEIDS = {
     "spec/12-search-positionals.md::Adverse-event Positional Query",
 }
 
+S2_SPEC_NODEIDS = {
+    "spec/06-article.md::Semantic Scholar TLDR Section",
+    "spec/06-article.md::Semantic Scholar Citations",
+    "spec/06-article.md::Semantic Scholar References",
+    "spec/06-article.md::Semantic Scholar Recommendations (Single Seed)",
+    "spec/06-article.md::Semantic Scholar Recommendations (Multi Seed)",
+}
+
 
 def _has_openfda_api_key() -> bool:
     return bool(os.environ.get("OPENFDA_API_KEY", "").strip())
+
+
+def _has_s2_api_key() -> bool:
+    return bool(os.environ.get("S2_API_KEY", "").strip())
 
 
 def pytest_collection_modifyitems(
@@ -31,8 +43,18 @@ def pytest_collection_modifyitems(
             )
         )
 
+    s2_skip = None
+    if not _has_s2_api_key():
+        s2_skip = pytest.mark.skip(
+            reason=(
+                "requires S2_API_KEY for Semantic Scholar article enrichment/live-spec coverage"
+            )
+        )
+
     for item in items:
         if openfda_skip and any(
             item.nodeid.startswith(nodeid) for nodeid in OPENFDA_SPEC_NODEIDS
         ):
             item.add_marker(openfda_skip)
+        if s2_skip and any(item.nodeid.startswith(nodeid) for nodeid in S2_SPEC_NODEIDS):
+            item.add_marker(s2_skip)

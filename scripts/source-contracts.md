@@ -157,6 +157,22 @@ curl -sS -L "https://www.ebi.ac.uk/interpro/api/protein/uniprot/P99999/entry/int
 curl -sS -L "https://www.ebi.ac.uk/interpro/api/protein/uniprot/P15056/not-a-real-resource/"
 ```
 
+## Semantic Scholar (optional, requires `S2_API_KEY`)
+
+Keep this probe bounded because the approved key tier is 1 request / second.
+Skip it cleanly when `S2_API_KEY` is absent.
+
+- Happy detail
+```bash
+curl -sS -L "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011?fields=paperId,title" \
+  -H "x-api-key: $S2_API_KEY"
+```
+- Happy citation graph
+```bash
+curl -sS -L "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011/citations?fields=contexts,intents,isInfluential&limit=1" \
+  -H "x-api-key: $S2_API_KEY"
+```
+
 ## ClinicalTrials.gov (existing variant-support source)
 
 - Happy

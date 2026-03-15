@@ -965,12 +965,13 @@ See also: biomcp list gene")]
 EXAMPLES:
   biomcp get article 22663011
   biomcp get article 22663011 annotations
+  biomcp get article 22663011 tldr
 
 See also: biomcp list article")]
     Article {
         /// PMID (e.g., 22663011), PMCID (e.g., PMC9984800), or DOI (e.g., 10.1056/NEJMoa1203421)
         id: String,
-        /// Sections to include (annotations, fulltext, all)
+        /// Sections to include (annotations, fulltext, tldr, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
@@ -1272,6 +1273,55 @@ See also: biomcp list article")]
         /// PMID (e.g., 22663011)
         pmid: String,
         /// Maximum entities per category (default: 10)
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
+    /// Traverse citing papers with Semantic Scholar contexts and intents
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp article citations 22663011 --limit 5
+  biomcp article citations PMC9984800 --limit 5
+
+Requires: S2_API_KEY
+See also: biomcp list article")]
+    Citations {
+        /// PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID
+        id: String,
+        /// Maximum rows (default: 10)
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
+    /// Traverse referenced papers with Semantic Scholar contexts and intents
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp article references 22663011 --limit 5
+  biomcp article references 10.1056/NEJMoa1203421 --limit 5
+
+Requires: S2_API_KEY
+See also: biomcp list article")]
+    References {
+        /// PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID
+        id: String,
+        /// Maximum rows (default: 10)
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
+    /// Find related papers from one or more positive seeds
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp article recommendations 22663011 --limit 5
+  biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 5
+
+Requires: S2_API_KEY
+See also: biomcp list article")]
+    Recommendations {
+        /// One or more positive seeds (PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID)
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+        /// One or more negative seeds
+        #[arg(long = "negative")]
+        negative: Vec<String>,
+        /// Maximum rows (default: 10)
         #[arg(short, long, default_value = "10")]
         limit: usize,
     },
@@ -3145,6 +3195,46 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             article.pmid.as_deref().unwrap_or(&pmid),
                             annotations.as_ref(),
                             Some(limit),
+                        )?)
+                    }
+                }
+                ArticleCommand::Citations { id, limit } => {
+                    let limit = paged_fetch_limit(limit, 0, 100)?;
+                    let graph = crate::entities::article::citations(&id, limit).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&graph)?)
+                    } else {
+                        Ok(crate::render::markdown::article_graph_markdown(
+                            "Citations",
+                            &graph,
+                        )?)
+                    }
+                }
+                ArticleCommand::References { id, limit } => {
+                    let limit = paged_fetch_limit(limit, 0, 100)?;
+                    let graph = crate::entities::article::references(&id, limit).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&graph)?)
+                    } else {
+                        Ok(crate::render::markdown::article_graph_markdown(
+                            "References",
+                            &graph,
+                        )?)
+                    }
+                }
+                ArticleCommand::Recommendations {
+                    ids,
+                    negative,
+                    limit,
+                } => {
+                    let limit = paged_fetch_limit(limit, 0, 100)?;
+                    let recommendations =
+                        crate::entities::article::recommendations(&ids, &negative, limit).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&recommendations)?)
+                    } else {
+                        Ok(crate::render::markdown::article_recommendations_markdown(
+                            &recommendations,
                         )?)
                     }
                 }
@@ -5180,7 +5270,7 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand,
+        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand, GetEntity,
         ProteinCommand, StudyCommand, VariantCommand, execute, extract_json_from_sections,
         paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
         resolve_query_input, resolve_variant_query, should_try_pathway_trial_fallback,
@@ -5932,6 +6022,76 @@ mod tests {
             } => {
                 assert_eq!(pmid, "22663011");
                 assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_article_parses_tldr_section() {
+        let cli = Cli::try_parse_from(["biomcp", "get", "article", "22663011", "tldr"])
+            .expect("get article tldr should parse");
+
+        match cli.command {
+            Commands::Get {
+                entity: GetEntity::Article { id, sections },
+            } => {
+                assert_eq!(id, "22663011");
+                assert_eq!(sections, vec!["tldr".to_string()]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn article_citations_parses_limit_flag() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "article", "citations", "22663011", "--limit", "3"])
+                .expect("article citations with --limit should parse");
+
+        match cli.command {
+            Commands::Article {
+                cmd: ArticleCommand::Citations { id, limit },
+            } => {
+                assert_eq!(id, "22663011");
+                assert_eq!(limit, 3);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn article_recommendations_parse_positive_and_negative_ids() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "article",
+            "recommendations",
+            "22663011",
+            "24200969",
+            "--negative",
+            "39073865",
+            "--negative",
+            "31452104",
+            "--limit",
+            "4",
+        ])
+        .expect("article recommendations should parse");
+
+        match cli.command {
+            Commands::Article {
+                cmd:
+                    ArticleCommand::Recommendations {
+                        ids,
+                        negative,
+                        limit,
+                    },
+            } => {
+                assert_eq!(ids, vec!["22663011".to_string(), "24200969".to_string()]);
+                assert_eq!(
+                    negative,
+                    vec!["39073865".to_string(), "31452104".to_string()]
+                );
+                assert_eq!(limit, 4);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -6859,6 +7019,9 @@ mod next_commands_validity {
         assert_parses("biomcp search disease --query melanoma");
         assert_parses("biomcp get drug osimertinib");
         assert_parses("biomcp article entities 12345");
+        assert_parses("biomcp article citations 12345 --limit 3");
+        assert_parses("biomcp article references 12345 --limit 3");
+        assert_parses("biomcp article recommendations 12345 67890 --negative 11111 --limit 3");
     }
 
     #[test]
@@ -7031,6 +7194,7 @@ mod next_commands_json_property {
                 }],
                 mutations: Vec::new(),
             }),
+            semantic_scholar: None,
             pubtator_fallback: false,
         };
 

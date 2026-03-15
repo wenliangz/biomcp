@@ -52,6 +52,21 @@ Saved to: {{ full_text_path }}
 {{ full_text_note }}
 {% endif -%}
 {% endif -%}
+{% if show_semantic_scholar_section and semantic_scholar -%}
+## Semantic Scholar
+
+{% if semantic_scholar.paper_id %}Paper ID: {{ semantic_scholar.paper_id }}{% endif %}
+{% if semantic_scholar.tldr %}TLDR: {{ semantic_scholar.tldr }}{% endif %}
+{% if semantic_scholar.citation_count is not none %}Citations: {{ semantic_scholar.citation_count }}{% endif %}
+{% if semantic_scholar.influential_citation_count is not none %}Influential citations: {{ semantic_scholar.influential_citation_count }}{% endif %}
+{% if semantic_scholar.reference_count is not none %}References: {{ semantic_scholar.reference_count }}{% endif %}
+{% if semantic_scholar.is_open_access is not none %}Open access: {% if semantic_scholar.is_open_access %}Yes{% else %}No{% endif %}{% endif %}
+{% if semantic_scholar.open_access_pdf -%}
+{% if semantic_scholar.open_access_pdf.url %}Open-access PDF: {{ semantic_scholar.open_access_pdf.url }}{% endif %}
+{% if semantic_scholar.open_access_pdf.status %}PDF status: {{ semantic_scholar.open_access_pdf.status }}{% endif %}
+{% if semantic_scholar.open_access_pdf.license %}PDF license: {{ semantic_scholar.open_access_pdf.license }}{% endif %}
+{% endif -%}
+{% endif -%}
 {% if sections_block %}{{ sections_block }}
 {% endif -%}
 {% if related_block %}{{ related_block }}

@@ -60,6 +60,7 @@ unlock additional data:
 | Key | Source | Effect |
 |-----|--------|--------|
 | `NCBI_API_KEY` | PubTator3, PMC OA, NCBI ID converter | Higher rate limits |
+| `S2_API_KEY` | Semantic Scholar article enrichment/navigation | Optional TLDR, citation graph, and recommendation helpers at 1 req/sec |
 | `OPENFDA_API_KEY` | OpenFDA | Higher rate limits |
 | `NCI_API_KEY` | NCI CTS trial search (`--source nci`) | Required for NCI source |
 | `ONCOKB_TOKEN` | OncoKB production API | Full clinical data (demo available without) |
@@ -179,6 +180,7 @@ replacing the real BioMCP markdown output.
 ## Known Constraints
 
 - Rate limiting is process-local (see above)
+- Semantic Scholar article helpers are explicitly limited to 1 request/sec per process and are not part of article search fan-out
 - Federated totals are approximate
 - Some sources (OncoKB production, NCI CTS, AlphaGenome) require API keys
 - OncoKB demo endpoint has a known no-hit response for some variants — this

@@ -89,7 +89,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 |--------|---------|---------|
 | gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, CIViC | `biomcp get gene BRAF pathways` |
 | variant | MyVariant.info, ClinVar, gnomAD, CIViC, OncoKB, cBioPortal, GWAS Catalog, AlphaGenome | `biomcp get variant "BRAF V600E" clinvar` |
-| article | PubMed, PubTator3, Europe PMC | `biomcp search article -g BRAF --limit 5` |
+| article | PubMed, PubTator3, Europe PMC, Semantic Scholar (optional) | `biomcp search article -g BRAF --limit 5` |
 | trial | ClinicalTrials.gov, NCI CTS API | `biomcp search trial -c melanoma -s recruiting` |
 | drug | MyChem.info, ChEMBL, OpenTargets, Drugs\@FDA, CIViC | `biomcp get drug pembrolizumab targets` |
 | disease | Monarch Initiative, MONDO, CIViC, OpenTargets | `biomcp get disease "Lynch syndrome" genes` |

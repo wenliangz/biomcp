@@ -16,7 +16,8 @@ SPEC_PR_DESELECT_ARGS = \
 	--deselect "spec/06-article.md::Searching by Gene" \
 	--deselect "spec/06-article.md::Searching by Keyword" \
 	--deselect "spec/06-article.md::Sort Behavior" \
-	--deselect "spec/07-disease.md::Disease to Articles"
+	--deselect "spec/07-disease.md::Disease to Articles" \
+	--deselect "spec/12-search-positionals.md::GWAS Positional Query"
 
 build:
 	cargo build --release

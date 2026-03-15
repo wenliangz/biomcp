@@ -60,6 +60,12 @@ indexed by PubMed or Europe PMC and cannot be resolved.
 biomcp get article 22663011
 ```
 
+When `S2_API_KEY` is set, default article output also includes an optional
+Semantic Scholar section with TLDR text, influence counts, and open-access PDF
+metadata when that paper resolves in Semantic Scholar. `search article` still
+fans out only to PubTator3 and Europe PMC; Semantic Scholar is enrichment and
+navigation, not federated search.
+
 ## Request specific sections
 
 Full text section:
@@ -74,11 +80,24 @@ Annotation section:
 biomcp get article 22663011 annotations
 ```
 
+Semantic Scholar TLDR section:
+
+```bash
+biomcp get article 22663011 tldr
+```
+
 ## Helper commands
 
 ```bash
 biomcp article entities 22663011   # extract annotated entities via PubTator
+biomcp article citations 22663011 --limit 3         # Semantic Scholar citation graph
+biomcp article references 22663011 --limit 3        # Semantic Scholar reference graph
+biomcp article recommendations 22663011 --limit 3   # Semantic Scholar related papers
 ```
+
+These Semantic Scholar helper commands require `S2_API_KEY`. Without the key,
+ordinary `get article` still works, but the explicit helper commands return an
+API-key-required error.
 
 ## Caching behavior
 
@@ -96,6 +115,7 @@ biomcp --json get article 22663011
 - Start with narrow `--limit` values.
 - Add a disease term when gene-only search is too broad.
 - Use section requests to avoid oversized responses.
+- Use `biomcp get article <id> tldr` when you want only the optional Semantic Scholar section.
 
 ## Related guides
 

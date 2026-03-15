@@ -60,6 +60,9 @@ New to BioMCP? Try:
 - `disease articles <name>`
 - `disease drugs <name>`
 - `article entities <pmid> --limit <N>`
+- `article citations <id> --limit <N>` (`S2_API_KEY`)
+- `article references <id> --limit <N>` (`S2_API_KEY`)
+- `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` (`S2_API_KEY`)
 - `gene trials|drugs|articles <symbol>`
 - `gene pathways <symbol> --limit <N> --offset <N>`
 - `pathway drugs|articles|trials <id>`
@@ -84,6 +87,7 @@ Results depend on source document wording and may vary across sources.
 ## Deployment Notes
 
 - Set `NCBI_API_KEY` to increase NCBI request throughput for article annotation/full-text paths.
+- Set `S2_API_KEY` to unlock Semantic Scholar TLDR, citation graph, and recommendation paths.
 - In multi-worker environments, run one shared `biomcp serve-http` process so workers share one Streamable HTTP `/mcp` endpoint and one limiter budget.
 
 ## Ops

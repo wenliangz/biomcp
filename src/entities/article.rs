@@ -12,6 +12,10 @@ use crate::sources::europepmc::{
 use crate::sources::ncbi_idconv::NcbiIdConverterClient;
 use crate::sources::pmc_oa::PmcOaClient;
 use crate::sources::pubtator::PubTatorClient;
+use crate::sources::semantic_scholar::{
+    SemanticScholarCitationEdge, SemanticScholarClient, SemanticScholarPaper,
+    SemanticScholarReferenceEdge,
+};
 use crate::transform;
 use crate::utils::date::validate_since;
 use crate::utils::download;
@@ -46,8 +50,37 @@ pub struct Article {
     pub full_text_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ArticleAnnotations>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_scholar: Option<ArticleSemanticScholar>,
     #[serde(default)]
     pub pubtator_fallback: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArticleSemanticScholar {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paper_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub citation_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub influential_citation_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_open_access: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_access_pdf: Option<ArticleSemanticScholarPdf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArticleSemanticScholarPdf {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +116,50 @@ pub struct ArticleSearchResult {
     pub score: Option<f64>,
     #[serde(default)]
     pub is_retracted: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArticleRelatedPaper {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paper_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pmid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doi: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arxiv_id: Option<String>,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub journal: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArticleGraphEdge {
+    pub paper: ArticleRelatedPaper,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intents: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contexts: Vec<String>,
+    pub is_influential: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArticleGraphResult {
+    pub article: ArticleRelatedPaper,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edges: Vec<ArticleGraphEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArticleRecommendationsResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub positive_seeds: Vec<ArticleRelatedPaper>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negative_seeds: Vec<ArticleRelatedPaper>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommendations: Vec<ArticleRelatedPaper>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,11 +266,13 @@ pub struct ArticleSearchFilters {
 
 const ARTICLE_SECTION_ANNOTATIONS: &str = "annotations";
 const ARTICLE_SECTION_FULLTEXT: &str = "fulltext";
+const ARTICLE_SECTION_TLDR: &str = "tldr";
 const ARTICLE_SECTION_ALL: &str = "all";
 
 pub const ARTICLE_SECTION_NAMES: &[&str] = &[
     ARTICLE_SECTION_ANNOTATIONS,
     ARTICLE_SECTION_FULLTEXT,
+    ARTICLE_SECTION_TLDR,
     ARTICLE_SECTION_ALL,
 ];
 
@@ -290,6 +369,43 @@ fn parse_article_id(id: &str) -> ArticleIdType {
         return ArticleIdType::Pmid(pmid);
     }
     ArticleIdType::Invalid
+}
+
+fn parse_arxiv_id(id: &str) -> Option<String> {
+    let id = id.trim();
+    if id.len() <= 6 {
+        return None;
+    }
+    let prefix = id.get(..6)?;
+    if !prefix.eq_ignore_ascii_case("arxiv:") {
+        return None;
+    }
+    let rest = id.get(6..)?.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    Some(format!("ARXIV:{rest}"))
+}
+
+fn is_semantic_scholar_paper_id(id: &str) -> bool {
+    id.len() == 40 && id.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn semantic_scholar_lookup_id(id: &str) -> Option<String> {
+    let id = id.trim();
+    if let Some(pmid) = parse_pmid(id) {
+        return Some(format!("PMID:{pmid}"));
+    }
+    if is_doi(id) {
+        return Some(format!("DOI:{id}"));
+    }
+    if let Some(arxiv) = parse_arxiv_id(id) {
+        return Some(arxiv);
+    }
+    if is_semantic_scholar_paper_id(id) {
+        return Some(id.to_string());
+    }
+    None
 }
 
 fn is_preprint_journal(journal: &str) -> bool {
@@ -477,6 +593,10 @@ fn pubtator_sort(sort: ArticleSort) -> Option<&'static str> {
         ArticleSort::Date => Some("date desc"),
         ArticleSort::Citations | ArticleSort::Relevance => None,
     }
+}
+
+fn pubtator_source_can_satisfy(filters: &ArticleSearchFilters) -> bool {
+    !filters.exclude_retracted
 }
 
 fn parse_row_date(value: Option<&str>) -> Option<String> {
@@ -755,6 +875,7 @@ async fn build_pubtator_query(
 struct ArticleSections {
     include_annotations: bool,
     include_fulltext: bool,
+    include_tldr: bool,
     include_all: bool,
 }
 
@@ -773,6 +894,7 @@ fn parse_sections(sections: &[String]) -> Result<ArticleSections, BioMcpError> {
         match section.as_str() {
             ARTICLE_SECTION_ANNOTATIONS => out.include_annotations = true,
             ARTICLE_SECTION_FULLTEXT => out.include_fulltext = true,
+            ARTICLE_SECTION_TLDR => out.include_tldr = true,
             ARTICLE_SECTION_ALL => out.include_all = true,
             _ => {
                 return Err(BioMcpError::InvalidArgument(format!(
@@ -786,6 +908,7 @@ fn parse_sections(sections: &[String]) -> Result<ArticleSections, BioMcpError> {
     if out.include_all {
         out.include_annotations = true;
         out.include_fulltext = true;
+        out.include_tldr = true;
     }
 
     Ok(out)
@@ -809,8 +932,161 @@ fn article_not_found(id: &str, suggestion_id: &str) -> BioMcpError {
     }
 }
 
+fn semantic_scholar_invalid_id(id: &str) -> BioMcpError {
+    BioMcpError::InvalidArgument(format!(
+        "Unsupported identifier format for Semantic Scholar article helpers: '{id}'. Supported: PMID, PMCID, DOI, arXiv, or a Semantic Scholar paper ID."
+    ))
+}
+
 fn first_europepmc_hit(search: EuropePmcSearchResponse) -> Option<EuropePmcResult> {
     search.result_list.and_then(|l| l.result.into_iter().next())
+}
+
+fn related_paper_from_semantic_scholar(paper: &SemanticScholarPaper) -> ArticleRelatedPaper {
+    let external_ids = paper.external_ids.as_ref();
+    ArticleRelatedPaper {
+        paper_id: paper.paper_id.clone(),
+        pmid: external_ids.and_then(|ids| ids.pubmed.clone()),
+        doi: external_ids.and_then(|ids| ids.doi.clone()),
+        arxiv_id: external_ids.and_then(|ids| ids.arxiv.clone()),
+        title: paper.title.clone().unwrap_or_default().trim().to_string(),
+        journal: paper
+            .venue
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        year: paper.year,
+    }
+}
+
+fn semantic_scholar_enrichment_from_paper(
+    paper: &SemanticScholarPaper,
+) -> Option<ArticleSemanticScholar> {
+    let open_access_pdf = paper.open_access_pdf.as_ref().and_then(|pdf| {
+        let url = pdf
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        Some(ArticleSemanticScholarPdf {
+            url: url.to_string(),
+            status: pdf
+                .status
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            license: pdf
+                .license
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        })
+    });
+    let tldr = paper
+        .tldr
+        .as_ref()
+        .and_then(|value| value.text.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    if paper.paper_id.is_none()
+        && tldr.is_none()
+        && paper.citation_count.is_none()
+        && paper.influential_citation_count.is_none()
+        && paper.reference_count.is_none()
+        && paper.is_open_access.is_none()
+        && open_access_pdf.is_none()
+    {
+        return None;
+    }
+
+    Some(ArticleSemanticScholar {
+        paper_id: paper.paper_id.clone(),
+        tldr,
+        citation_count: paper.citation_count,
+        influential_citation_count: paper.influential_citation_count,
+        reference_count: paper.reference_count,
+        is_open_access: paper.is_open_access,
+        open_access_pdf,
+    })
+}
+
+async fn resolve_semantic_scholar_input_id(
+    id: &str,
+    europe: &EuropePmcClient,
+) -> Result<String, BioMcpError> {
+    if let Some(id) = semantic_scholar_lookup_id(id) {
+        return Ok(id);
+    }
+
+    if let Some(pmcid) = parse_pmcid(id) {
+        let search = europe.search_by_pmcid(&pmcid).await?;
+        let hit = first_europepmc_hit(search).ok_or_else(|| article_not_found(&pmcid, id))?;
+        if let Some(pmid) = hit.pmid.as_deref().and_then(parse_pmid) {
+            return Ok(format!("PMID:{pmid}"));
+        }
+        if let Some(doi) = hit
+            .doi
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Ok(format!("DOI:{doi}"));
+        }
+        return Err(article_not_found(&pmcid, id));
+    }
+
+    Err(semantic_scholar_invalid_id(id))
+}
+
+async fn resolve_semantic_scholar_seed(
+    id: &str,
+    client: &SemanticScholarClient,
+    europe: &EuropePmcClient,
+) -> Result<ArticleRelatedPaper, BioMcpError> {
+    let lookup_id = resolve_semantic_scholar_input_id(id, europe).await?;
+    let mut rows = client.paper_batch(&[lookup_id]).await?;
+    let paper = rows
+        .pop()
+        .flatten()
+        .ok_or_else(|| article_not_found(id, id))?;
+    Ok(related_paper_from_semantic_scholar(&paper))
+}
+
+fn dedup_related_papers(rows: Vec<ArticleRelatedPaper>) -> Vec<ArticleRelatedPaper> {
+    let mut seen: HashSet<String> = HashSet::with_capacity(rows.len());
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let key = row
+            .paper_id
+            .as_deref()
+            .map(str::to_string)
+            .or_else(|| row.pmid.as_deref().map(|value| format!("pmid:{value}")))
+            .or_else(|| row.doi.as_deref().map(|value| format!("doi:{value}")))
+            .or_else(|| {
+                row.arxiv_id
+                    .as_deref()
+                    .map(|value| format!("arxiv:{value}"))
+            })
+            .unwrap_or_else(|| row.title.clone());
+        if seen.insert(key) {
+            out.push(row);
+        }
+    }
+    out
+}
+
+async fn resolve_semantic_scholar_seeds(
+    ids: &[String],
+    client: &SemanticScholarClient,
+    europe: &EuropePmcClient,
+) -> Result<Vec<ArticleRelatedPaper>, BioMcpError> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        out.push(resolve_semantic_scholar_seed(id, client, europe).await?);
+    }
+    Ok(dedup_related_papers(out))
 }
 
 fn is_pubtator_lag_error(err: &BioMcpError) -> bool {
@@ -865,6 +1141,55 @@ async fn resolve_article_from_pmid(
             article.pubtator_fallback = true;
             Ok(article)
         }
+    }
+}
+
+async fn enrich_article_with_semantic_scholar(article: &mut Article) -> Result<(), BioMcpError> {
+    let client = SemanticScholarClient::new()?;
+    if !client.is_configured() {
+        return Ok(());
+    }
+
+    let lookup_id = article
+        .pmid
+        .as_deref()
+        .map(|pmid| format!("PMID:{pmid}"))
+        .or_else(|| article.doi.as_deref().map(|doi| format!("DOI:{doi}")));
+    let Some(lookup_id) = lookup_id else {
+        return Ok(());
+    };
+
+    match client.paper_detail(&lookup_id).await {
+        Ok(paper) => article.semantic_scholar = semantic_scholar_enrichment_from_paper(&paper),
+        Err(err) => warn!(?err, lookup_id, "Semantic Scholar enrichment failed"),
+    }
+
+    Ok(())
+}
+
+fn semantic_scholar_api_key_required(client: &SemanticScholarClient) -> Result<(), BioMcpError> {
+    if client.is_configured() {
+        Ok(())
+    } else {
+        Err(SemanticScholarClient::api_key_required())
+    }
+}
+
+fn graph_edge_from_citation(edge: SemanticScholarCitationEdge) -> ArticleGraphEdge {
+    ArticleGraphEdge {
+        paper: related_paper_from_semantic_scholar(&edge.citing_paper),
+        intents: edge.intents,
+        contexts: edge.contexts,
+        is_influential: edge.is_influential.unwrap_or(false),
+    }
+}
+
+fn graph_edge_from_reference(edge: SemanticScholarReferenceEdge) -> ArticleGraphEdge {
+    ArticleGraphEdge {
+        paper: related_paper_from_semantic_scholar(&edge.cited_paper),
+        intents: edge.intents,
+        contexts: edge.contexts,
+        is_influential: edge.is_influential.unwrap_or(false),
     }
 }
 
@@ -992,6 +1317,10 @@ async fn search_pubtator_page(
     limit: usize,
     offset: usize,
 ) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
+    if !pubtator_source_can_satisfy(filters) {
+        return Ok(SearchPage::offset(Vec::new(), Some(0)));
+    }
+
     let pubtator = PubTatorClient::new()?;
     let query = build_pubtator_query(filters, &pubtator).await?;
     let sort = pubtator_sort(filters.sort);
@@ -1186,8 +1515,13 @@ pub async fn get(id: &str, sections: &[String]) -> Result<Article, BioMcpError> 
         }
     };
 
+    enrich_article_with_semantic_scholar(&mut article).await?;
+
     if section_only && !section_flags.include_annotations {
         article.annotations = None;
+    }
+    if section_only && !section_flags.include_tldr {
+        article.semantic_scholar = None;
     }
 
     if full_text {
@@ -1270,6 +1604,106 @@ pub async fn get(id: &str, sections: &[String]) -> Result<Article, BioMcpError> 
     Ok(article)
 }
 
+pub async fn citations(id: &str, limit: usize) -> Result<ArticleGraphResult, BioMcpError> {
+    let client = SemanticScholarClient::new()?;
+    semantic_scholar_api_key_required(&client)?;
+    let europe = EuropePmcClient::new()?;
+    let article = resolve_semantic_scholar_seed(id, &client, &europe).await?;
+    let graph_id = article
+        .paper_id
+        .as_deref()
+        .map(str::to_string)
+        .ok_or_else(|| article_not_found(id, id))?;
+    let response = client.paper_citations(&graph_id, limit).await?;
+
+    Ok(ArticleGraphResult {
+        article,
+        edges: response
+            .data
+            .into_iter()
+            .map(graph_edge_from_citation)
+            .collect(),
+    })
+}
+
+pub async fn references(id: &str, limit: usize) -> Result<ArticleGraphResult, BioMcpError> {
+    let client = SemanticScholarClient::new()?;
+    semantic_scholar_api_key_required(&client)?;
+    let europe = EuropePmcClient::new()?;
+    let article = resolve_semantic_scholar_seed(id, &client, &europe).await?;
+    let graph_id = article
+        .paper_id
+        .as_deref()
+        .map(str::to_string)
+        .ok_or_else(|| article_not_found(id, id))?;
+    let response = client.paper_references(&graph_id, limit).await?;
+
+    Ok(ArticleGraphResult {
+        article,
+        edges: response
+            .data
+            .into_iter()
+            .map(graph_edge_from_reference)
+            .collect(),
+    })
+}
+
+pub async fn recommendations(
+    ids: &[String],
+    negative: &[String],
+    limit: usize,
+) -> Result<ArticleRecommendationsResult, BioMcpError> {
+    let client = SemanticScholarClient::new()?;
+    semantic_scholar_api_key_required(&client)?;
+    let europe = EuropePmcClient::new()?;
+    let positive_seeds = resolve_semantic_scholar_seeds(ids, &client, &europe).await?;
+    let negative_seeds = resolve_semantic_scholar_seeds(negative, &client, &europe).await?;
+    if positive_seeds.is_empty() {
+        return Err(BioMcpError::InvalidArgument(
+            "At least one positive article seed is required. Example: biomcp article recommendations 22663011".into(),
+        ));
+    }
+
+    let positive_ids: Vec<String> = positive_seeds
+        .iter()
+        .filter_map(|paper| paper.paper_id.clone())
+        .collect();
+    let negative_ids: Vec<String> = negative_seeds
+        .iter()
+        .filter_map(|paper| paper.paper_id.clone())
+        .collect();
+    let positive_set: HashSet<&str> = positive_ids.iter().map(String::as_str).collect();
+    if let Some(conflict) = negative_ids
+        .iter()
+        .map(String::as_str)
+        .find(|paper_id| positive_set.contains(paper_id))
+    {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "The same paper cannot appear in both positive and negative recommendation seeds ({conflict})"
+        )));
+    }
+
+    let response = if positive_ids.len() == 1 && negative_ids.is_empty() {
+        client
+            .recommendations_for_paper(&positive_ids[0], limit)
+            .await?
+    } else {
+        client
+            .recommendations(&positive_ids, &negative_ids, limit)
+            .await?
+    };
+
+    Ok(ArticleRecommendationsResult {
+        positive_seeds,
+        negative_seeds,
+        recommendations: response
+            .recommended_papers
+            .into_iter()
+            .map(|paper| related_paper_from_semantic_scholar(&paper))
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1313,6 +1747,36 @@ mod tests {
     fn empty_filters_default_sort_is_relevance() {
         let filters = empty_filters();
         assert_eq!(filters.sort, ArticleSort::Relevance);
+    }
+
+    #[test]
+    fn article_section_names_include_tldr() {
+        assert!(ARTICLE_SECTION_NAMES.contains(&"tldr"));
+    }
+
+    #[test]
+    fn parse_sections_supports_tldr_and_all() {
+        let tldr_only = parse_sections(&["tldr".to_string()]).expect("tldr should parse");
+        assert!(tldr_only.include_tldr);
+        assert!(!tldr_only.include_annotations);
+        assert!(!tldr_only.include_fulltext);
+
+        let all = parse_sections(&["all".to_string()]).expect("all should parse");
+        assert!(all.include_tldr);
+        assert!(all.include_annotations);
+        assert!(all.include_fulltext);
+    }
+
+    #[test]
+    fn semantic_scholar_lookup_id_supports_arxiv_and_paper_ids() {
+        assert_eq!(
+            semantic_scholar_lookup_id("arXiv:2401.01234"),
+            Some("ARXIV:2401.01234".to_string())
+        );
+        assert_eq!(
+            semantic_scholar_lookup_id("0123456789abcdef0123456789abcdef01234567"),
+            Some("0123456789abcdef0123456789abcdef01234567".to_string())
+        );
     }
 
     #[test]
@@ -1530,6 +1994,18 @@ mod tests {
         let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
             .expect_err("planner should reject strict-only filter on pubtator");
         assert!(err.to_string().contains("--type"));
+    }
+
+    #[test]
+    fn pubtator_source_cannot_satisfy_exclude_retracted() {
+        let include_filters = empty_filters();
+        let exclude_filters = ArticleSearchFilters {
+            exclude_retracted: true,
+            ..empty_filters()
+        };
+
+        assert!(pubtator_source_can_satisfy(&include_filters));
+        assert!(!pubtator_source_can_satisfy(&exclude_filters));
     }
 
     #[test]
