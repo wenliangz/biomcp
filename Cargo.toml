@@ -22,6 +22,7 @@ path = "src/main_biomcp_cli.rs"
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive"] }
+kuva = "0.1.4"
 
 # Async
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "signal", "io-util", "net"] }
@@ -86,6 +87,10 @@ async-trait = "0.1"
 
 # Command parsing for MCP shell
 shlex = "1"
+
+[features]
+default = []
+charts-png = ["kuva/png"]
 
 [dev-dependencies]
 wiremock = "0.6"

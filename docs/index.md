@@ -80,7 +80,7 @@ get <entity> <id> [sections] → focused detail
 <entity> <helper> <id>       → cross-entity pivots
 enrich <GENE1,GENE2,...>     → gene-set enrichment
 batch <entity> <id1,id2,...> → parallel gets
-search all [slot filters]    → unified fan-out across all entities
+search all [slot filters]    → counts-first cross-entity orientation
 ```
 
 ## Entities and sources
@@ -103,6 +103,9 @@ search all [slot filters]    → unified fan-out across all entities
 ## Cross-entity helpers
 
 Pivot between related entities without rebuilding filters:
+
+See the [cross-entity pivot guide](how-to/cross-entity-pivots.md) for when to
+use a helper versus a fresh search.
 
 ```bash
 biomcp variant trials "BRAF V600E" --limit 5
@@ -168,6 +171,7 @@ catalog. Read it with `biomcp skill`, install it with
 
 - [Installation](getting-started/installation.md)
 - [First Query](getting-started/first-query.md)
+- [Search All Workflow](how-to/search-all-workflow.md)
 - [Data Sources](reference/data-sources.md)
 - [Quick Reference](reference/quick-reference.md)
 - [Troubleshooting](troubleshooting.md)

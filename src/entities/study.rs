@@ -357,6 +357,64 @@ pub async fn query_study(
     .await
 }
 
+pub async fn expression_values(study_id: &str, gene: &str) -> Result<Vec<f64>, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let gene = normalize_gene(gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        let mut values =
+            crate::sources::cbioportal_study::expression_values_by_sample(&study_dir, &gene)?
+                .into_values()
+                .collect::<Vec<_>>();
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(values)
+    })
+    .await
+}
+
+pub async fn compare_expression_values(
+    study_id: &str,
+    stratify_gene: &str,
+    target_gene: &str,
+) -> Result<Vec<(String, Vec<f64>)>, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let stratify_gene = normalize_gene(stratify_gene)?;
+    let target_gene = normalize_gene(target_gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        let cohort =
+            crate::sources::cbioportal_study::build_cohort_split(&study_dir, &stratify_gene)?;
+        let values_by_sample = crate::sources::cbioportal_study::expression_values_by_sample(
+            &study_dir,
+            &target_gene,
+        )?;
+
+        let mut mutant_values = cohort
+            .mutant_samples
+            .iter()
+            .filter_map(|sample| values_by_sample.get(sample).copied())
+            .collect::<Vec<_>>();
+        let mut wildtype_values = cohort
+            .wildtype_samples
+            .iter()
+            .filter_map(|sample| values_by_sample.get(sample).copied())
+            .collect::<Vec<_>>();
+
+        mutant_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        wildtype_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(vec![
+            (format!("{stratify_gene}-mutant"), mutant_values),
+            (format!("{stratify_gene}-wildtype"), wildtype_values),
+        ])
+    })
+    .await
+}
+
 pub async fn co_occurrence(
     study_id: &str,
     genes: &[String],
@@ -1227,5 +1285,39 @@ mod tests {
         assert_eq!(result.groups[1].group_name, "TP53-wildtype");
         assert_eq!(result.groups[1].sample_count, 1);
         assert_eq!(result.groups[1].mutated_count, 0);
+    }
+
+    #[tokio::test]
+    async fn expression_values_returns_sorted_values() {
+        let _guard = env_lock().lock().await;
+        let fixture = TestStudyDir::new("expression-values");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let values = expression_values("demo_study", "ERBB2")
+            .await
+            .expect("raw expression values should load");
+        assert_eq!(values, vec![1.0, 2.0, 4.0]);
+    }
+
+    #[tokio::test]
+    async fn compare_expression_values_returns_mutant_then_wildtype_groups() {
+        let _guard = env_lock().lock().await;
+        let fixture = TestStudyDir::new("compare-expression-values");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let groups = compare_expression_values("demo_study", "TP53", "ERBB2")
+            .await
+            .expect("grouped expression values should load");
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, "TP53-mutant");
+        assert_eq!(groups[0].1, vec![2.0, 4.0]);
+        assert_eq!(groups[1].0, "TP53-wildtype");
+        assert_eq!(groups[1].1, vec![1.0]);
     }
 }

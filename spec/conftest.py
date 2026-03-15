@@ -7,6 +7,7 @@ import pytest
 OPENFDA_SPEC_NODEIDS = {
     "spec/05-drug.md::Drug to Adverse Events",
     "spec/05-drug.md::Adverse Event Search",
+    "spec/17-cross-entity-pivots.md::Drug to Adverse Events",
     "spec/11-evidence-urls.md::Markdown Evidence Links",
     "spec/11-evidence-urls.md::JSON Metadata Contract",
     "spec/12-search-positionals.md::Adverse-event Positional Query",

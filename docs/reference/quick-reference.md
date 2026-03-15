@@ -69,6 +69,8 @@ biomcp search all --gene BRAF --disease melanoma
 biomcp search all --keyword resistance --counts-only
 ```
 
+See also: [Search All Workflow](../how-to/search-all-workflow.md)
+
 ## Output modes and discovery commands
 
 ```bash
@@ -239,6 +241,7 @@ Use these with `biomcp search variant --consequence <value>`.
 
 ## Related references
 
+- [Cross-Entity Pivot Guide](../how-to/cross-entity-pivots.md)
 - [CLI Reference](../user-guide/cli-reference.md)
 - [Data Sources](data-sources.md)
 - [Troubleshooting](../troubleshooting.md)

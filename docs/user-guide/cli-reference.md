@@ -65,6 +65,8 @@ biomcp search all --gene BRAF --counts-only
 biomcp search all --keyword "immunotherapy resistance" --since 2024-01-01
 ```
 
+See also: [Search All Workflow](../how-to/search-all-workflow.md)
+
 ### Gene
 
 ```bash

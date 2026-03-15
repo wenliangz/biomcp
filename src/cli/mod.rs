@@ -3,10 +3,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use futures::{StreamExt, future::try_join_all};
 use tracing::{debug, warn};
 
+pub mod chart;
 pub mod health;
 pub mod list;
 pub mod search_all;
@@ -31,6 +32,91 @@ pub struct Cli {
     /// Disable HTTP caching (always fetch fresh data)
     #[arg(long, global = true)]
     pub no_cache: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ChartType {
+    Bar,
+    Pie,
+    Histogram,
+    Density,
+    Box,
+    Violin,
+    Ridgeline,
+}
+
+impl ChartType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bar => "bar",
+            Self::Pie => "pie",
+            Self::Histogram => "histogram",
+            Self::Density => "density",
+            Self::Box => "box",
+            Self::Violin => "violin",
+            Self::Ridgeline => "ridgeline",
+        }
+    }
+}
+
+impl std::fmt::Display for ChartType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Args, Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChartArgs {
+    #[arg(
+        long,
+        value_enum,
+        hide_short_help = true,
+        help_heading = "Chart Output"
+    )]
+    pub chart: Option<ChartType>,
+
+    #[arg(
+        long,
+        requires = "chart",
+        conflicts_with = "output",
+        hide_short_help = true,
+        help_heading = "Chart Output"
+    )]
+    pub terminal: bool,
+
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "FILE",
+        requires = "chart",
+        hide_short_help = true,
+        help_heading = "Chart Output"
+    )]
+    pub output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        requires = "chart",
+        hide_short_help = true,
+        help_heading = "Chart Styling"
+    )]
+    pub title: Option<String>,
+
+    #[arg(
+        long,
+        requires = "chart",
+        hide_short_help = true,
+        help_heading = "Chart Styling"
+    )]
+    pub theme: Option<String>,
+
+    #[arg(
+        long,
+        requires = "chart",
+        hide_short_help = true,
+        help_heading = "Chart Styling"
+    )]
+    pub palette: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -121,6 +207,16 @@ EXAMPLES:
     Skill {
         #[command(subcommand)]
         command: Option<skill::SkillCommand>,
+    },
+    /// Chart type documentation for study visualizations
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp chart
+  biomcp chart bar
+  biomcp chart violin")]
+    Chart {
+        #[command(subcommand)]
+        command: Option<chart::ChartCommand>,
     },
     /// Update the biomcp binary from GitHub releases
     Update {
@@ -483,7 +579,11 @@ See also: biomcp list trial")]
         #[arg(long = "study-type")]
         study_type: Option<String>,
 
-        /// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months)
+        /// Patient age in years for eligibility matching (decimals accepted, e.g. 0.5 for 6 months).
+        ///
+        /// With `--count-only`, age-only CTGov searches report an approximate
+        /// upstream total because BioMCP applies the age filter during full
+        /// search, not the fast count path.
         #[arg(long)]
         age: Option<f32>,
 
@@ -1446,6 +1546,8 @@ See also: biomcp list study")]
         /// Query type (mutations, cna, expression)
         #[arg(short = 't', long = "type")]
         query_type: String,
+        #[command(flatten)]
+        chart: ChartArgs,
     },
     /// Filter samples across mutation, CNA, expression, and clinical criteria
     #[command(after_help = "\
@@ -1509,6 +1611,8 @@ See also: biomcp list study")]
         /// Survival endpoint (os, dfs, pfs, dss). Default: os
         #[arg(short, long, default_value = "os")]
         endpoint: String,
+        #[command(flatten)]
+        chart: ChartArgs,
     },
     /// Compare mutation-stratified groups on expression or mutation rates
     #[command(after_help = "\
@@ -1530,6 +1634,8 @@ See also: biomcp list study")]
         /// Target gene to compare across groups
         #[arg(long)]
         target: String,
+        #[command(flatten)]
+        chart: ChartArgs,
     },
     /// Compute pairwise mutation co-occurrence across genes
     #[command(after_help = "\
@@ -1545,6 +1651,8 @@ See also: biomcp list study")]
         /// Comma-separated gene symbols (2..=10)
         #[arg(short, long)]
         genes: String,
+        #[command(flatten)]
+        chart: ChartArgs,
     },
 }
 
@@ -1697,6 +1805,18 @@ fn normalize_cli_query(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn chart_json_conflict(
+    chart: &ChartArgs,
+    json_output: bool,
+) -> Result<(), crate::error::BioMcpError> {
+    if json_output && chart.chart.is_some() {
+        return Err(crate::error::BioMcpError::InvalidArgument(
+            "--json cannot be combined with --chart. Use standard study output for JSON, or remove --json for chart rendering.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn normalize_cli_tokens(values: Vec<String>) -> Option<String> {
@@ -3482,13 +3602,87 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     study,
                     gene,
                     query_type,
+                    chart,
                 } => {
                     let query_type = crate::entities::study::StudyQueryType::from_flag(&query_type)?;
-                    let result = crate::entities::study::query_study(&study, &gene, query_type).await?;
-                    if cli.json {
-                        Ok(crate::render::json::to_pretty(&result)?)
+                    chart_json_conflict(&chart, cli.json)?;
+                    if let Some(chart_type) = chart.chart {
+                        crate::render::chart::validate_query_chart_type(query_type, chart_type)?;
+                        let options = crate::render::chart::ChartRenderOptions::from_args(
+                            chart.terminal,
+                            chart.output,
+                            chart.title,
+                            chart.theme,
+                            chart.palette,
+                        );
+                        match query_type {
+                            crate::entities::study::StudyQueryType::Mutations => {
+                                let result =
+                                    crate::entities::study::query_study(&study, &gene, query_type)
+                                        .await?;
+                                let crate::entities::study::StudyQueryResult::MutationFrequency(
+                                    result,
+                                ) = result
+                                else {
+                                    unreachable!("mutation query should return mutation result");
+                                };
+                                Ok(crate::render::chart::render_mutation_frequency_chart(
+                                    &result,
+                                    chart_type,
+                                    &options,
+                                )?)
+                            }
+                            crate::entities::study::StudyQueryType::Cna => {
+                                let result =
+                                    crate::entities::study::query_study(&study, &gene, query_type)
+                                        .await?;
+                                let crate::entities::study::StudyQueryResult::CnaDistribution(
+                                    result,
+                                ) = result
+                                else {
+                                    unreachable!("cna query should return cna result");
+                                };
+                                Ok(crate::render::chart::render_cna_chart(
+                                    &result,
+                                    chart_type,
+                                    &options,
+                                )?)
+                            }
+                            crate::entities::study::StudyQueryType::Expression => Ok(
+                                match chart_type {
+                                    ChartType::Histogram => {
+                                        let values =
+                                            crate::entities::study::expression_values(&study, &gene)
+                                                .await?;
+                                        crate::render::chart::render_expression_histogram_chart(
+                                            &study, &gene, &values, &options,
+                                        )?
+                                    }
+                                    ChartType::Density => {
+                                        let values =
+                                            crate::entities::study::expression_values(&study, &gene)
+                                                .await?;
+                                        crate::render::chart::render_expression_density_chart(
+                                            &study, &gene, &values, &options,
+                                        )?
+                                    }
+                                    other => {
+                                        return Err(crate::error::BioMcpError::InvalidArgument(
+                                            format!("Invalid chart type: {other}"),
+                                        )
+                                        .into());
+                                    }
+                                },
+                            ),
+                        }
                     } else {
-                        Ok(crate::render::markdown::study_query_markdown(&result))
+                        let result =
+                            crate::entities::study::query_study(&study, &gene, query_type).await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_query_markdown(&result))
+                        }
                     }
                 }
                 StudyCommand::Filter {
@@ -3553,13 +3747,36 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     study,
                     gene,
                     endpoint,
+                    chart,
                 } => {
                     let endpoint = crate::entities::study::SurvivalEndpoint::from_flag(&endpoint)?;
-                    let result = crate::entities::study::survival(&study, &gene, endpoint).await?;
-                    if cli.json {
-                        Ok(crate::render::json::to_pretty(&result)?)
+                    chart_json_conflict(&chart, cli.json)?;
+                    if let Some(chart_type) = chart.chart {
+                        crate::render::chart::validate_standalone_chart_type(
+                            "study survival",
+                            chart_type,
+                            &[ChartType::Bar],
+                        )?;
+                        let result = crate::entities::study::survival(&study, &gene, endpoint).await?;
+                        let options = crate::render::chart::ChartRenderOptions::from_args(
+                            chart.terminal,
+                            chart.output,
+                            chart.title,
+                            chart.theme,
+                            chart.palette,
+                        );
+                        Ok(crate::render::chart::render_survival_chart(
+                            &result,
+                            chart_type,
+                            &options,
+                        )?)
                     } else {
-                        Ok(crate::render::markdown::study_survival_markdown(&result))
+                        let result = crate::entities::study::survival(&study, &gene, endpoint).await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_survival_markdown(&result))
+                        }
                     }
                 }
                 StudyCommand::Compare {
@@ -3567,37 +3784,90 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     gene,
                     compare_type,
                     target,
-                } => match compare_type.trim().to_ascii_lowercase().as_str() {
-                    "expression" | "expr" => {
-                        let result =
-                            crate::entities::study::compare_expression(&study, &gene, &target)
+                    chart,
+                } => {
+                    chart_json_conflict(&chart, cli.json)?;
+                    match compare_type.trim().to_ascii_lowercase().as_str() {
+                        "expression" | "expr" => {
+                            if let Some(chart_type) = chart.chart {
+                                crate::render::chart::validate_compare_chart_type(
+                                    "expression",
+                                    chart_type,
+                                )?;
+                                let groups = crate::entities::study::compare_expression_values(
+                                    &study, &gene, &target,
+                                )
                                 .await?;
-                        if cli.json {
-                            Ok(crate::render::json::to_pretty(&result)?)
-                        } else {
-                            Ok(crate::render::markdown::study_compare_expression_markdown(
-                                &result,
-                            ))
+                                let options = crate::render::chart::ChartRenderOptions::from_args(
+                                    chart.terminal,
+                                    chart.output,
+                                    chart.title,
+                                    chart.theme,
+                                    chart.palette,
+                                );
+                                Ok(crate::render::chart::render_expression_compare_chart(
+                                    &study,
+                                    &gene,
+                                    &target,
+                                    &groups,
+                                    chart_type,
+                                    &options,
+                                )?)
+                            } else {
+                                let result =
+                                    crate::entities::study::compare_expression(&study, &gene, &target)
+                                        .await?;
+                                if cli.json {
+                                    Ok(crate::render::json::to_pretty(&result)?)
+                                } else {
+                                    Ok(crate::render::markdown::study_compare_expression_markdown(
+                                        &result,
+                                    ))
+                                }
+                            }
                         }
-                    }
-                    "mutations" | "mutation" => {
-                        let result =
-                            crate::entities::study::compare_mutations(&study, &gene, &target)
-                                .await?;
-                        if cli.json {
-                            Ok(crate::render::json::to_pretty(&result)?)
-                        } else {
-                            Ok(crate::render::markdown::study_compare_mutations_markdown(
-                                &result,
-                            ))
+                        "mutations" | "mutation" => {
+                            if let Some(chart_type) = chart.chart {
+                                crate::render::chart::validate_compare_chart_type(
+                                    "mutations",
+                                    chart_type,
+                                )?;
+                                let result =
+                                    crate::entities::study::compare_mutations(&study, &gene, &target)
+                                        .await?;
+                                let options = crate::render::chart::ChartRenderOptions::from_args(
+                                    chart.terminal,
+                                    chart.output,
+                                    chart.title,
+                                    chart.theme,
+                                    chart.palette,
+                                );
+                                Ok(crate::render::chart::render_mutation_compare_chart(
+                                    &result,
+                                    chart_type,
+                                    &options,
+                                )?)
+                            } else {
+                                let result =
+                                    crate::entities::study::compare_mutations(&study, &gene, &target)
+                                        .await?;
+                                if cli.json {
+                                    Ok(crate::render::json::to_pretty(&result)?)
+                                } else {
+                                    Ok(crate::render::markdown::study_compare_mutations_markdown(
+                                        &result,
+                                    ))
+                                }
+                            }
                         }
+                        other => Err(crate::error::BioMcpError::InvalidArgument(format!(
+                            "Unknown comparison type '{other}'. Expected: expression, mutations."
+                        ))
+                        .into()),
                     }
-                    other => Err(crate::error::BioMcpError::InvalidArgument(format!(
-                        "Unknown comparison type '{other}'. Expected: expression, mutations."
-                    ))
-                    .into()),
-                },
-                StudyCommand::CoOccurrence { study, genes } => {
+                }
+                StudyCommand::CoOccurrence { study, genes, chart } => {
+                    chart_json_conflict(&chart, cli.json)?;
                     let genes = genes
                         .split(',')
                         .map(str::trim)
@@ -3610,11 +3880,32 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         )
                         .into());
                     }
-                    let result = crate::entities::study::co_occurrence(&study, &genes).await?;
-                    if cli.json {
-                        Ok(crate::render::json::to_pretty(&result)?)
+                    if let Some(chart_type) = chart.chart {
+                        crate::render::chart::validate_standalone_chart_type(
+                            "study co-occurrence",
+                            chart_type,
+                            &[ChartType::Bar, ChartType::Pie],
+                        )?;
+                        let result = crate::entities::study::co_occurrence(&study, &genes).await?;
+                        let options = crate::render::chart::ChartRenderOptions::from_args(
+                            chart.terminal,
+                            chart.output,
+                            chart.title,
+                            chart.theme,
+                            chart.palette,
+                        );
+                        Ok(crate::render::chart::render_co_occurrence_chart(
+                            &result,
+                            chart_type,
+                            &options,
+                        )?)
                     } else {
-                        Ok(crate::render::markdown::study_co_occurrence_markdown(&result))
+                        let result = crate::entities::study::co_occurrence(&study, &genes).await?;
+                        if cli.json {
+                            Ok(crate::render::json::to_pretty(&result)?)
+                        } else {
+                            Ok(crate::render::markdown::study_co_occurrence_markdown(&result))
+                        }
                     }
                 }
             },
@@ -4300,19 +4591,36 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     let query =
                         trial_search_query_summary(&filters, offset, next_page.as_deref());
                     if count_only {
-                        let total = crate::entities::trial::count_all(&filters).await?;
+                        let count = crate::entities::trial::count_all(&filters).await?;
                         if cli.json {
+                            use crate::entities::trial::TrialCount;
+
                             #[derive(serde::Serialize)]
                             struct TrialCountOnlyJson {
                                 total: Option<usize>,
+                                #[serde(skip_serializing_if = "Option::is_none")]
+                                approximate: Option<bool>,
                             }
+                            let (total, approximate) = match count {
+                                TrialCount::Exact(total) => (Some(total), None),
+                                TrialCount::Approximate(total) => (Some(total), Some(true)),
+                                TrialCount::Unknown => (None, None),
+                            };
                             return Ok(crate::render::json::to_pretty(&TrialCountOnlyJson {
                                 total,
+                                approximate,
                             })?);
                         }
-                        return Ok(match total {
-                            Some(total) => format!("Total: {total}"),
-                            None => "Total: unknown (traversal limit reached)".to_string(),
+                        return Ok(match count {
+                            crate::entities::trial::TrialCount::Exact(total) => {
+                                format!("Total: {total}")
+                            }
+                            crate::entities::trial::TrialCount::Approximate(total) => {
+                                format!("Total: {total} (approximate, age post-filtered)")
+                            }
+                            crate::entities::trial::TrialCount::Unknown => {
+                                "Total: unknown (traversal limit reached)".to_string()
+                            }
                         });
                     }
                     let page = crate::entities::trial::search_page(
@@ -4889,6 +5197,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     Ok(crate::cli::skill::show_use_case(&key)?)
                 }
             },
+            Commands::Chart { command } => Ok(crate::cli::chart::show(command.as_ref())?),
             Commands::Update { check } => Ok(crate::cli::update::run(check).await?),
             Commands::Uninstall => Ok(uninstall_self()?),
             Commands::Enrich { genes, limit } => {
@@ -4961,8 +5270,8 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArticleCommand, Cli, Commands, DrugCommand, GeneCommand, GetEntity, ProteinCommand,
-        StudyCommand, VariantCommand, execute, extract_json_from_sections,
+        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand, GetEntity,
+        ProteinCommand, StudyCommand, VariantCommand, execute, extract_json_from_sections,
         paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
         resolve_query_input, resolve_variant_query, should_try_pathway_trial_fallback,
         trial_locations_json, trial_search_query_summary, truncate_article_annotations,
@@ -5086,6 +5395,13 @@ mod tests {
 
         assert!(help.contains("all"));
         assert!(help.contains("no sex restriction"));
+    }
+
+    #[test]
+    fn trial_age_help_explains_age_only_count_is_approximate() {
+        let help = render_trial_search_long_help();
+
+        assert!(help.contains("age-only CTGov searches report an approximate upstream total"));
     }
 
     #[test]
@@ -5920,6 +6236,7 @@ mod tests {
                         study,
                         gene,
                         query_type,
+                        ..
                     },
             } => {
                 assert_eq!(study, "msk_impact_2017");
@@ -5928,6 +6245,112 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn study_query_parses_chart_flags() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "query",
+            "--study",
+            "msk_impact_2017",
+            "--gene",
+            "TP53",
+            "--type",
+            "mutations",
+            "--chart",
+            "bar",
+            "--terminal",
+            "--title",
+            "TP53 mutations",
+            "--theme",
+            "dark",
+            "--palette",
+            "wong",
+        ])
+        .expect("study query chart flags should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::Query { chart, .. },
+            } => {
+                assert_eq!(chart.chart, Some(ChartType::Bar));
+                assert!(chart.terminal);
+                assert_eq!(chart.title.as_deref(), Some("TP53 mutations"));
+                assert_eq!(chart.theme.as_deref(), Some("dark"));
+                assert_eq!(chart.palette.as_deref(), Some("wong"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_chart_subcommand_parses_specific_topic() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "chart", "violin"]).expect("chart docs should parse");
+        match cli.command {
+            Commands::Chart { command } => {
+                assert_eq!(format!("{command:?}"), "Some(Violin)");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chart_auxiliary_flags_require_chart() {
+        let err = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "query",
+            "--study",
+            "msk_impact_2017",
+            "--gene",
+            "TP53",
+            "--type",
+            "mutations",
+            "--terminal",
+        ])
+        .expect_err("--terminal without --chart should fail");
+        let msg = err.to_string();
+        assert!(msg.contains("--chart"));
+    }
+
+    #[test]
+    fn short_help_hides_chart_flags_but_long_help_shows_them() {
+        let mut cmd = Cli::command();
+        let study = cmd.find_subcommand_mut("study").expect("study command");
+        let query = study
+            .find_subcommand_mut("query")
+            .expect("study query command");
+
+        let mut short_help = Vec::new();
+        query
+            .write_help(&mut short_help)
+            .expect("short help should render");
+        let short_help = String::from_utf8(short_help).expect("utf8 short help");
+        assert!(!short_help.contains("--chart"));
+
+        let mut long_help = Vec::new();
+        query
+            .write_long_help(&mut long_help)
+            .expect("long help should render");
+        let long_help = String::from_utf8(long_help).expect("utf8 long help");
+        assert!(long_help.contains("--chart"));
+        assert!(long_help.contains("Chart Output"));
+    }
+
+    #[test]
+    fn chart_args_default_to_no_chart() {
+        let args = ChartArgs {
+            chart: None,
+            terminal: false,
+            output: None,
+            title: None,
+            theme: None,
+            palette: None,
+        };
+        assert_eq!(args.chart, None);
+        assert!(!args.terminal);
     }
 
     #[test]
@@ -5951,6 +6374,7 @@ mod tests {
                         study,
                         gene,
                         endpoint,
+                        ..
                     },
             } => {
                 assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
@@ -5985,6 +6409,7 @@ mod tests {
                         gene,
                         compare_type,
                         target,
+                        ..
                     },
             } => {
                 assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
@@ -6063,7 +6488,7 @@ mod tests {
         .expect("study co-occurrence should parse");
         match cli.command {
             Commands::Study {
-                cmd: StudyCommand::CoOccurrence { study, genes },
+                cmd: StudyCommand::CoOccurrence { study, genes, .. },
             } => {
                 assert_eq!(study, "brca_tcga_pan_can_atlas_2018");
                 assert_eq!(genes, "TP53,PIK3CA,GATA3");

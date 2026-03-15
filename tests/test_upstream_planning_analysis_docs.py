@@ -131,9 +131,15 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)" in technical
     assert "`version-sync` (`bash scripts/check-version-sync.sh`)" in technical
     assert "`climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`)" in technical
-    assert '`contracts` (`uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "biomcp serve"`, `uv run mkdocs build --strict`)' in technical
-    assert "`spec` (`cargo build --release --locked`, then `make spec`)" in technical
-    assert "PR CI now runs `make spec` via the `spec` job in `.github/workflows/ci.yml`." in technical
+    assert (
+        '`contracts` (`cargo build --release --locked`, `uv sync --extra dev`, '
+        '`uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, '
+        '`uv run mkdocs build --strict`)'
+        in technical
+    )
+    assert "`spec-stable` (`cargo build --release --locked`, then `make spec-pr`)" in technical
+    assert "PR CI now runs `make spec-pr` via the `spec-stable` job in `.github/workflows/ci.yml`." in technical
+    assert "Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`" in technical
     assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical
     assert "release validation runs `pytest tests/` and `mkdocs build --strict`" in technical
     assert "Streamable HTTP" in technical
@@ -164,22 +170,31 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
     ci = _read_repo(".github/workflows/ci.yml")
     release = _read_repo(".github/workflows/release.yml")
     contracts_smoke = _read_repo(".github/workflows/contracts.yml")
-    expected_contract_runs = [
+    spec_smoke = _read_repo(".github/workflows/spec-smoke.yml")
+    expected_ci_contract_runs = [
+        "cargo build --release --locked",
+        "uv sync --extra dev",
+        'uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"',
+        "uv run mkdocs build --strict",
+    ]
+    expected_release_contract_runs = [
         "uv sync --extra dev",
         'uv run pytest tests/ -v --mcp-cmd "biomcp serve"',
         "uv run mkdocs build --strict",
     ]
 
     ci_contracts = _workflow_job_block(ci, "contracts")
-    ci_spec = _workflow_job_block(ci, "spec")
+    ci_spec = _workflow_job_block(ci, "spec-stable")
     ci_version_sync = _workflow_job_block(ci, "version-sync")
     ci_climb_hygiene = _workflow_job_block(ci, "climb-hygiene")
     release_validate = _workflow_job_block(release, "validate")
+    smoke_spec = _workflow_job_block(spec_smoke, "spec-volatile-live")
 
     assert 'python-version: "3.12"' in ci_contracts
     assert 'python-version: "3.12"' in ci_spec
     assert 'python-version: "3.12"' in release_validate
-    assert _workflow_run_steps(ci_contracts) == expected_contract_runs
+    assert 'python-version: "3.12"' in smoke_spec
+    assert _workflow_run_steps(ci_contracts) == expected_ci_contract_runs
     assert "- uses: actions/checkout@v4" in ci_spec
     assert "uses: arduino/setup-protoc@v3" in ci_spec
     assert "uses: dtolnay/rust-toolchain@stable" in ci_spec
@@ -187,9 +202,9 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
     assert "uses: astral-sh/setup-uv@v4" in ci_spec
     assert _workflow_run_steps(ci_spec) == [
         "cargo build --release --locked",
-        "make spec",
+        "make spec-pr",
     ]
-    assert _workflow_run_steps(release_validate)[-3:] == expected_contract_runs
+    assert _workflow_run_steps(release_validate)[-3:] == expected_release_contract_runs
     assert "- uses: actions/checkout@v4" in ci_version_sync
     assert _workflow_run_steps(ci_version_sync) == [
         "bash scripts/check-version-sync.sh"
@@ -224,6 +239,53 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
     assert "workflow_dispatch:" in contracts_smoke
     assert "continue-on-error: true" in contracts_smoke
     assert "- run: bash scripts/contract-smoke.sh" in contracts_smoke
+
+    assert "name: Spec smoke (volatile live-network)" in spec_smoke
+    assert 'cron: "0 7 * * *"' in spec_smoke
+    assert "workflow_dispatch:" in spec_smoke
+    assert "- uses: actions/checkout@v4" in smoke_spec
+    assert "uses: arduino/setup-protoc@v3" in smoke_spec
+    assert "uses: dtolnay/rust-toolchain@stable" in smoke_spec
+    assert "uses: actions/setup-python@v5" in smoke_spec
+    assert "uses: astral-sh/setup-uv@v4" in smoke_spec
+    assert _workflow_run_steps(smoke_spec) == [
+        "cargo build --release --locked",
+        "make spec",
+    ]
+
+
+def test_makefile_spec_split_contract_is_documented_and_executable() -> None:
+    makefile = _read_repo("Makefile")
+
+    assert ".PHONY: build test check run clean spec spec-pr validate-skills test-contracts" in makefile
+    assert "Volatile live-network spec headings." in makefile
+    assert "PR gate: repo-local checks plus live-backed headings that have been stable" in makefile
+    assert "Smoke lane: `search article`, `gene articles`, `variant articles`," in makefile
+    assert "To move a heading into the smoke lane, add its exact pytest markdown node ID" in makefile
+    assert 'SPEC_PR_DESELECT_ARGS = \\' in makefile
+    for node_id in (
+        'spec/02-gene.md::Gene to Articles',
+        'spec/03-variant.md::Variant to Articles',
+        'spec/06-article.md::Searching by Gene',
+        'spec/06-article.md::Searching by Keyword',
+        'spec/06-article.md::Sort Behavior',
+        'spec/07-disease.md::Disease to Articles',
+    ):
+        assert f'--deselect "{node_id}"' in makefile
+    assert re.search(
+        r"^spec-pr:\n\tXDG_CACHE_HOME=\"\$\(CURDIR\)/\.cache\" PATH=\"\$\(CURDIR\)/target/release:\$\(PATH\)\" \\\n\t\tuv run --extra dev sh -c 'PATH=\"\$\(CURDIR\)/target/release:\$\$PATH\" pytest spec/ --mustmatch-lang bash --mustmatch-timeout 60 -v \$\(SPEC_PR_DESELECT_ARGS\)'$",
+        makefile,
+        flags=re.MULTILINE,
+    )
+    assert re.search(
+        r"^test-contracts:\n"
+        r"\tcargo build --release --locked\n"
+        r"\tuv sync --extra dev\n"
+        r'\tuv run pytest tests/ -v --mcp-cmd "\./target/release/biomcp serve"\n'
+        r"\tuv run mkdocs build --strict$",
+        makefile,
+        flags=re.MULTILINE,
+    )
 
 
 def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
@@ -267,6 +329,12 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "make test-contracts" in runbook
     assert "S2_API_KEY" in runbook
     assert "./target/release/biomcp article citations 22663011 --limit 3" in runbook
+    assert (
+        '`make test-contracts` runs `cargo build --release --locked`, '
+        '`uv sync --extra dev`, `pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, '
+        'and `mkdocs build --strict` - the same steps that PR CI `contracts` requires.'
+        in runbook
+    )
     assert "docs/user-guide/cli-reference.md" in runbook
     assert "docs/reference/mcp-server.md" in runbook
 
