@@ -39,6 +39,7 @@ nav:
       - Find Trials: how-to/find-trials.md
       - Predict Effects: how-to/predict-effects.md
       - Reproduce Papers: how-to/reproduce-papers.md
+      - Search All Workflow: how-to/search-all-workflow.md
       - Skill Validation: how-to/skill-validation.md
   - Study Charts:
       - Overview: charts/index.md

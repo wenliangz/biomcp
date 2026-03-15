@@ -224,6 +224,7 @@ biomcp uninstall        # remove biomcp from ~/.local/bin
 Full documentation at [biomcp.org](https://biomcp.org/).
 
 - [Getting Started](docs/getting-started/installation.md)
+- [Search All Workflow](docs/how-to/search-all-workflow.md)
 - [Data Sources](docs/reference/data-sources.md)
 - [Quick Reference](docs/reference/quick-reference.md)
 - [Troubleshooting](docs/troubleshooting.md)

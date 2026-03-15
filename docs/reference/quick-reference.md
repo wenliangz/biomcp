@@ -68,6 +68,8 @@ biomcp search all --gene BRAF --disease melanoma
 biomcp search all --keyword resistance --counts-only
 ```
 
+See also: [Search All Workflow](../how-to/search-all-workflow.md)
+
 ## Output modes and discovery commands
 
 ```bash

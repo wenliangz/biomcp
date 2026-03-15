@@ -168,6 +168,7 @@ catalog. Read it with `biomcp skill`, install it with
 
 - [Installation](getting-started/installation.md)
 - [First Query](getting-started/first-query.md)
+- [Search All Workflow](how-to/search-all-workflow.md)
 - [Data Sources](reference/data-sources.md)
 - [Quick Reference](reference/quick-reference.md)
 - [Troubleshooting](troubleshooting.md)
