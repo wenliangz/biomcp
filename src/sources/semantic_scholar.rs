@@ -13,7 +13,7 @@ const SEMANTIC_SCHOLAR_DOCS_URL: &str = "https://www.semanticscholar.org/product
 const GRAPH_PAPER_FIELDS: &str = "paperId,externalIds,title,venue,year,tldr,citationCount,influentialCitationCount,referenceCount,isOpenAccess,openAccessPdf";
 const BATCH_PAPER_FIELDS: &str = "paperId,externalIds,title,venue,year";
 const CITATION_EDGE_FIELDS: &str = "contexts,intents,isInfluential,citingPaper.paperId,citingPaper.externalIds,citingPaper.title,citingPaper.venue,citingPaper.year";
-const REFERENCE_EDGE_FIELDS: &str = "contexts,intents,isInfluential,referencedPaper.paperId,referencedPaper.externalIds,referencedPaper.title,referencedPaper.venue,referencedPaper.year";
+const REFERENCE_EDGE_FIELDS: &str = "contexts,intents,isInfluential,citedPaper.paperId,citedPaper.externalIds,citedPaper.title,citedPaper.venue,citedPaper.year";
 const RECOMMENDATION_FIELDS: &str = "paperId,externalIds,title,venue,year";
 
 #[derive(Clone)]
@@ -349,8 +349,8 @@ pub struct SemanticScholarReferenceEdge {
     pub intents: Vec<String>,
     #[serde(rename = "isInfluential")]
     pub is_influential: Option<bool>,
-    #[serde(rename = "referencedPaper")]
-    pub referenced_paper: SemanticScholarPaper,
+    #[serde(rename = "citedPaper")]
+    pub cited_paper: SemanticScholarPaper,
 }
 
 #[derive(Debug, Serialize)]

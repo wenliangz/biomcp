@@ -1186,7 +1186,7 @@ fn graph_edge_from_citation(edge: SemanticScholarCitationEdge) -> ArticleGraphEd
 
 fn graph_edge_from_reference(edge: SemanticScholarReferenceEdge) -> ArticleGraphEdge {
     ArticleGraphEdge {
-        paper: related_paper_from_semantic_scholar(&edge.referenced_paper),
+        paper: related_paper_from_semantic_scholar(&edge.cited_paper),
         intents: edge.intents,
         contexts: edge.contexts,
         is_influential: edge.is_influential.unwrap_or(false),
