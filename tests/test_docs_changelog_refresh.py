@@ -141,7 +141,7 @@ def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
 
 
 def test_release_overview_describes_streamable_http_workflow_demo() -> None:
-    overview = _read("analysis/technical/overview.md")
+    overview = _read("design/technical/overview.md")
 
     assert "standalone Streamable HTTP demo client" in overview
     assert "three-step" in overview
@@ -164,10 +164,10 @@ def test_latest_changelog_documents_mcp_tool_rename() -> None:
     assert "`biomcp`" in latest_release_block
 
 
-def test_release_overview_mentions_v0_8_15_current_version() -> None:
-    overview = _read("analysis/technical/overview.md")
+def test_release_overview_mentions_v0_8_16_current_version() -> None:
+    overview = _read("design/technical/overview.md")
 
-    assert "**Current version:** 0.8.15 (as of 2026-03-11)" in overview
+    assert "**Current version:** 0.8.16 (as of 2026-03-17)" in overview
 
 
 def test_gene_guide_includes_new_sections_and_positional_search() -> None:

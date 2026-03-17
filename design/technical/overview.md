@@ -28,7 +28,7 @@ curl ... install.sh | bash       # binary installer (resolves latest release)
 ```
 
 - **Edition:** Rust 2024
-- **Current version:** 0.8.15 (as of 2026-03-11)
+- **Current version:** 0.8.16 (as of 2026-03-17)
 - **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
 - **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
 - **Release checklist:** Bump `Cargo.toml` and `pyproject.toml`, update
@@ -192,7 +192,7 @@ replacing the real BioMCP markdown output.
 
 ## Operator Notes
 
-Runtime operator docs now live in `analysis/technical/staging-demo.md` and
+Runtime operator docs now live in `design/technical/staging-demo.md` and
 `RUN.md`. Use those documents for the shared target, promotion contract, and
 exact release-binary run/smoke commands, then use `scripts/` for the source
 probe inventory and demo helpers.
