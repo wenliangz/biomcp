@@ -3,21 +3,28 @@ use std::sync::OnceLock;
 
 use minijinja::{Environment, context};
 
+use crate::cli::debug_plan::DebugPlan;
 use crate::cli::search_all::SearchAllResults;
 use crate::entities::adverse_event::{
     AdverseEvent, AdverseEventCountBucket, AdverseEventSearchResult, AdverseEventSearchSummary,
     DeviceEvent, DeviceEventSearchResult, RecallSearchResult,
 };
 use crate::entities::article::{
-    Article, ArticleAnnotations, ArticleGraphResult, ArticleRecommendationsResult,
-    ArticleRelatedPaper, ArticleSearchResult, ArticleSource,
+    AnnotationCount, Article, ArticleAnnotations, ArticleBatchEntitySummary, ArticleBatchItem,
+    ArticleGraphResult, ArticleRecommendationsResult, ArticleRelatedPaper, ArticleSearchResult,
+    ArticleSort, ArticleSource,
 };
-use crate::entities::disease::{Disease, DiseaseSearchResult, PhenotypeSearchResult};
+use crate::entities::discover::{DiscoverResult, DiscoverType};
+use crate::entities::disease::{
+    Disease, DiseaseAssociationScoreSummary, DiseaseSearchResult, PhenotypeSearchResult,
+};
 use crate::entities::drug::{Drug, DrugSearchResult};
 use crate::entities::gene::{Gene, GeneSearchResult};
 use crate::entities::pathway::{Pathway, PathwaySearchResult};
 use crate::entities::pgx::{Pgx, PgxSearchResult};
-use crate::entities::protein::{Protein, ProteinSearchResult};
+use crate::entities::protein::{
+    Protein, ProteinComplex, ProteinComplexComponent, ProteinComplexCuration, ProteinSearchResult,
+};
 use crate::entities::study::{
     CoOccurrenceResult as StudyCoOccurrenceResult, CohortResult as StudyCohortResult,
     ExpressionComparisonResult as StudyExpressionComparisonResult,
@@ -28,6 +35,7 @@ use crate::entities::study::{
 use crate::entities::trial::{Trial, TrialSearchResult};
 use crate::entities::variant::{
     Variant, VariantGwasAssociation, VariantOncoKbResult, VariantPrediction, VariantSearchResult,
+    gnomad_variant_slug,
 };
 use crate::error::BioMcpError;
 
@@ -40,11 +48,65 @@ struct XrefRow {
 }
 
 #[derive(serde::Serialize)]
-struct ArticleSearchSourceGroup {
-    source_key: String,
-    source_label: String,
-    count: usize,
-    results: Vec<ArticleSearchResult>,
+struct ArticleSearchRenderRow {
+    pmid: String,
+    title: String,
+    sources: String,
+    date: Option<String>,
+    why: String,
+    citation_count: Option<u64>,
+    is_retracted: Option<bool>,
+}
+
+#[derive(serde::Serialize)]
+struct ProteinComplexSummaryRow {
+    accession: String,
+    name: String,
+    component_count: usize,
+    curation: String,
+}
+
+#[derive(serde::Serialize)]
+struct ProteinComplexDetailRow {
+    accession: String,
+    component_count: usize,
+    component_preview: String,
+    remaining_count: usize,
+    description: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct DiseaseGeneAssociationRenderRow {
+    gene: String,
+    relationship: Option<String>,
+    source: Option<String>,
+    source_url: Option<String>,
+    opentargets: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct DiseasePhenotypeRenderRow {
+    hpo_id: String,
+    name: Option<String>,
+    evidence: Option<String>,
+    frequency: Option<String>,
+    frequency_qualifier: Option<String>,
+    onset_qualifier: Option<String>,
+    sex_qualifier: Option<String>,
+    stage_qualifier: Option<String>,
+    qualifiers: Vec<String>,
+    source: Option<String>,
+    source_url: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct DiseaseModelAssociationRenderRow {
+    model: String,
+    organism: Option<String>,
+    relationship: Option<String>,
+    source: Option<String>,
+    source_url: Option<String>,
+    evidence_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,11 +349,173 @@ fn env() -> Result<&'static Environment<'static>, BioMcpError> {
         "search_all.md.j2",
         include_str!("../../templates/search_all.md.j2"),
     )?;
+    env.add_template(
+        "discover.md.j2",
+        include_str!("../../templates/discover.md.j2"),
+    )?;
 
     let _ = ENV.set(env);
     Ok(ENV
         .get()
         .expect("ENV should be initialized by the time this is reached"))
+}
+
+fn format_disease_association_score(summary: &DiseaseAssociationScoreSummary) -> String {
+    let mut parts = vec![format!("overall {:.3}", summary.overall_score)];
+    if let Some(score) = summary.gwas_score {
+        parts.push(format!("GWAS {:.3}", score));
+    }
+    if let Some(score) = summary.rare_variant_score {
+        parts.push(format!("rare {:.3}", score));
+    }
+    if let Some(score) = summary.somatic_mutation_score {
+        parts.push(format!("somatic {:.3}", score));
+    }
+    parts.join("; ")
+}
+
+fn disease_top_gene_score_labels(disease: &Disease) -> Vec<String> {
+    disease
+        .top_gene_scores
+        .iter()
+        .take(5)
+        .map(|row| format!("{} (OT {:.3})", row.symbol, row.summary.overall_score))
+        .collect()
+}
+
+fn disease_gene_association_rows(disease: &Disease) -> Vec<DiseaseGeneAssociationRenderRow> {
+    disease
+        .gene_associations
+        .iter()
+        .map(|row| DiseaseGeneAssociationRenderRow {
+            gene: row.gene.clone(),
+            relationship: row.relationship.clone(),
+            source: row.source.clone(),
+            source_url: disease_source_url(disease, row.source.as_deref(), None),
+            opentargets: row
+                .opentargets_score
+                .as_ref()
+                .map(format_disease_association_score),
+        })
+        .collect()
+}
+
+fn disease_phenotype_rows(disease: &Disease) -> Vec<DiseasePhenotypeRenderRow> {
+    disease
+        .phenotypes
+        .iter()
+        .map(|row| DiseasePhenotypeRenderRow {
+            hpo_id: row.hpo_id.clone(),
+            name: row.name.clone(),
+            evidence: row.evidence.clone(),
+            frequency: row.frequency.clone(),
+            frequency_qualifier: row.frequency_qualifier.clone(),
+            onset_qualifier: row.onset_qualifier.clone(),
+            sex_qualifier: row.sex_qualifier.clone(),
+            stage_qualifier: row.stage_qualifier.clone(),
+            qualifiers: row.qualifiers.clone(),
+            source: row.source.clone(),
+            source_url: disease_source_url(disease, row.source.as_deref(), None),
+        })
+        .collect()
+}
+
+fn disease_model_rows(disease: &Disease) -> Vec<DiseaseModelAssociationRenderRow> {
+    disease
+        .models
+        .iter()
+        .map(|row| DiseaseModelAssociationRenderRow {
+            model: row.model.clone(),
+            organism: row.organism.clone(),
+            relationship: row.relationship.clone(),
+            source: row.source.clone(),
+            source_url: disease_source_url(disease, row.source.as_deref(), row.model_id.as_deref())
+                .or_else(|| disease_source_url(disease, row.source.as_deref(), Some(&row.model))),
+            evidence_count: row.evidence_count,
+        })
+        .collect()
+}
+
+fn source_matches(source: Option<&str>, needle: &str) -> bool {
+    source
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| value.to_ascii_lowercase().contains(needle))
+}
+
+fn orphanet_disease_url(disease: &Disease) -> Option<String> {
+    disease
+        .xrefs
+        .get("Orphanet")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("https://www.orpha.net/en/disease/detail/{value}"))
+}
+
+fn omim_disease_url(disease: &Disease) -> Option<String> {
+    disease
+        .xrefs
+        .get("OMIM")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("https://www.omim.org/entry/{value}"))
+}
+
+fn mgi_model_url(model_id: Option<&str>) -> Option<String> {
+    let model_id = model_id
+        .map(str::trim)
+        .filter(|value| value.starts_with("MGI:"))?;
+    Some(format!(
+        "https://www.informatics.jax.org/accession/{model_id}"
+    ))
+}
+
+fn disease_source_url(
+    disease: &Disease,
+    source: Option<&str>,
+    model_id: Option<&str>,
+) -> Option<String> {
+    if source_matches(source, "orphanet") {
+        return orphanet_disease_url(disease);
+    }
+    if source_matches(source, "omim") {
+        return omim_disease_url(disease);
+    }
+    if source_matches(source, "mgi") {
+        return mgi_model_url(model_id);
+    }
+    None
+}
+
+fn openfda_count_query_url(query: &str, count_field: &str, limit: usize) -> Option<String> {
+    let mut url = reqwest::Url::parse("https://api.fda.gov/drug/event.json").ok()?;
+    url.query_pairs_mut()
+        .append_pair("search", query)
+        .append_pair("count", count_field)
+        .append_pair("limit", &limit.to_string());
+    Some(url.into())
+}
+
+fn dailymed_setid_url(set_id: &str) -> Option<String> {
+    let set_id = set_id.trim();
+    if set_id.is_empty() {
+        return None;
+    }
+    let mut url = reqwest::Url::parse("https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm").ok()?;
+    url.query_pairs_mut().append_pair("setid", set_id);
+    Some(url.into())
+}
+
+fn dailymed_search_url(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let mut url = reqwest::Url::parse("https://dailymed.nlm.nih.gov/dailymed/search.cfm").ok()?;
+    url.query_pairs_mut().append_pair("query", name);
+    Some(url.into())
 }
 
 fn append_evidence_urls(mut body: String, urls: Vec<(&str, String)>) -> String {
@@ -394,6 +618,35 @@ pub(crate) fn variant_evidence_urls(variant: &Variant) -> Vec<(&'static str, Str
             format!("https://cancer.sanger.ac.uk/cosmic/mutation/overview?id={cosmic_id}"),
         ));
     }
+    if (variant.gnomad_af.is_some() || variant.population_breakdown.is_some())
+        && let Some(variant_id) = variant
+            .rsid
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| gnomad_variant_slug(&variant.id))
+    {
+        urls.push((
+            "gnomAD",
+            format!("https://gnomad.broadinstitute.org/variant/{variant_id}"),
+        ));
+    }
+    urls
+}
+
+pub(crate) fn discover_evidence_urls(result: &DiscoverResult) -> Vec<(&'static str, String)> {
+    let mut urls = Vec::new();
+    if let Ok(mut url) = reqwest::Url::parse("https://www.ebi.ac.uk/ols4/api/search") {
+        url.query_pairs_mut()
+            .append_pair("q", result.query.trim())
+            .append_pair("rows", "10")
+            .append_pair("groupField", "iri");
+        urls.push(("OLS4", url.into()));
+    }
+    if let Some(topic) = result.plain_language.as_ref() {
+        urls.push(("MedlinePlus", topic.url.clone()));
+    }
     urls
 }
 
@@ -432,13 +685,43 @@ pub(crate) fn trial_evidence_urls(trial: &Trial) -> Vec<(&'static str, String)> 
 }
 
 pub(crate) fn disease_evidence_urls(disease: &Disease) -> Vec<(&'static str, String)> {
-    if disease.id.trim().is_empty() {
-        return Vec::new();
+    let mut urls = Vec::new();
+    if !disease.id.trim().is_empty() {
+        urls.push((
+            "Monarch",
+            format!("https://monarchinitiative.org/{}", disease.id.trim()),
+        ));
     }
-    vec![(
-        "Monarch",
-        format!("https://monarchinitiative.org/{}", disease.id.trim()),
-    )]
+    if disease
+        .gene_associations
+        .iter()
+        .any(|row| source_matches(row.source.as_deref(), "orphanet"))
+        && let Some(url) = orphanet_disease_url(disease)
+    {
+        urls.push(("Orphanet", url));
+    }
+    let has_omim_source = disease
+        .gene_associations
+        .iter()
+        .any(|row| source_matches(row.source.as_deref(), "omim"))
+        || disease
+            .phenotypes
+            .iter()
+            .any(|row| source_matches(row.source.as_deref(), "omim"));
+    if has_omim_source && let Some(url) = omim_disease_url(disease) {
+        urls.push(("OMIM", url));
+    }
+    if let Some(url) = disease
+        .models
+        .iter()
+        .find(|row| source_matches(row.source.as_deref(), "mgi"))
+        .and_then(|row| {
+            mgi_model_url(row.model_id.as_deref()).or_else(|| mgi_model_url(Some(&row.model)))
+        })
+    {
+        urls.push(("MGI", url));
+    }
+    urls
 }
 
 pub(crate) fn drug_evidence_urls(drug: &Drug) -> Vec<(&'static str, String)> {
@@ -465,16 +748,46 @@ pub(crate) fn drug_evidence_urls(drug: &Drug) -> Vec<(&'static str, String)> {
             format!("https://www.ebi.ac.uk/chembl/compound_report_card/{chembl_id}"),
         ));
     }
+    if !drug.top_adverse_events.is_empty()
+        && let Some(query) = drug
+            .faers_query
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        && let Some(url) =
+            openfda_count_query_url(query, "patient.reaction.reactionmeddrapt.exact", 50)
+    {
+        urls.push(("OpenFDA FAERS", url));
+    }
+    if drug.label.is_some()
+        && let Some(url) = drug
+            .label_set_id
+            .as_deref()
+            .and_then(dailymed_setid_url)
+            .or_else(|| dailymed_search_url(&drug.name))
+    {
+        urls.push(("DailyMed", url));
+    }
     urls
 }
 
 pub(crate) fn pathway_evidence_urls(pathway: &Pathway) -> Vec<(&'static str, String)> {
-    if pathway.id.trim().is_empty() {
+    let id = pathway.id.trim();
+    if id.is_empty() {
         return Vec::new();
+    }
+    if pathway.source.eq_ignore_ascii_case("KEGG") {
+        return vec![("KEGG", format!("https://www.kegg.jp/entry/{id}"))];
+    }
+    if pathway.source.eq_ignore_ascii_case("WikiPathways") {
+        return vec![(
+            "WikiPathways",
+            format!("https://www.wikipathways.org/pathways/{id}.html"),
+        )];
     }
     vec![(
         "Reactome",
-        format!("https://reactome.org/content/detail/{}", pathway.id.trim()),
+        format!("https://reactome.org/content/detail/{id}"),
     )]
 }
 
@@ -535,7 +848,7 @@ pub(crate) fn pgx_evidence_urls(pgx: &Pgx) -> Vec<(&'static str, String)> {
     urls
 }
 
-fn quote_arg(value: &str) -> String {
+pub(crate) fn quote_arg(value: &str) -> String {
     let v = value.trim();
     if v.is_empty() {
         return String::new();
@@ -544,6 +857,80 @@ fn quote_arg(value: &str) -> String {
         return format!("\"{}\"", v.replace('\"', "\\\""));
     }
     v.to_string()
+}
+
+pub(crate) fn alias_fallback_suggestion(
+    decision: &crate::entities::discover::AliasFallbackDecision,
+) -> String {
+    match decision {
+        crate::entities::discover::AliasFallbackDecision::Canonical(alias) => {
+            let command = alias.next_commands.first().cloned().unwrap_or_else(|| {
+                format!(
+                    "biomcp get {} {}",
+                    alias.requested_entity.cli_name(),
+                    quote_arg(&alias.canonical)
+                )
+            });
+            format!("Did you mean: `{command}`")
+        }
+        crate::entities::discover::AliasFallbackDecision::Ambiguous(alias) => {
+            let mut out = format!(
+                "BioMCP could not map '{}' to a single {}.\n\nTry:",
+                alias.query,
+                alias.requested_entity.cli_name()
+            );
+            for (idx, command) in alias.next_commands.iter().enumerate() {
+                out.push_str(&format!("\n{}. {command}", idx + 1));
+            }
+            if !alias.candidates.is_empty() {
+                out.push_str("\n\nPossible matches:");
+                for candidate in &alias.candidates {
+                    match candidate.primary_id.as_deref() {
+                        Some(primary_id) => out.push_str(&format!(
+                            "\n- {} ({}, {})",
+                            candidate.label,
+                            candidate.primary_type.label(),
+                            primary_id
+                        )),
+                        None => out.push_str(&format!(
+                            "\n- {} ({})",
+                            candidate.label,
+                            candidate.primary_type.label()
+                        )),
+                    }
+                }
+            }
+            out
+        }
+        crate::entities::discover::AliasFallbackDecision::None => String::new(),
+    }
+}
+
+pub(crate) fn variant_guidance_suggestion(
+    guidance: &crate::entities::variant::VariantGuidance,
+) -> String {
+    match &guidance.kind {
+        crate::entities::variant::VariantGuidanceKind::GeneResidueAlias { .. } => {
+            let mut out = format!(
+                "BioMCP could not map '{}' to an exact variant.\n\nTry:",
+                guidance.query
+            );
+            for (idx, command) in guidance.next_commands.iter().enumerate() {
+                out.push_str(&format!("\n{}. {command}", idx + 1));
+            }
+            out
+        }
+        crate::entities::variant::VariantGuidanceKind::ProteinChangeOnly { .. } => {
+            let mut out = format!(
+                "BioMCP could not map '{}' to an exact variant without gene context.\n\nTry:",
+                guidance.query
+            );
+            for (idx, command) in guidance.next_commands.iter().enumerate() {
+                out.push_str(&format!("\n{}. {command}", idx + 1));
+            }
+            out
+        }
+    }
 }
 
 fn has_all_section(requested: &[String]) -> bool {
@@ -743,7 +1130,10 @@ fn sections_pathway(pathway: &Pathway, requested: &[String]) -> Vec<String> {
     if id.is_empty() {
         return Vec::new();
     }
-    sections_for(requested, crate::entities::pathway::PATHWAY_SECTION_NAMES)
+    sections_for(
+        requested,
+        crate::entities::pathway::supported_pathway_sections_for_source(&pathway.source),
+    )
 }
 
 fn sections_protein(protein: &Protein, requested: &[String]) -> Vec<String> {
@@ -894,11 +1284,18 @@ pub(crate) fn related_pathway(pathway: &Pathway) -> Vec<String> {
     vec![format!("biomcp pathway drugs {id}")]
 }
 
-pub(crate) fn related_protein(protein: &Protein) -> Vec<String> {
+pub(crate) fn related_protein(protein: &Protein, requested_sections: &[String]) -> Vec<String> {
     let accession = quote_arg(&protein.accession);
+    let requested = requested_section_names(requested_sections);
+    let requested_section = |name: &str| requested.iter().any(|value| value == name);
     let mut out = Vec::new();
     if !accession.is_empty() {
-        out.push(format!("biomcp get protein {accession} structures"));
+        if !requested_section("structures") {
+            out.push(format!("biomcp get protein {accession} structures"));
+        }
+        if !requested_section("complexes") {
+            out.push(format!("biomcp get protein {accession} complexes"));
+        }
     }
     if let Some(symbol) = protein
         .gene_symbol
@@ -909,6 +1306,68 @@ pub(crate) fn related_protein(protein: &Protein) -> Vec<String> {
         out.push(format!("biomcp get gene {symbol}"));
     }
     out
+}
+
+fn format_protein_complex_component(component: &ProteinComplexComponent) -> String {
+    let accession = component.accession.trim();
+    let name = component.name.trim();
+    let label = if name.is_empty() { accession } else { name };
+    let stoichiometry = component
+        .stoichiometry
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match stoichiometry {
+        Some(stoichiometry) => format!("{label} ({stoichiometry})"),
+        None => label.to_string(),
+    }
+}
+
+fn protein_complex_summary_rows(complexes: &[ProteinComplex]) -> Vec<ProteinComplexSummaryRow> {
+    complexes
+        .iter()
+        .map(|complex| ProteinComplexSummaryRow {
+            accession: markdown_cell(&complex.accession),
+            name: markdown_cell(&complex.name),
+            component_count: complex.components.len(),
+            curation: match &complex.curation {
+                ProteinComplexCuration::Curated => "curated".to_string(),
+                ProteinComplexCuration::Predicted => "predicted".to_string(),
+            },
+        })
+        .collect()
+}
+
+fn protein_complex_detail_rows(complexes: &[ProteinComplex]) -> Vec<ProteinComplexDetailRow> {
+    complexes
+        .iter()
+        .map(|complex| {
+            let component_count = complex.components.len();
+            let preview_components = complex
+                .components
+                .iter()
+                .take(5)
+                .map(format_protein_complex_component)
+                .map(|component| markdown_cell(&component))
+                .collect::<Vec<_>>();
+            ProteinComplexDetailRow {
+                accession: markdown_cell(&complex.accession),
+                component_count,
+                component_preview: if preview_components.is_empty() {
+                    "none listed".to_string()
+                } else {
+                    preview_components.join(", ")
+                },
+                remaining_count: component_count.saturating_sub(preview_components.len()),
+                description: complex
+                    .description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(markdown_cell),
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn related_drug(drug: &Drug) -> Vec<String> {
@@ -963,9 +1422,12 @@ pub fn gene_markdown(gene: &Gene, requested_sections: &[String]) -> Result<Strin
     let has_requested = |name: &str| requested.iter().any(|s| s.eq_ignore_ascii_case(name));
     let show_civic_section = include_all || has_requested("civic");
     let show_expression_section = include_all || has_requested("expression");
+    let show_hpa_section = include_all || has_requested("hpa");
     let show_druggability_section =
         include_all || has_requested("druggability") || has_requested("drugs");
     let show_clingen_section = include_all || has_requested("clingen");
+    let show_constraint_section = include_all || has_requested("constraint");
+    let show_disgenet_section = include_all || has_requested("disgenet");
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(&gene.symbol, requested_sections),
@@ -990,12 +1452,18 @@ pub fn gene_markdown(gene: &Gene, requested_sections: &[String]) -> Result<Strin
         interactions => &gene.interactions,
         civic => &gene.civic,
         expression => &gene.expression,
+        hpa => &gene.hpa,
         druggability => &gene.druggability,
         clingen => &gene.clingen,
+        constraint => &gene.constraint,
+        disgenet => &gene.disgenet,
         show_civic_section => show_civic_section,
         show_expression_section => show_expression_section,
+        show_hpa_section => show_hpa_section,
         show_druggability_section => show_druggability_section,
         show_clingen_section => show_clingen_section,
+        show_constraint_section => show_constraint_section,
+        show_disgenet_section => show_disgenet_section,
         sections_block => format_sections_block("gene", &gene.symbol, sections_gene(gene, requested_sections)),
         related_block => format_related_block(related_gene(gene)),
     })?;
@@ -1161,6 +1629,71 @@ pub fn article_entities_markdown(
     })?)
 }
 
+fn article_batch_counts(label: &str, rows: &[AnnotationCount]) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{label}: {}",
+        rows.iter()
+            .map(|row| format!("{} ({})", row.text.trim(), row.count))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
+fn article_batch_entities(summary: Option<&ArticleBatchEntitySummary>) -> Option<String> {
+    let summary = summary?;
+    let parts = [
+        article_batch_counts("Genes", &summary.genes),
+        article_batch_counts("Diseases", &summary.diseases),
+        article_batch_counts("Chemicals", &summary.chemicals),
+        article_batch_counts("Mutations", &summary.mutations),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
+pub fn article_batch_markdown(items: &[ArticleBatchItem]) -> Result<String, BioMcpError> {
+    let mut out = format!("# Article Batch ({})\n\n", items.len());
+    for (idx, item) in items.iter().enumerate() {
+        out.push_str(&format!("## {}. {}\n", idx + 1, item.title.trim()));
+        if let Some(pmid) = &item.pmid {
+            out.push_str(&format!("PMID: {}\n", pmid.trim()));
+        } else if let Some(pmcid) = &item.pmcid {
+            out.push_str(&format!("PMCID: {}\n", pmcid.trim()));
+        } else if let Some(doi) = &item.doi {
+            out.push_str(&format!("DOI: {}\n", doi.trim()));
+        }
+        if let Some(journal) = &item.journal {
+            out.push_str(&format!("Journal: {}\n", journal.trim()));
+        }
+        if let Some(year) = item.year {
+            out.push_str(&format!("Year: {}\n", year));
+        }
+        if let Some(entities) = article_batch_entities(item.entity_summary.as_ref()) {
+            out.push_str(&format!("Entities: {}\n", entities));
+        }
+        if let Some(tldr) = &item.tldr {
+            out.push_str(&format!("TLDR: {}\n", tldr.trim()));
+        }
+        match (item.citation_count, item.influential_citation_count) {
+            (Some(c), Some(ic)) => out.push_str(&format!("Citations: {c} (influential: {ic})\n")),
+            (Some(c), None) => out.push_str(&format!("Citations: {c}\n")),
+            (None, Some(ic)) => out.push_str(&format!("Citations: influential {ic}\n")),
+            (None, None) => {}
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 pub fn article_graph_markdown(
     kind: &str,
     result: &ArticleGraphResult,
@@ -1250,36 +1783,81 @@ pub fn article_recommendations_markdown(
     Ok(out)
 }
 
-pub fn article_search_markdown(
-    query: &str,
-    results: &[ArticleSearchResult],
-) -> Result<String, BioMcpError> {
-    article_search_markdown_with_footer(query, results, "")
+fn article_sources_label(row: &ArticleSearchResult) -> String {
+    let mut sources = if row.matched_sources.is_empty() {
+        vec![row.source]
+    } else {
+        row.matched_sources.clone()
+    };
+    sources.dedup();
+    sources
+        .into_iter()
+        .map(ArticleSource::display_name)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
-pub fn article_search_markdown_with_footer(
+fn article_ranking_why(row: &ArticleSearchResult, sort: ArticleSort) -> String {
+    if sort != ArticleSort::Relevance {
+        return "-".to_string();
+    }
+    let Some(ranking) = row.ranking.as_ref() else {
+        return "-".to_string();
+    };
+    if ranking.anchor_count == 0 {
+        return "-".to_string();
+    }
+    if ranking.all_anchors_in_title {
+        return format!(
+            "title {}/{}",
+            ranking.title_anchor_hits, ranking.anchor_count
+        );
+    }
+    if ranking.all_anchors_in_text {
+        return format!(
+            "title+abstract {}/{}",
+            ranking.combined_anchor_hits, ranking.anchor_count
+        );
+    }
+    if ranking.abstract_anchor_hits > 0 && ranking.title_anchor_hits > 0 {
+        return format!(
+            "title+abstract {}/{}",
+            ranking.combined_anchor_hits, ranking.anchor_count
+        );
+    }
+    if ranking.abstract_anchor_hits > 0 {
+        return format!(
+            "abstract {}/{}",
+            ranking.abstract_anchor_hits, ranking.anchor_count
+        );
+    }
+    if ranking.title_anchor_hits > 0 {
+        return format!(
+            "title {}/{}",
+            ranking.title_anchor_hits, ranking.anchor_count
+        );
+    }
+    "-".to_string()
+}
+
+pub fn article_search_markdown_with_footer_and_context(
     query: &str,
     results: &[ArticleSearchResult],
     pagination_footer: &str,
+    sort: ArticleSort,
+    semantic_scholar_enabled: bool,
+    debug_plan: Option<&DebugPlan>,
 ) -> Result<String, BioMcpError> {
-    let groups = [ArticleSource::PubTator, ArticleSource::EuropePmc]
-        .into_iter()
-        .filter_map(|source| {
-            let rows = results
-                .iter()
-                .filter(|row| row.source == source)
-                .cloned()
-                .collect::<Vec<_>>();
-            if rows.is_empty() {
-                None
-            } else {
-                Some(ArticleSearchSourceGroup {
-                    source_key: source.as_str().to_string(),
-                    source_label: source.display_name().to_string(),
-                    count: rows.len(),
-                    results: rows,
-                })
-            }
+    let rows = results
+        .iter()
+        .map(|row| ArticleSearchRenderRow {
+            pmid: row.pmid.clone(),
+            title: row.title.clone(),
+            sources: article_sources_label(row),
+            date: row.date.clone(),
+            why: article_ranking_why(row, sort),
+            citation_count: row.citation_count,
+            is_retracted: row.is_retracted,
         })
         .collect::<Vec<_>>();
 
@@ -1287,10 +1865,25 @@ pub fn article_search_markdown_with_footer(
     let body = tmpl.render(context! {
         query => query,
         count => results.len(),
-        groups => groups,
+        rows => rows,
+        semantic_scholar_enabled => semantic_scholar_enabled,
+        sort => sort.as_str(),
+        ranking_policy => "directness-first (title coverage > title+abstract coverage > study/review cue > citation support)",
         pagination_footer => pagination_footer,
     })?;
-    Ok(with_pagination_footer(body, pagination_footer))
+    let body = with_pagination_footer(body, pagination_footer);
+    if let Some(debug_plan) = debug_plan {
+        Ok(format!("{}{}", render_debug_plan_block(debug_plan)?, body))
+    } else {
+        Ok(body)
+    }
+}
+
+fn render_debug_plan_block(debug_plan: &DebugPlan) -> Result<String, BioMcpError> {
+    Ok(format!(
+        "## Debug plan\n\n```json\n{}\n```\n\n",
+        serde_json::to_string_pretty(debug_plan)?
+    ))
 }
 
 pub fn disease_markdown(
@@ -1318,6 +1911,7 @@ pub fn disease_markdown(
     let show_models_section = include_all || has_requested("models");
     let show_prevalence_section = include_all || has_requested("prevalence");
     let show_civic_section = include_all || has_requested("civic");
+    let show_disgenet_section = include_all || has_requested("disgenet");
     let disease_label = if disease.name.trim().is_empty() {
         disease.id.as_str()
     } else {
@@ -1325,6 +1919,10 @@ pub fn disease_markdown(
     };
 
     let tmpl = env()?.get_template("disease.md.j2")?;
+    let top_gene_score_labels = disease_top_gene_score_labels(disease);
+    let gene_association_rows = disease_gene_association_rows(disease);
+    let phenotype_rows = disease_phenotype_rows(disease);
+    let model_rows = disease_model_rows(disease);
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(disease_label, requested_sections),
@@ -1335,16 +1933,21 @@ pub fn disease_markdown(
         parents => &disease.parents,
         associated_genes => &disease.associated_genes,
         gene_associations => &disease.gene_associations,
+        gene_association_rows => gene_association_rows,
         top_genes => &disease.top_genes,
+        top_gene_scores => &disease.top_gene_scores,
+        top_gene_score_labels => top_gene_score_labels,
         treatment_landscape => &disease.treatment_landscape,
         recruiting_trial_count => &disease.recruiting_trial_count,
         pathways => &disease.pathways,
-        phenotypes => &disease.phenotypes,
+        phenotypes => phenotype_rows,
         variants => &disease.variants,
-        models => &disease.models,
+        top_variant => &disease.top_variant,
+        models => model_rows,
         prevalence => &disease.prevalence,
         prevalence_note => &disease.prevalence_note,
         civic => &disease.civic,
+        disgenet => &disease.disgenet,
         show_genes_section => show_genes_section,
         show_pathways_section => show_pathways_section,
         show_phenotypes_section => show_phenotypes_section,
@@ -1352,6 +1955,7 @@ pub fn disease_markdown(
         show_models_section => show_models_section,
         show_prevalence_section => show_prevalence_section,
         show_civic_section => show_civic_section,
+        show_disgenet_section => show_disgenet_section,
         xrefs => xrefs,
         sections_block => format_sections_block("disease", &disease.id, sections_disease(disease, requested_sections)),
         related_block => format_related_block(related_disease(disease)),
@@ -1466,6 +2070,7 @@ pub fn trial_markdown(trial: &Trial, requested_sections: &[String]) -> Result<St
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(&trial.nct_id, requested_sections),
+        trial_source_label => crate::render::provenance::trial_source_label(trial.source.as_deref()),
         nct_id => &trial.nct_id,
         title => &trial.title,
         status => &trial.status,
@@ -1571,7 +2176,9 @@ pub fn variant_markdown(
         conditions => &variant.conditions,
         clinvar_conditions => &variant.clinvar_conditions,
         clinvar_condition_reports => &variant.clinvar_condition_reports,
+        top_disease => &variant.top_disease,
         gnomad_af => &variant.gnomad_af,
+        allele_frequency_percent => &variant.allele_frequency_percent,
         population_breakdown => &variant.population_breakdown,
         cadd_score => &variant.cadd_score,
         sift_pred => &variant.sift_pred,
@@ -1788,6 +2395,7 @@ pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<Strin
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(&drug.name, requested_sections),
+        drug_interactions_heading => crate::render::provenance::drug_interaction_heading_label(drug),
         name => &drug.name,
         drugbank_id => &drug.drugbank_id,
         chembl_id => &drug.chembl_id,
@@ -1796,6 +2404,7 @@ pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<Strin
         mechanism => &drug.mechanism,
         mechanisms => &drug.mechanisms,
         approval_date => &drug.approval_date,
+        approval_date_display => &drug.approval_date_display,
         brand_names => &drug.brand_names,
         route => &drug.route,
         top_adverse_events => &drug.top_adverse_events,
@@ -1865,6 +2474,8 @@ pub fn pathway_markdown(
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(pathway_label, requested_sections),
+        pathway_source_label => crate::render::provenance::pathway_source_label(&pathway.source),
+        source => &pathway.source,
         id => &pathway.id,
         name => &pathway.name,
         species => &pathway.species,
@@ -1918,12 +2529,15 @@ pub fn protein_markdown(
     let has_requested = |name: &str| requested.iter().any(|s| s.eq_ignore_ascii_case(name));
     let show_domains_section = !section_only || include_all || has_requested("domains");
     let show_interactions_section = !section_only || include_all || has_requested("interactions");
+    let show_complexes_section = !section_only || include_all || has_requested("complexes");
     let show_structures_section = !section_only || include_all || has_requested("structures");
     let protein_label = if protein.name.trim().is_empty() {
         protein.accession.as_str()
     } else {
         protein.name.as_str()
     };
+    let complex_summaries = protein_complex_summary_rows(&protein.complexes);
+    let complex_details = protein_complex_detail_rows(&protein.complexes);
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(protein_label, requested_sections),
@@ -1938,11 +2552,14 @@ pub fn protein_markdown(
         structure_count => &protein.structure_count,
         domains => &protein.domains,
         interactions => &protein.interactions,
+        complexes => complex_summaries,
+        complex_details => complex_details,
         show_domains_section => show_domains_section,
         show_interactions_section => show_interactions_section,
+        show_complexes_section => show_complexes_section,
         show_structures_section => show_structures_section,
         sections_block => format_sections_block("protein", &protein.accession, sections_protein(protein, requested_sections)),
-        related_block => format_related_block(related_protein(protein)),
+        related_block => format_related_block(related_protein(protein, requested_sections)),
     })?;
     Ok(append_evidence_urls(body, protein_evidence_urls(protein)))
 }
@@ -2552,14 +3169,90 @@ pub fn search_all_markdown(
         })
         .collect::<Vec<_>>();
 
-    Ok(tmpl.render(context! {
+    let body = tmpl.render(context! {
         query => &results.query,
         sections => sections,
         counts_only => counts_only,
         searches_dispatched => results.searches_dispatched,
         searches_with_results => results.searches_with_results,
         wall_time_ms => results.wall_time_ms,
-    })?)
+    })?;
+
+    if let Some(debug_plan) = results.debug_plan.as_ref() {
+        Ok(format!("{}{}", render_debug_plan_block(debug_plan)?, body))
+    } else {
+        Ok(body)
+    }
+}
+
+pub fn render_discover(result: &DiscoverResult) -> Result<String, BioMcpError> {
+    #[derive(serde::Serialize)]
+    struct DiscoverConceptView {
+        label: String,
+        primary_id: Option<String>,
+        synonyms: Vec<String>,
+        xrefs: Vec<String>,
+        sources: Vec<String>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct DiscoverGroupView {
+        label: String,
+        concepts: Vec<DiscoverConceptView>,
+    }
+
+    let tmpl = env()?.get_template("discover.md.j2")?;
+    let groups = [
+        DiscoverType::Gene,
+        DiscoverType::Drug,
+        DiscoverType::Disease,
+        DiscoverType::Symptom,
+        DiscoverType::Pathway,
+        DiscoverType::Variant,
+        DiscoverType::Unknown,
+    ]
+    .into_iter()
+    .filter_map(|kind| {
+        let concepts = result
+            .concepts
+            .iter()
+            .filter(|concept| concept.primary_type == kind)
+            .map(|concept| DiscoverConceptView {
+                label: concept.label.clone(),
+                primary_id: concept.primary_id.clone(),
+                synonyms: concept.synonyms.clone(),
+                xrefs: concept
+                    .xrefs
+                    .iter()
+                    .map(|xref| format!("{}:{}", xref.source, xref.id))
+                    .collect(),
+                sources: concept
+                    .sources
+                    .iter()
+                    .map(|source| format!("{} ({})", source.source, source.source_type))
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        if concepts.is_empty() {
+            None
+        } else {
+            Some(DiscoverGroupView {
+                label: kind.label().to_string(),
+                concepts,
+            })
+        }
+    })
+    .collect::<Vec<_>>();
+
+    let body = tmpl.render(context! {
+        query => &result.query,
+        notes => &result.notes,
+        ambiguous => result.ambiguous,
+        groups => groups,
+        plain_language => &result.plain_language,
+        next_commands => &result.next_commands,
+    })?;
+    Ok(append_evidence_urls(body, discover_evidence_urls(result)))
 }
 
 #[cfg(test)]
@@ -2569,8 +3262,10 @@ mod tests {
     use crate::entities::article::{
         AnnotationCount, Article, ArticleAnnotations, ArticleSearchResult, ArticleSource,
     };
+    use crate::entities::disease::{Disease, DiseaseVariantAssociation};
     use crate::entities::drug::Drug;
     use crate::entities::gene::Gene;
+    use crate::entities::pathway::Pathway;
     use crate::entities::pgx::Pgx;
     use crate::entities::study::{
         CnaDistributionResult as StudyCnaDistributionResult,
@@ -2593,6 +3288,47 @@ mod tests {
         assert_eq!(quote_arg("BRAF"), "BRAF");
         assert_eq!(quote_arg("BRAF V600E"), "\"BRAF V600E\"");
         assert_eq!(quote_arg("BRAF \"V600E\""), "\"BRAF \\\"V600E\\\"\"");
+    }
+
+    #[test]
+    fn sections_pathway_for_kegg_excludes_unsupported_sections() {
+        let pathway = Pathway {
+            source: "KEGG".to_string(),
+            id: "hsa05200".to_string(),
+            name: "Pathways in cancer".to_string(),
+            species: None,
+            summary: None,
+            genes: Vec::new(),
+            events: Vec::new(),
+            enrichment: Vec::new(),
+        };
+
+        let sections = sections_pathway(&pathway, &[]);
+        assert_eq!(sections, vec!["genes".to_string()]);
+    }
+
+    #[test]
+    fn sections_pathway_for_reactome_keeps_full_supported_set() {
+        let pathway = Pathway {
+            source: "Reactome".to_string(),
+            id: "R-HSA-5673001".to_string(),
+            name: "RAF/MAP kinase cascade".to_string(),
+            species: None,
+            summary: None,
+            genes: Vec::new(),
+            events: Vec::new(),
+            enrichment: Vec::new(),
+        };
+
+        let sections = sections_pathway(&pathway, &[]);
+        assert_eq!(
+            sections,
+            vec![
+                "genes".to_string(),
+                "events".to_string(),
+                "enrichment".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -2619,14 +3355,442 @@ mod tests {
             interactions: None,
             civic: None,
             expression: None,
+            hpa: None,
             druggability: None,
             clingen: None,
+            constraint: None,
+            disgenet: None,
         };
 
         let markdown = gene_markdown(&gene, &[]).expect("rendered markdown");
         assert!(markdown.contains("BRAF"));
         assert!(markdown.contains("[NCBI Gene](https://www.ncbi.nlm.nih.gov/gene/673)"));
         assert!(markdown.contains("[UniProt](https://www.uniprot.org/uniprot/P15056)"));
+    }
+
+    #[test]
+    fn markdown_detail_outputs_label_gene_drug_and_disease_sources() {
+        let gene = Gene {
+            symbol: "CFTR".to_string(),
+            name: "CF transmembrane conductance regulator".to_string(),
+            entrez_id: "1080".to_string(),
+            ensembl_id: None,
+            location: Some("7q31.2".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P13569".to_string()),
+            summary: Some("Chloride channel.".to_string()),
+            gene_type: Some("protein-coding".to_string()),
+            aliases: vec!["ABCC7".to_string()],
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: Some(vec![crate::entities::gene::EnrichmentResult {
+                library: "GO_Biological_Process_2025".to_string(),
+                terms: vec![crate::entities::gene::EnrichmentTerm {
+                    name: "ion transport".to_string(),
+                    p_value: 0.001,
+                    genes: "CFTR".to_string(),
+                }],
+            }]),
+            diseases: Some(vec![crate::entities::gene::EnrichmentResult {
+                library: "DisGeNET".to_string(),
+                terms: vec![crate::entities::gene::EnrichmentTerm {
+                    name: "cystic fibrosis".to_string(),
+                    p_value: 0.002,
+                    genes: "CFTR".to_string(),
+                }],
+            }]),
+            protein: Some(crate::entities::gene::GeneProtein {
+                accession: "P13569".to_string(),
+                name: "CFTR".to_string(),
+                function: Some("ATP-binding cassette transporter.".to_string()),
+                length: Some(1480),
+            }),
+            go: Some(vec![crate::entities::gene::GeneGoTerm {
+                id: "GO:0006811".to_string(),
+                name: "ion transport".to_string(),
+                aspect: Some("BP".to_string()),
+                evidence: Some("EXP".to_string()),
+            }]),
+            interactions: Some(vec![crate::entities::gene::GeneInteraction {
+                partner: "SLC26A9".to_string(),
+                score: Some(0.83),
+            }]),
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+        let gene_markdown = gene_markdown(&gene, &[]).expect("gene markdown");
+        assert!(gene_markdown.contains("Source: NCBI Gene / MyGene.info"));
+        assert!(gene_markdown.contains("## Summary (NCBI Gene)"));
+        assert!(gene_markdown.contains("## Aliases (NCBI Gene / MyGene.info)"));
+        assert!(gene_markdown.contains("## Ontology (Enrichr)"));
+        assert!(gene_markdown.contains("## Diseases (Enrichr)"));
+        assert!(gene_markdown.contains("## Protein (UniProt)"));
+        assert!(gene_markdown.contains("## GO Terms (QuickGO)"));
+        assert!(gene_markdown.contains("## Interactions (STRING)"));
+
+        let drug = Drug {
+            name: "ivacaftor".to_string(),
+            drugbank_id: Some("DB08820".to_string()),
+            chembl_id: Some("CHEMBL1200749".to_string()),
+            unii: None,
+            drug_type: Some("small molecule".to_string()),
+            mechanism: Some("CFTR potentiator".to_string()),
+            mechanisms: vec!["Potentiates CFTR chloride transport.".to_string()],
+            approval_date: Some("2012-01-31".to_string()),
+            approval_date_raw: Some("2012-01-31".to_string()),
+            approval_date_display: Some("January 31, 2012".to_string()),
+            approval_summary: Some("FDA approved on January 31, 2012".to_string()),
+            brand_names: vec!["Kalydeco".to_string()],
+            route: Some("Oral".to_string()),
+            targets: vec!["CFTR".to_string()],
+            indications: vec!["Cystic fibrosis".to_string()],
+            interactions: vec![crate::entities::drug::DrugInteraction {
+                drug: "rifampin".to_string(),
+                description: Some("May reduce ivacaftor exposure.".to_string()),
+            }],
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: vec!["Cough".to_string()],
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: Some(Vec::new()),
+            approvals: Some(Vec::new()),
+            civic: None,
+        };
+        let drug_markdown = drug_markdown(&drug, &["all".to_string()]).expect("drug markdown");
+        assert!(drug_markdown.contains("Type (MyChem.info): small molecule"));
+        assert!(drug_markdown.contains("FDA Approved (DrugCentral): January 31, 2012"));
+        assert!(drug_markdown.contains("Brand Names (DrugBank): Kalydeco"));
+        assert!(drug_markdown.contains("Safety (OpenFDA FAERS): Cough"));
+        assert!(drug_markdown.contains("## Mechanisms (MyChem.info / ChEMBL)"));
+        assert!(drug_markdown.contains("## Targets (ChEMBL / Open Targets)"));
+        assert!(drug_markdown.contains("## Indications (Open Targets)"));
+        assert!(drug_markdown.contains("## Interactions (DrugBank)"));
+        assert!(drug_markdown.contains("## Shortage (OpenFDA Drug Shortages)"));
+        assert!(drug_markdown.contains("## Drugs@FDA Approvals"));
+
+        let disease = crate::entities::disease::Disease {
+            id: "MONDO:0009061".to_string(),
+            name: "cystic fibrosis".to_string(),
+            definition: Some("Inherited disease affecting chloride transport.".to_string()),
+            synonyms: vec!["CF".to_string()],
+            parents: vec!["autosomal recessive disease".to_string()],
+            associated_genes: vec!["CFTR".to_string()],
+            gene_associations: Vec::new(),
+            top_genes: vec!["CFTR".to_string()],
+            top_gene_scores: Vec::new(),
+            treatment_landscape: vec!["ivacaftor".to_string()],
+            recruiting_trial_count: Some(4),
+            pathways: vec![crate::entities::disease::DiseasePathway {
+                id: "R-HSA-5673001".to_string(),
+                name: "Ion channel transport".to_string(),
+            }],
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+        let disease_markdown =
+            disease_markdown(&disease, &["all".to_string()]).expect("disease markdown");
+        assert!(disease_markdown.contains("## Definition (MyDisease.info)"));
+        assert!(disease_markdown.contains("Genes (Open Targets): CFTR"));
+        assert!(disease_markdown.contains("Treatments (MyChem.info indication search): ivacaftor"));
+        assert!(disease_markdown.contains("Recruiting Trials (ClinicalTrials.gov): 4"));
+        assert!(
+            disease_markdown.contains("## Synonyms (MONDO / Disease Ontology via MyDisease.info)")
+        );
+        assert!(
+            disease_markdown.contains("## Parents (MONDO / Disease Ontology via MyDisease.info)")
+        );
+        assert!(disease_markdown.contains("## Pathways (Reactome)"));
+    }
+
+    #[test]
+    fn markdown_detail_outputs_label_article_trial_and_pathway_sources() {
+        let article = Article {
+            pmid: Some("22663011".to_string()),
+            pmcid: Some("PMC9984800".to_string()),
+            doi: Some("10.1000/example".to_string()),
+            title: "Example article".to_string(),
+            authors: vec!["A. Author".to_string()],
+            journal: Some("Example Journal".to_string()),
+            date: Some("2012-05-31".to_string()),
+            citation_count: Some(12),
+            publication_type: Some("Journal Article".to_string()),
+            open_access: Some(true),
+            abstract_text: Some("Abstract text.".to_string()),
+            full_text_path: None,
+            full_text_note: Some("Saved full text unavailable.".to_string()),
+            annotations: Some(ArticleAnnotations {
+                genes: vec![AnnotationCount {
+                    text: "CFTR".to_string(),
+                    count: 1,
+                }],
+                diseases: Vec::new(),
+                chemicals: Vec::new(),
+                mutations: Vec::new(),
+            }),
+            semantic_scholar: Some(crate::entities::article::ArticleSemanticScholar {
+                paper_id: Some("paper-1".to_string()),
+                tldr: Some("TLDR".to_string()),
+                citation_count: Some(10),
+                influential_citation_count: Some(2),
+                reference_count: Some(5),
+                is_open_access: Some(true),
+                open_access_pdf: None,
+            }),
+            pubtator_fallback: false,
+        };
+        let article_markdown = article_markdown(&article, &["all".to_string()]).expect("article");
+        assert!(article_markdown.contains("Source: PubMed / Europe PMC"));
+        assert!(article_markdown.contains("## Authors (PubMed / Europe PMC)"));
+        assert!(article_markdown.contains("## Abstract (PubMed / Europe PMC)"));
+        assert!(article_markdown.contains("## PubTator Annotations"));
+        assert!(article_markdown.contains("## Full Text (PMC OA)"));
+        assert!(article_markdown.contains("## Semantic Scholar"));
+
+        let trial = crate::entities::trial::Trial {
+            nct_id: "NCT06668103".to_string(),
+            source: Some("ClinicalTrials.gov".to_string()),
+            title: "Example trial".to_string(),
+            status: "Recruiting".to_string(),
+            phase: Some("Phase 2".to_string()),
+            study_type: Some("Interventional".to_string()),
+            age_range: Some("18 Years and older".to_string()),
+            conditions: vec!["cystic fibrosis".to_string()],
+            interventions: vec!["ivacaftor".to_string()],
+            sponsor: Some("Example Sponsor".to_string()),
+            enrollment: Some(42),
+            summary: Some("Trial summary.".to_string()),
+            start_date: Some("2025-01-01".to_string()),
+            completion_date: None,
+            eligibility_text: Some("Eligibility text.".to_string()),
+            locations: Some(vec![crate::entities::trial::TrialLocation {
+                facility: "Example Hospital".to_string(),
+                city: "Boston".to_string(),
+                state: Some("MA".to_string()),
+                country: "United States".to_string(),
+                status: Some("Recruiting".to_string()),
+                contact_name: None,
+                contact_phone: None,
+            }]),
+            outcomes: Some(crate::entities::trial::TrialOutcomes {
+                primary: vec![crate::entities::trial::TrialOutcome {
+                    measure: "FEV1".to_string(),
+                    description: None,
+                    time_frame: None,
+                }],
+                secondary: Vec::new(),
+            }),
+            arms: Some(vec![crate::entities::trial::TrialArm {
+                label: "Arm A".to_string(),
+                arm_type: Some("Experimental".to_string()),
+                description: Some("Description".to_string()),
+                interventions: vec!["ivacaftor".to_string()],
+            }]),
+            references: Some(vec![crate::entities::trial::TrialReference {
+                pmid: Some("22663011".to_string()),
+                citation: "Example citation".to_string(),
+                reference_type: Some("background".to_string()),
+            }]),
+        };
+        let trial_markdown = trial_markdown(&trial, &["all".to_string()]).expect("trial");
+        assert!(trial_markdown.contains("Source: ClinicalTrials.gov"));
+        assert!(trial_markdown.contains("## Conditions (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## Interventions (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## Summary (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## Eligibility (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## Locations (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## Outcomes (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## Arms (ClinicalTrials.gov)"));
+        assert!(trial_markdown.contains("## References (ClinicalTrials.gov)"));
+
+        let pathway = Pathway {
+            source: "Reactome".to_string(),
+            id: "R-HSA-5358351".to_string(),
+            name: "Signal transduction".to_string(),
+            species: Some("Homo sapiens".to_string()),
+            summary: Some("Reactome summary.".to_string()),
+            genes: vec!["CFTR".to_string()],
+            events: vec!["Channel gating".to_string()],
+            enrichment: vec![crate::entities::pathway::PathwayEnrichment {
+                source: "Reactome".to_string(),
+                id: "R-HSA-1234".to_string(),
+                name: "Transport".to_string(),
+                p_value: Some(0.001),
+            }],
+        };
+        let pathway_markdown = pathway_markdown(&pathway, &["all".to_string()]).expect("pathway");
+        assert!(pathway_markdown.contains("## Summary (Reactome)"));
+        assert!(pathway_markdown.contains("## Genes (Reactome)"));
+        assert!(pathway_markdown.contains("## Events (Reactome)"));
+        assert!(pathway_markdown.contains("## Enrichment (g:Profiler)"));
+    }
+
+    #[test]
+    fn markdown_detail_outputs_label_variant_protein_pgx_and_openfda_sources() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "rs334",
+            "gene": "HBB",
+            "hgvs_p": "p.Glu7Val",
+            "rsid": "rs334",
+            "prediction": {
+                "expression_lfc": 0.3,
+                "splice_score": 0.1,
+                "chromatin_score": 0.2,
+                "top_gene": "HBB"
+            },
+            "gnomad_af": 0.01,
+            "conservation": {
+                "phylop_100way_vertebrate": 0.8
+            },
+            "expanded_predictions": [
+                {"tool": "REVEL", "score": 0.91, "prediction": "Damaging"}
+            ],
+            "cgi_associations": [
+                {"drug": "hydroxyurea", "association": "responsive"}
+            ]
+        }))
+        .expect("variant");
+        let variant_markdown = variant_markdown(&variant, &["all".to_string()]).expect("variant");
+        assert!(variant_markdown.contains("Source: MyVariant.info / ClinVar"));
+        assert!(variant_markdown.contains("## AlphaGenome Prediction"));
+        assert!(variant_markdown.contains("## Population (gnomAD via MyVariant.info)"));
+        assert!(variant_markdown.contains("## Conservation (MyVariant.info)"));
+        assert!(variant_markdown.contains("## Expanded Predictions (MyVariant.info)"));
+        assert!(variant_markdown.contains("## CGI Drug Associations (Cancer Genome Interpreter)"));
+
+        let protein = crate::entities::protein::Protein {
+            accession: "P15056".to_string(),
+            entry_id: Some("BRAF_HUMAN".to_string()),
+            name: "Serine/threonine-protein kinase B-raf".to_string(),
+            gene_symbol: Some("BRAF".to_string()),
+            organism: Some("Homo sapiens".to_string()),
+            length: Some(766),
+            function: Some("Kinase function.".to_string()),
+            structures: vec!["6V34".to_string()],
+            structure_count: Some(1),
+            domains: vec![crate::entities::protein::ProteinDomain {
+                accession: "IPR000719".to_string(),
+                name: Some("Protein kinase domain".to_string()),
+                domain_type: Some("domain".to_string()),
+            }],
+            interactions: vec![crate::entities::protein::ProteinInteraction {
+                partner: "MEK1".to_string(),
+                score: Some(0.92),
+            }],
+            complexes: vec![crate::entities::protein::ProteinComplex {
+                accession: "CPX-1".to_string(),
+                name: "BRAF complex".to_string(),
+                description: None,
+                curation: crate::entities::protein::ProteinComplexCuration::Curated,
+                components: vec![crate::entities::protein::ProteinComplexComponent {
+                    accession: "P15056".to_string(),
+                    name: "BRAF".to_string(),
+                    stoichiometry: None,
+                }],
+            }],
+        };
+        let protein_markdown = protein_markdown(&protein, &["all".to_string()]).expect("protein");
+        assert!(protein_markdown.contains("Source: UniProt"));
+        assert!(protein_markdown.contains("## Function (UniProt)"));
+        assert!(protein_markdown.contains("## Structures (PDB / AlphaFold via UniProt)"));
+        assert!(protein_markdown.contains("## Domains (InterPro)"));
+        assert!(protein_markdown.contains("## Interactions (STRING)"));
+        assert!(protein_markdown.contains("## Complexes (ComplexPortal)"));
+
+        let pgx = Pgx {
+            query: "CYP2D6".to_string(),
+            gene: Some("CYP2D6".to_string()),
+            drug: Some("codeine".to_string()),
+            interactions: vec![crate::entities::pgx::PgxInteraction {
+                genesymbol: "CYP2D6".to_string(),
+                drugname: "codeine".to_string(),
+                cpiclevel: Some("A".to_string()),
+                pgxtesting: Some("Recommended".to_string()),
+                guidelinename: None,
+                guidelineurl: None,
+            }],
+            recommendations: vec![crate::entities::pgx::PgxRecommendation {
+                drugname: "codeine".to_string(),
+                phenotype: Some("Poor metabolizer".to_string()),
+                activity_score: None,
+                implication: None,
+                recommendation: Some("Avoid codeine".to_string()),
+                classification: Some("Strong".to_string()),
+                population: None,
+                guidelinename: None,
+                guidelineurl: None,
+            }],
+            frequencies: vec![crate::entities::pgx::PgxFrequency {
+                genesymbol: "CYP2D6".to_string(),
+                allele: "*4".to_string(),
+                population_group: Some("European".to_string()),
+                subject_count: Some(100),
+                frequency: Some(0.2),
+                min_frequency: None,
+                max_frequency: None,
+            }],
+            guidelines: vec![crate::entities::pgx::PgxGuideline {
+                name: "CPIC Guideline".to_string(),
+                url: Some("https://example.org/guideline".to_string()),
+                genes: vec!["CYP2D6".to_string()],
+                drugs: vec!["codeine".to_string()],
+            }],
+            annotations: Vec::new(),
+            annotations_note: Some("PharmGKB note.".to_string()),
+        };
+        let pgx_markdown = pgx_markdown(&pgx, &["all".to_string()]).expect("pgx");
+        assert!(pgx_markdown.contains("Source: CPIC"));
+        assert!(pgx_markdown.contains("## Interactions (CPIC)"));
+        assert!(pgx_markdown.contains("## Recommendations (CPIC)"));
+        assert!(pgx_markdown.contains("## Population Frequencies (CPIC)"));
+        assert!(pgx_markdown.contains("## Guidelines (CPIC)"));
+
+        let faers = crate::entities::adverse_event::AdverseEvent {
+            report_id: "10329882".to_string(),
+            drug: "ivacaftor".to_string(),
+            reactions: vec!["Cough".to_string()],
+            outcomes: vec!["Hospitalization".to_string()],
+            patient: None,
+            concomitant_medications: vec!["azithromycin".to_string()],
+            reporter_type: None,
+            reporter_country: None,
+            indication: None,
+            serious: true,
+            date: Some("2024-01-01".to_string()),
+        };
+        let faers_markdown = adverse_event_markdown(&faers, &["all".to_string()]).expect("faers");
+        assert!(faers_markdown.contains("Source: OpenFDA"));
+        assert!(faers_markdown.contains("## Reactions (OpenFDA)"));
+        assert!(faers_markdown.contains("## Outcomes (OpenFDA)"));
+        assert!(faers_markdown.contains("## Concomitant Drugs (OpenFDA)"));
+
+        let device = DeviceEvent {
+            report_id: "MDR-123".to_string(),
+            report_number: None,
+            device: "Infusion Pump".to_string(),
+            manufacturer: Some("Example".to_string()),
+            event_type: Some("Malfunction".to_string()),
+            date: Some("2024-02-01".to_string()),
+            description: Some("Description text.".to_string()),
+        };
+        let device_markdown = device_event_markdown(&device).expect("device");
+        assert!(device_markdown.contains("Source: OpenFDA"));
+        assert!(device_markdown.contains("## Description (OpenFDA)"));
     }
 
     #[test]
@@ -2653,27 +3817,568 @@ mod tests {
             interactions: None,
             civic: None,
             expression: None,
+            hpa: None,
             druggability: None,
             clingen: None,
+            constraint: None,
+            disgenet: None,
         };
 
         let markdown = gene_markdown(
             &gene,
             &[
                 "expression".to_string(),
+                "hpa".to_string(),
                 "druggability".to_string(),
                 "clingen".to_string(),
             ],
         )
         .expect("rendered markdown");
 
-        assert!(markdown.contains("# BRAF - expression, druggability, clingen"));
+        assert!(markdown.contains("# BRAF - expression, hpa, druggability, clingen"));
         assert!(markdown.contains("## Expression (GTEx)"));
-        assert!(markdown.contains("## Druggability (DGIdb)"));
+        assert!(markdown.contains("## Human Protein Atlas"));
+        assert!(markdown.contains("## Druggability"));
         assert!(markdown.contains("## ClinGen"));
         assert!(markdown.contains("No GTEx expression records returned"));
+        assert!(markdown.contains("No Human Protein Atlas records returned"));
         assert!(markdown.contains("No DGIdb interactions returned"));
         assert!(markdown.contains("No ClinGen records returned"));
+    }
+
+    #[test]
+    fn gene_markdown_renders_combined_dgidb_and_opentargets_druggability() {
+        let gene = Gene {
+            symbol: "EGFR".to_string(),
+            name: "epidermal growth factor receptor".to_string(),
+            entrez_id: "1956".to_string(),
+            ensembl_id: Some("ENSG00000146648".to_string()),
+            location: Some("7p11.2".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P00533".to_string()),
+            summary: None,
+            gene_type: Some("protein-coding".to_string()),
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: Some(crate::sources::dgidb::GeneDruggability {
+                categories: vec!["Kinase".to_string()],
+                interactions: Vec::new(),
+                tractability: vec![
+                    crate::sources::dgidb::GeneTractabilityModality {
+                        modality: "small molecule".to_string(),
+                        tractable: true,
+                        evidence_labels: vec!["Approved Drug".to_string()],
+                    },
+                    crate::sources::dgidb::GeneTractabilityModality {
+                        modality: "antibody".to_string(),
+                        tractable: true,
+                        evidence_labels: vec!["Clinical Precedence".to_string()],
+                    },
+                ],
+                safety_liabilities: vec![crate::sources::dgidb::GeneSafetyLiability {
+                    event: "Skin rash".to_string(),
+                    datasource: Some("ForceGenetics".to_string()),
+                    effect_direction: Some("activation".to_string()),
+                    biosample: Some("Skin".to_string()),
+                }],
+            }),
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown =
+            gene_markdown(&gene, &["druggability".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("## Druggability"));
+        assert!(!markdown.contains("## Druggability (DGIdb)"));
+        assert!(markdown.contains("OpenTargets tractability"));
+        assert!(markdown.contains("| Modality | Tractable | Evidence |"));
+        assert!(markdown.contains("| small molecule | yes | Approved Drug |"));
+        assert!(markdown.contains("| antibody | yes | Clinical Precedence |"));
+        assert!(markdown.contains("OpenTargets safety liabilities"));
+        assert!(markdown.contains("Skin rash"));
+        assert!(markdown.contains("No DGIdb interactions returned for this gene query."));
+    }
+
+    #[test]
+    fn gene_markdown_renders_dgidb_interaction_table_alongside_opentargets_data() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: None,
+            location: None,
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: None,
+            summary: None,
+            gene_type: None,
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: Some(crate::sources::dgidb::GeneDruggability {
+                categories: vec!["Kinase".to_string()],
+                interactions: vec![crate::sources::dgidb::DrugInteraction {
+                    drug: "Dabrafenib".to_string(),
+                    interaction_types: vec!["inhibitor".to_string()],
+                    score: Some(1.2),
+                    approved: Some(true),
+                    source_count: 2,
+                }],
+                tractability: vec![crate::sources::dgidb::GeneTractabilityModality {
+                    modality: "small molecule".to_string(),
+                    tractable: true,
+                    evidence_labels: vec!["Approved Drug".to_string()],
+                }],
+                safety_liabilities: Vec::new(),
+            }),
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown =
+            gene_markdown(&gene, &["druggability".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("## Druggability"));
+        assert!(markdown.contains("OpenTargets tractability"));
+        assert!(markdown.contains("| small molecule | yes | Approved Drug |"));
+        // DGIdb interaction table renders (not replaced by empty-state message)
+        assert!(markdown.contains("| Drug | Interaction Types | Score | Approved | Sources |"));
+        assert!(markdown.contains("| Dabrafenib | inhibitor | 1.200 | yes | 2 |"));
+        assert!(!markdown.contains("No DGIdb interactions returned for this gene query."));
+    }
+
+    #[test]
+    fn disease_markdown_renders_opentargets_scores_in_summary_and_genes_table() {
+        let disease = Disease {
+            id: "MONDO:0005105".to_string(),
+            name: "melanoma".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: vec!["BRAF".to_string(), "NRAS".to_string()],
+            gene_associations: vec![
+                crate::entities::disease::DiseaseGeneAssociation {
+                    gene: "BRAF".to_string(),
+                    relationship: Some("causal".to_string()),
+                    source: Some("Monarch".to_string()),
+                    opentargets_score: Some(
+                        crate::entities::disease::DiseaseAssociationScoreSummary {
+                            overall_score: 0.912,
+                            gwas_score: Some(0.321),
+                            rare_variant_score: Some(0.654),
+                            somatic_mutation_score: Some(0.876),
+                        },
+                    ),
+                },
+                crate::entities::disease::DiseaseGeneAssociation {
+                    gene: "NRAS".to_string(),
+                    relationship: Some("associated".to_string()),
+                    source: Some("CIViC".to_string()),
+                    opentargets_score: None,
+                },
+            ],
+            top_genes: vec!["BRAF".to_string(), "NRAS".to_string()],
+            top_gene_scores: vec![
+                crate::entities::disease::DiseaseTargetScore {
+                    symbol: "BRAF".to_string(),
+                    summary: crate::entities::disease::DiseaseAssociationScoreSummary {
+                        overall_score: 0.912,
+                        gwas_score: Some(0.321),
+                        rare_variant_score: Some(0.654),
+                        somatic_mutation_score: Some(0.876),
+                    },
+                },
+                crate::entities::disease::DiseaseTargetScore {
+                    symbol: "NRAS".to_string(),
+                    summary: crate::entities::disease::DiseaseAssociationScoreSummary {
+                        overall_score: 0.701,
+                        gwas_score: None,
+                        rare_variant_score: None,
+                        somatic_mutation_score: Some(0.443),
+                    },
+                },
+            ],
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let summary = disease_markdown(&disease, &[]).expect("rendered markdown");
+        assert!(summary.contains("Genes (Open Targets): BRAF (OT 0.912), NRAS (OT 0.701)"));
+
+        let genes = disease_markdown(&disease, &["genes".to_string()]).expect("rendered markdown");
+        assert!(genes.contains("| Gene | Relationship | Source | OpenTargets |"));
+        assert!(genes.contains("overall 0.912; GWAS 0.321; rare 0.654; somatic 0.876"));
+        assert!(genes.contains("| NRAS | associated | CIViC | - |"));
+    }
+
+    #[test]
+    fn gene_markdown_renders_hpa_section_details() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: Some("ENSG00000157764".to_string()),
+            location: Some("7q34".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P15056".to_string()),
+            summary: Some("Kinase involved in MAPK signaling.".to_string()),
+            gene_type: Some("protein-coding".to_string()),
+            aliases: vec!["BRAF1".to_string()],
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: Some(crate::sources::hpa::GeneHpa {
+                tissues: vec![
+                    crate::sources::hpa::HpaTissueExpression {
+                        tissue: "Liver".to_string(),
+                        level: "High".to_string(),
+                    },
+                    crate::sources::hpa::HpaTissueExpression {
+                        tissue: "Kidney".to_string(),
+                        level: "Medium".to_string(),
+                    },
+                ],
+                subcellular_main_location: vec!["cytosol".to_string(), "vesicles".to_string()],
+                subcellular_additional_location: vec!["plasma membrane".to_string()],
+                reliability: Some("Supported".to_string()),
+                protein_summary: Some("Ubiquitous cytoplasmic expression.".to_string()),
+                rna_summary: Some("Low tissue specificity; Detected in all".to_string()),
+            }),
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown = gene_markdown(&gene, &["hpa".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("# BRAF - hpa"));
+        assert!(markdown.contains("## Human Protein Atlas"));
+        assert!(markdown.contains("Reliability: Supported"));
+        assert!(markdown.contains("Protein summary: Ubiquitous cytoplasmic expression."));
+        assert!(markdown.contains("RNA summary: Low tissue specificity; Detected in all"));
+        assert!(markdown.contains("Subcellular main locations: cytosol, vesicles"));
+        assert!(markdown.contains("Subcellular additional locations: plasma membrane"));
+        assert!(markdown.contains("| Tissue | Level |"));
+        assert!(markdown.contains("| Liver | High |"));
+        assert!(markdown.contains("| Kidney | Medium |"));
+    }
+
+    #[test]
+    fn gene_markdown_section_only_shows_constraint_section() {
+        let gene = Gene {
+            symbol: "TP53".to_string(),
+            name: "tumor protein p53".to_string(),
+            entrez_id: "7157".to_string(),
+            ensembl_id: Some("ENSG00000141510".to_string()),
+            location: Some("17p13.1".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P04637".to_string()),
+            summary: Some("Tumor suppressor.".to_string()),
+            gene_type: Some("protein-coding".to_string()),
+            aliases: vec!["P53".to_string()],
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: Some(crate::entities::gene::GeneConstraint {
+                pli: None,
+                loeuf: None,
+                mis_z: None,
+                syn_z: None,
+                transcript: Some("ENST00000269305".to_string()),
+                source: "gnomAD".to_string(),
+                source_version: "v4".to_string(),
+                reference_genome: "GRCh38".to_string(),
+            }),
+            disgenet: None,
+        };
+
+        let markdown =
+            gene_markdown(&gene, &["constraint".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("# TP53 - constraint"));
+        assert!(markdown.contains("## Constraint (gnomAD)"));
+        assert!(markdown.contains("Source: gnomAD"));
+        assert!(markdown.contains("Version: v4"));
+        assert!(markdown.contains("Reference genome: GRCh38"));
+        assert!(markdown.contains("Transcript: ENST00000269305"));
+        assert!(markdown.contains("No gnomAD constraint metrics returned for this gene query."));
+    }
+
+    #[test]
+    fn gene_markdown_section_only_shows_disgenet_section() {
+        let gene = Gene {
+            symbol: "TP53".to_string(),
+            name: "tumor protein p53".to_string(),
+            entrez_id: "7157".to_string(),
+            ensembl_id: None,
+            location: None,
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: None,
+            summary: None,
+            gene_type: None,
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: Some(crate::entities::gene::GeneDisgenet {
+                associations: vec![crate::entities::gene::GeneDisgenetAssociation {
+                    disease_name: "Breast Carcinoma".to_string(),
+                    disease_cui: "C0678222".to_string(),
+                    score: 0.91,
+                    publication_count: Some(1234),
+                    clinical_trial_count: Some(4),
+                    evidence_index: Some(0.72),
+                    evidence_level: Some("Definitive".to_string()),
+                }],
+            }),
+        };
+
+        let markdown = gene_markdown(&gene, &["disgenet".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("# TP53 - disgenet"));
+        assert!(markdown.contains("## DisGeNET"));
+        assert!(markdown.contains("| Disease | UMLS CUI | Score | PMIDs | Trials | EL | EI |"));
+        assert!(
+            markdown.contains(
+                "| Breast Carcinoma | C0678222 | 0.910 | 1234 | 4 | Definitive | 0.720 |"
+            )
+        );
+    }
+
+    #[test]
+    fn gene_markdown_disgenet_renders_sparse_optional_fields() {
+        let gene = Gene {
+            symbol: "KYNU".to_string(),
+            name: "kynureninase".to_string(),
+            entrez_id: "8942".to_string(),
+            ensembl_id: None,
+            location: None,
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: None,
+            summary: None,
+            gene_type: None,
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: Some(crate::entities::gene::GeneDisgenet {
+                associations: vec![crate::entities::gene::GeneDisgenetAssociation {
+                    disease_name: "Sparse Disease".to_string(),
+                    disease_cui: "C1234567".to_string(),
+                    score: 0.23,
+                    publication_count: None,
+                    clinical_trial_count: None,
+                    evidence_index: None,
+                    evidence_level: None,
+                }],
+            }),
+        };
+
+        let markdown = gene_markdown(&gene, &["disgenet".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("| Disease | UMLS CUI | Score | PMIDs | Trials | EL | EI |"));
+        assert!(markdown.contains("| Sparse Disease | C1234567 | 0.230 | - | - | - | - |"));
+    }
+
+    #[test]
+    fn gene_markdown_pathways_show_source_labels() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: None,
+            location: Some("7q34".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: None,
+            summary: None,
+            gene_type: None,
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: Some(vec![
+                crate::entities::gene::GenePathway {
+                    source: "KEGG".to_string(),
+                    id: "hsa05200".to_string(),
+                    name: "Pathways in cancer".to_string(),
+                },
+                crate::entities::gene::GenePathway {
+                    source: "Reactome".to_string(),
+                    id: "R-HSA-5673001".to_string(),
+                    name: "RAF/MAP kinase cascade".to_string(),
+                },
+            ]),
+            ontology: None,
+            diseases: None,
+            protein: None,
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown = gene_markdown(&gene, &[]).expect("rendered markdown");
+        assert!(markdown.contains("| Source | ID | Name |"));
+        assert!(markdown.contains("| KEGG | hsa05200 | Pathways in cancer |"));
+        assert!(markdown.contains("| Reactome | R-HSA-5673001 | RAF/MAP kinase cascade |"));
+        assert!(!markdown.contains("Showing pathway rows from Reactome search results."));
+    }
+
+    #[test]
+    fn pathway_markdown_uses_source_and_source_specific_evidence_url() {
+        let pathway = Pathway {
+            source: "KEGG".to_string(),
+            id: "hsa05200".to_string(),
+            name: "Pathways in cancer".to_string(),
+            species: Some("Homo sapiens".to_string()),
+            summary: Some("Cancer pathway overview.".to_string()),
+            genes: vec!["BRAF".to_string(), "EGFR".to_string()],
+            events: Vec::new(),
+            enrichment: Vec::new(),
+        };
+
+        let markdown = pathway_markdown(&pathway, &[]).expect("rendered markdown");
+        assert!(markdown.contains("Source: KEGG"));
+        assert!(markdown.contains("[KEGG](https://www.kegg.jp/entry/hsa05200)"));
+
+        let wikipathways = Pathway {
+            source: "WikiPathways".to_string(),
+            id: "WP254".to_string(),
+            name: "Apoptosis".to_string(),
+            species: Some("Homo sapiens".to_string()),
+            summary: None,
+            genes: vec!["TP53".to_string()],
+            events: Vec::new(),
+            enrichment: Vec::new(),
+        };
+
+        let markdown = pathway_markdown(&wikipathways, &[]).expect("rendered markdown");
+        assert!(markdown.contains("Source: WikiPathways"));
+        assert!(
+            markdown.contains("[WikiPathways](https://www.wikipathways.org/pathways/WP254.html)")
+        );
+    }
+
+    #[test]
+    fn pathway_markdown_hides_genes_section_when_genes_are_empty() {
+        let pathway = Pathway {
+            source: "KEGG".to_string(),
+            id: "hsa05200".to_string(),
+            name: "Pathways in cancer".to_string(),
+            species: Some("Homo sapiens".to_string()),
+            summary: Some("Cancer pathway overview.".to_string()),
+            genes: Vec::new(),
+            events: Vec::new(),
+            enrichment: Vec::new(),
+        };
+
+        let markdown = pathway_markdown(&pathway, &[]).expect("rendered markdown");
+        assert!(!markdown.contains("## Genes"));
+        assert!(!markdown.contains("BRAF"));
+    }
+
+    #[test]
+    fn pathway_search_markdown_shows_source_column() {
+        let results = vec![
+            PathwaySearchResult {
+                source: "Reactome".to_string(),
+                id: "R-HSA-5673001".to_string(),
+                name: "RAF/MAP kinase cascade".to_string(),
+            },
+            PathwaySearchResult {
+                source: "KEGG".to_string(),
+                id: "hsa04010".to_string(),
+                name: "MAPK signaling pathway".to_string(),
+            },
+        ];
+
+        let markdown =
+            pathway_search_markdown("MAPK", &results, Some(results.len())).expect("markdown");
+        assert!(markdown.contains("| Source | ID | Name |"));
+        assert!(markdown.contains("| Reactome | R-HSA-5673001 | RAF/MAP kinase cascade |"));
+        assert!(markdown.contains("| KEGG | hsa04010 | MAPK signaling pathway |"));
     }
 
     #[test]
@@ -2689,6 +4394,66 @@ mod tests {
         let markdown = variant_markdown(&variant, &[]).expect("rendered markdown");
         assert!(markdown.contains("EGFR"));
         assert!(markdown.contains("p.L858R"));
+    }
+
+    #[test]
+    fn variant_markdown_renders_compact_clinvar_and_population_fields() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "chr7:g.140453136A>T",
+            "gene": "BRAF",
+            "gnomad_af": 0.0001,
+            "allele_frequency_percent": "0.0100%",
+            "top_disease": {"condition": "Melanoma", "reports": 2},
+            "clinvar_conditions": [{"condition": "Melanoma", "reports": 2}]
+        }))
+        .expect("variant should deserialize");
+
+        let markdown = variant_markdown(&variant, &["all".to_string()]).expect("rendered markdown");
+        assert!(markdown.contains("Top disease (ClinVar): Melanoma (2 reports)"));
+        assert!(markdown.contains("gnomAD AF:"));
+        assert!(markdown.contains("(0.0100%)"));
+    }
+
+    #[test]
+    fn disease_markdown_renders_top_variant_summary() {
+        let disease = Disease {
+            id: "MONDO:0005105".to_string(),
+            name: "melanoma".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: vec![DiseaseVariantAssociation {
+                variant: "BRAF V600E".to_string(),
+                relationship: Some("associated with disease".to_string()),
+                source: Some("CIViC".to_string()),
+                evidence_count: Some(3),
+            }],
+            top_variant: Some(DiseaseVariantAssociation {
+                variant: "BRAF V600E".to_string(),
+                relationship: Some("associated with disease".to_string()),
+                source: Some("CIViC".to_string()),
+                evidence_count: Some(3),
+            }),
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown = disease_markdown(&disease, &["variants".to_string()]).expect("markdown");
+        assert!(markdown.contains(
+            "Top Variant: BRAF V600E - associated with disease (CIViC, 3 evidence items)"
+        ));
     }
 
     #[test]
@@ -2871,6 +4636,62 @@ mod tests {
     }
 
     #[test]
+    fn article_batch_markdown_renders_compact_rows() {
+        let rows = vec![
+            crate::entities::article::ArticleBatchItem {
+                requested_id: "22663011".to_string(),
+                pmid: Some("22663011".to_string()),
+                pmcid: None,
+                doi: Some("10.1056/NEJMoa1203421".to_string()),
+                title: "Improved survival with vemurafenib".to_string(),
+                journal: Some("NEJM".to_string()),
+                year: Some(2012),
+                entity_summary: Some(crate::entities::article::ArticleBatchEntitySummary {
+                    genes: vec![crate::entities::article::AnnotationCount {
+                        text: "BRAF".to_string(),
+                        count: 4,
+                    }],
+                    diseases: vec![crate::entities::article::AnnotationCount {
+                        text: "melanoma".to_string(),
+                        count: 2,
+                    }],
+                    chemicals: Vec::new(),
+                    mutations: Vec::new(),
+                }),
+                tldr: Some("BRAF inhibitor benefit in melanoma.".to_string()),
+                citation_count: Some(120),
+                influential_citation_count: Some(18),
+            },
+            crate::entities::article::ArticleBatchItem {
+                requested_id: "PMC9984800".to_string(),
+                pmid: Some("24200969".to_string()),
+                pmcid: Some("PMC9984800".to_string()),
+                doi: None,
+                title: "Follow-up trial".to_string(),
+                journal: Some("Nature".to_string()),
+                year: Some(2014),
+                entity_summary: None,
+                tldr: None,
+                citation_count: None,
+                influential_citation_count: None,
+            },
+        ];
+
+        let markdown = article_batch_markdown(&rows).expect("batch markdown");
+        assert!(markdown.contains("# Article Batch (2)"));
+        assert!(markdown.contains("## 1. Improved survival with vemurafenib"));
+        assert!(markdown.contains("PMID: 22663011"));
+        assert!(markdown.contains("Entities: Genes: BRAF (4); Diseases: melanoma (2)"));
+        assert!(markdown.contains("TLDR: BRAF inhibitor benefit in melanoma."));
+        assert!(markdown.contains("Citations: 120 (influential: 18)"));
+        assert!(markdown.contains("## 2. Follow-up trial"));
+        assert!(markdown.contains("PMID: 24200969"));
+        // Absent optional fields are omitted, not printed as placeholders
+        assert!(!markdown.contains("TLDR: -"));
+        assert!(!markdown.contains("Entities: -"));
+    }
+
+    #[test]
     fn related_pgx_uses_search_flags() {
         let pgx = Pgx {
             query: "CYP2D6".to_string(),
@@ -2913,8 +4734,11 @@ mod tests {
             interactions: None,
             civic: None,
             expression: None,
+            hpa: None,
             druggability: None,
             clingen: None,
+            constraint: None,
+            disgenet: None,
         };
 
         let urls = gene_evidence_urls(&gene);
@@ -2923,6 +4747,94 @@ mod tests {
             "https://www.ensembl.org/Homo_sapiens/Gene/Summary?g=ENSG00000157764".to_string()
         )));
         assert!(urls.contains(&("OMIM", "https://www.omim.org/entry/164757".to_string())));
+    }
+
+    #[test]
+    fn disease_markdown_section_only_shows_disgenet_section() {
+        let disease = Disease {
+            id: "MONDO:0007254".to_string(),
+            name: "breast cancer".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: Some(crate::entities::disease::DiseaseDisgenet {
+                associations: vec![crate::entities::disease::DiseaseDisgenetAssociation {
+                    symbol: "TP53".to_string(),
+                    entrez_id: Some(7157),
+                    score: 0.91,
+                    publication_count: Some(1234),
+                    clinical_trial_count: Some(4),
+                    evidence_index: Some(0.72),
+                    evidence_level: Some("Definitive".to_string()),
+                }],
+            }),
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown =
+            disease_markdown(&disease, &["disgenet".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("# breast cancer - disgenet"));
+        assert!(markdown.contains("## DisGeNET"));
+        assert!(markdown.contains("| Gene | Entrez ID | Score | PMIDs | Trials | EL | EI |"));
+        assert!(markdown.contains("| TP53 | 7157 | 0.910 | 1234 | 4 | Definitive | 0.720 |"));
+    }
+
+    #[test]
+    fn disease_markdown_disgenet_renders_sparse_optional_fields() {
+        let disease = Disease {
+            id: "MONDO:0000001".to_string(),
+            name: "sparse disease".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: Some(crate::entities::disease::DiseaseDisgenet {
+                associations: vec![crate::entities::disease::DiseaseDisgenetAssociation {
+                    symbol: "KYNU".to_string(),
+                    entrez_id: None,
+                    score: 0.23,
+                    publication_count: None,
+                    clinical_trial_count: None,
+                    evidence_index: None,
+                    evidence_level: None,
+                }],
+            }),
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown =
+            disease_markdown(&disease, &["disgenet".to_string()]).expect("rendered markdown");
+
+        assert!(markdown.contains("| Gene | Entrez ID | Score | PMIDs | Trials | EL | EI |"));
+        assert!(markdown.contains("| KYNU | - | 0.230 | - | - | - | - |"));
     }
 
     #[test]
@@ -2948,6 +4860,167 @@ mod tests {
     }
 
     #[test]
+    fn variant_evidence_urls_include_gnomad_for_population_data() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "chr11:g.5227002A>T",
+            "gene": "HBB",
+            "rsid": "rs334",
+            "gnomad_af": 0.042
+        }))
+        .expect("variant should deserialize");
+
+        let urls = variant_evidence_urls(&variant);
+        assert!(urls.contains(&(
+            "gnomAD",
+            "https://gnomad.broadinstitute.org/variant/rs334".to_string()
+        )));
+    }
+
+    #[test]
+    fn variant_evidence_urls_fall_back_to_hgvs_slug_for_population_data() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "chr7:g.140453136A>T",
+            "gene": "BRAF",
+            "population_breakdown": {
+                "populations": [{"population": "global", "af": 0.01}]
+            }
+        }))
+        .expect("variant should deserialize");
+
+        let urls = variant_evidence_urls(&variant);
+        assert!(urls.contains(&(
+            "gnomAD",
+            "https://gnomad.broadinstitute.org/variant/7-140453136-A-T".to_string()
+        )));
+    }
+
+    #[test]
+    fn disease_markdown_links_source_cells_and_footer_evidence_urls() {
+        let disease = Disease {
+            id: "MONDO:0009061".to_string(),
+            name: "cystic fibrosis".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: vec![crate::entities::disease::DiseaseGeneAssociation {
+                gene: "CFTR".to_string(),
+                relationship: Some("gene associated with condition".to_string()),
+                source: Some("infores:orphanet".to_string()),
+                opentargets_score: None,
+            }],
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0001945".to_string(),
+                name: Some("Dehydration".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: None,
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: Some("infores:omim".to_string()),
+            }],
+            variants: Vec::new(),
+            top_variant: None,
+            models: vec![crate::entities::disease::DiseaseModelAssociation {
+                model: "Cftr tm1Unc".to_string(),
+                model_id: Some("MGI:3698752".to_string()),
+                organism: Some("Mus musculus".to_string()),
+                relationship: Some("model of".to_string()),
+                source: Some("infores:mgi".to_string()),
+                evidence_count: Some(3),
+            }],
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::from([
+                ("Orphanet".to_string(), "586".to_string()),
+                ("OMIM".to_string(), "219700".to_string()),
+            ]),
+        };
+
+        let markdown = disease_markdown(&disease, &["all".to_string()]).expect("markdown");
+        assert!(
+            markdown.contains("[infores:orphanet](https://www.orpha.net/en/disease/detail/586)")
+        );
+        assert!(markdown.contains("[infores:omim](https://www.omim.org/entry/219700)"));
+        assert!(markdown.contains("[infores:mgi](https://www.informatics.jax.org/accession/MGI:"));
+        assert!(markdown.contains("[Orphanet](https://www.orpha.net/en/disease/detail/586)"));
+        assert!(markdown.contains("[OMIM](https://www.omim.org/entry/219700)"));
+        assert!(markdown.contains("[MGI](https://www.informatics.jax.org/accession/MGI:"));
+    }
+
+    #[test]
+    fn disease_evidence_urls_include_record_links() {
+        let disease = Disease {
+            id: "MONDO:0009061".to_string(),
+            name: "cystic fibrosis".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: vec![crate::entities::disease::DiseaseGeneAssociation {
+                gene: "CFTR".to_string(),
+                relationship: None,
+                source: Some("infores:orphanet".to_string()),
+                opentargets_score: None,
+            }],
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0001945".to_string(),
+                name: Some("Dehydration".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: None,
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: Some("infores:omim".to_string()),
+            }],
+            variants: Vec::new(),
+            top_variant: None,
+            models: vec![crate::entities::disease::DiseaseModelAssociation {
+                model: "MGI:3698752".to_string(),
+                model_id: None,
+                organism: Some("Mus musculus".to_string()),
+                relationship: Some("model of".to_string()),
+                source: Some("infores:mgi".to_string()),
+                evidence_count: Some(2),
+            }],
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::from([
+                ("Orphanet".to_string(), "586".to_string()),
+                ("OMIM".to_string(), "219700".to_string()),
+            ]),
+        };
+
+        let urls = disease_evidence_urls(&disease);
+        assert!(urls.contains(&(
+            "Orphanet",
+            "https://www.orpha.net/en/disease/detail/586".to_string()
+        )));
+        assert!(urls.contains(&("OMIM", "https://www.omim.org/entry/219700".to_string())));
+        assert!(urls.iter().any(|(label, url)| {
+            *label == "MGI" && url.starts_with("https://www.informatics.jax.org/accession/MGI:")
+        }));
+    }
+
+    #[test]
     fn drug_evidence_urls_include_chembl() {
         let drug = Drug {
             name: "osimertinib".to_string(),
@@ -2958,6 +5031,9 @@ mod tests {
             mechanism: None,
             mechanisms: Vec::new(),
             approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
@@ -2966,7 +5042,9 @@ mod tests {
             interaction_text: None,
             pharm_classes: Vec::new(),
             top_adverse_events: Vec::new(),
+            faers_query: None,
             label: None,
+            label_set_id: None,
             shortage: None,
             approvals: None,
             civic: None,
@@ -2980,6 +5058,54 @@ mod tests {
     }
 
     #[test]
+    fn drug_evidence_urls_include_faers_and_dailymed_when_sections_exist() {
+        let drug = Drug {
+            name: "ivacaftor".to_string(),
+            drugbank_id: None,
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: vec!["Rash".to_string()],
+            faers_query: Some(
+                "(patient.drug.openfda.generic_name:\"ivacaftor\") AND patient.drug.drugcharacterization:1"
+                    .to_string(),
+            ),
+            label: Some(crate::entities::drug::DrugLabel {
+                indications: None,
+                warnings: Some("Warnings".to_string()),
+                dosage: None,
+            }),
+            label_set_id: Some("set-123".to_string()),
+            shortage: None,
+            approvals: None,
+            civic: None,
+        };
+
+        let urls = drug_evidence_urls(&drug);
+        assert!(urls.iter().any(|(label, url)| {
+            *label == "OpenFDA FAERS"
+                && url.starts_with("https://api.fda.gov/drug/event.json?search=")
+                && url.contains("count=patient.reaction.reactionmeddrapt.exact")
+        }));
+        assert!(urls.iter().any(|(label, url)| {
+            *label == "DailyMed" && url.contains("/drugInfo.cfm?setid=set-123")
+        }));
+    }
+
+    #[test]
     fn drug_markdown_uses_label_interaction_text_before_public_unavailable_fallback() {
         let drug = Drug {
             name: "warfarin".to_string(),
@@ -2990,6 +5116,9 @@ mod tests {
             mechanism: None,
             mechanisms: Vec::new(),
             approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
@@ -3000,7 +5129,9 @@ mod tests {
             ),
             pharm_classes: Vec::new(),
             top_adverse_events: Vec::new(),
+            faers_query: None,
             label: None,
+            label_set_id: None,
             shortage: None,
             approvals: None,
             civic: None,
@@ -3023,6 +5154,9 @@ mod tests {
             mechanism: None,
             mechanisms: Vec::new(),
             approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
@@ -3031,7 +5165,9 @@ mod tests {
             interaction_text: None,
             pharm_classes: Vec::new(),
             top_adverse_events: Vec::new(),
+            faers_query: None,
             label: None,
+            label_set_id: None,
             shortage: None,
             approvals: None,
             civic: None,
@@ -3084,35 +5220,258 @@ mod tests {
     }
 
     #[test]
-    fn article_search_markdown_groups_results_by_source() {
+    fn related_protein_includes_complexes_follow_up() {
+        let protein = Protein {
+            accession: "P15056".to_string(),
+            entry_id: Some("BRAF_HUMAN".to_string()),
+            name: "Serine/threonine-protein kinase B-raf".to_string(),
+            gene_symbol: Some("BRAF".to_string()),
+            organism: Some("Homo sapiens".to_string()),
+            length: Some(766),
+            function: None,
+            structures: vec!["6V34".to_string()],
+            structure_count: Some(1),
+            domains: Vec::new(),
+            interactions: Vec::new(),
+            complexes: Vec::new(),
+        };
+
+        let related = related_protein(&protein, &[]);
+        assert!(related.contains(&"biomcp get protein P15056 structures".to_string()));
+        assert!(related.contains(&"biomcp get protein P15056 complexes".to_string()));
+        assert!(related.contains(&"biomcp get gene BRAF".to_string()));
+    }
+
+    #[test]
+    fn related_protein_excludes_requested_sections() {
+        let protein = Protein {
+            accession: "P15056".to_string(),
+            entry_id: Some("BRAF_HUMAN".to_string()),
+            name: "Serine/threonine-protein kinase B-raf".to_string(),
+            gene_symbol: Some("BRAF".to_string()),
+            organism: Some("Homo sapiens".to_string()),
+            length: Some(766),
+            function: None,
+            structures: vec!["6V34".to_string()],
+            structure_count: Some(1),
+            domains: Vec::new(),
+            interactions: Vec::new(),
+            complexes: Vec::new(),
+        };
+
+        let related = related_protein(
+            &protein,
+            &["complexes".to_string(), "structures".to_string()],
+        );
+        assert!(!related.contains(&"biomcp get protein P15056 structures".to_string()));
+        assert!(!related.contains(&"biomcp get protein P15056 complexes".to_string()));
+        assert!(related.contains(&"biomcp get gene BRAF".to_string()));
+    }
+
+    #[test]
+    fn protein_markdown_renders_complexes_summary_and_detail_bullets() {
+        let protein = Protein {
+            accession: "P15056".to_string(),
+            entry_id: Some("BRAF_HUMAN".to_string()),
+            name: "Serine/threonine-protein kinase B-raf".to_string(),
+            gene_symbol: Some("BRAF".to_string()),
+            organism: Some("Homo sapiens".to_string()),
+            length: Some(766),
+            function: None,
+            structures: Vec::new(),
+            structure_count: None,
+            domains: Vec::new(),
+            interactions: Vec::new(),
+            complexes: vec![
+                ProteinComplex {
+                    accession: "CPX-1234".to_string(),
+                    name: "BRAF signaling complex with an intentionally long display label that should truncate in the summary table".to_string(),
+                    description: Some("Signals through MAPK.".to_string()),
+                    curation: ProteinComplexCuration::Curated,
+                    components: vec![
+                        ProteinComplexComponent {
+                            accession: "P15056".to_string(),
+                            name: "BRAF".to_string(),
+                            stoichiometry: Some("1".to_string()),
+                        },
+                        ProteinComplexComponent {
+                            accession: "Q02750".to_string(),
+                            name: "MAP2K1".to_string(),
+                            stoichiometry: None,
+                        },
+                        ProteinComplexComponent {
+                            accession: "P10398".to_string(),
+                            name: "RAF1".to_string(),
+                            stoichiometry: None,
+                        },
+                        ProteinComplexComponent {
+                            accession: "P07900".to_string(),
+                            name: "HSP90AA1".to_string(),
+                            stoichiometry: None,
+                        },
+                        ProteinComplexComponent {
+                            accession: "Q16543".to_string(),
+                            name: "CDC37".to_string(),
+                            stoichiometry: None,
+                        },
+                        ProteinComplexComponent {
+                            accession: "Q9Y243".to_string(),
+                            name: "AKT3".to_string(),
+                            stoichiometry: None,
+                        },
+                        ProteinComplexComponent {
+                            accession: "P31749".to_string(),
+                            name: "AKT1".to_string(),
+                            stoichiometry: None,
+                        },
+                    ],
+                },
+                ProteinComplex {
+                    accession: "CPX-5678".to_string(),
+                    name: "Complex with no listed members".to_string(),
+                    description: None,
+                    curation: ProteinComplexCuration::Predicted,
+                    components: Vec::new(),
+                },
+            ],
+        };
+
+        let markdown = protein_markdown(&protein, &["complexes".to_string()]).expect("markdown");
+        assert!(markdown.contains("## Complexes"));
+        assert!(markdown.contains("| ID | Name | Members | Curation |"));
+        assert!(!markdown.contains("| ID | Name | Components | Curation |"));
+        assert!(
+            markdown.contains(
+                "| CPX-1234 | BRAF signaling complex with an intentionally long di… | 7 | curated |"
+            ),
+            "expected truncated complex summary row, got:\n{markdown}"
+        );
+        assert!(markdown.contains(
+            "- `CPX-1234` members (7): BRAF (1), MAP2K1, RAF1, HSP90AA1, CDC37, +2 more\n  Description: Signals through MAPK."
+        ));
+        assert!(markdown.contains("- `CPX-5678` members (0): none listed"));
+        assert!(!markdown.contains("- `CPX-1234`: Signals through MAPK."));
+        assert!(!markdown.contains("AKT3"));
+        assert!(!markdown.contains("AKT1"));
+        assert!(!markdown.contains("See also: biomcp get protein P15056 complexes"));
+    }
+
+    #[test]
+    fn article_search_markdown_preserves_rank_order_and_shows_rationale() {
         let rows = vec![
             ArticleSearchResult {
                 pmid: "1".into(),
                 title: "Entity-ranked".into(),
+                pmcid: Some("PMC1".into()),
+                doi: Some("10.1000/one".into()),
                 journal: Some("Journal A".into()),
                 date: Some("2025-01-01".into()),
                 citation_count: Some(10),
+                influential_citation_count: Some(4),
                 source: ArticleSource::PubTator,
                 score: Some(99.1),
                 is_retracted: Some(false),
+                abstract_snippet: Some("Abstract one".into()),
+                ranking: Some(crate::entities::article::ArticleRankingMetadata {
+                    directness_tier: 3,
+                    anchor_count: 2,
+                    title_anchor_hits: 2,
+                    abstract_anchor_hits: 0,
+                    combined_anchor_hits: 2,
+                    all_anchors_in_title: true,
+                    all_anchors_in_text: true,
+                    study_or_review_cue: false,
+                }),
+                matched_sources: vec![ArticleSource::PubTator, ArticleSource::SemanticScholar],
+                normalized_title: "entity-ranked".into(),
+                normalized_abstract: "abstract one".into(),
+                publication_type: None,
+                insertion_index: 0,
             },
             ArticleSearchResult {
                 pmid: "2".into(),
                 title: "Field-ranked".into(),
+                pmcid: None,
+                doi: None,
                 journal: Some("Journal B".into()),
                 date: Some("2025-01-02".into()),
                 citation_count: Some(12),
+                influential_citation_count: Some(1),
                 source: ArticleSource::EuropePmc,
                 score: None,
                 is_retracted: Some(false),
+                abstract_snippet: Some("Abstract two".into()),
+                ranking: Some(crate::entities::article::ArticleRankingMetadata {
+                    directness_tier: 2,
+                    anchor_count: 2,
+                    title_anchor_hits: 1,
+                    abstract_anchor_hits: 1,
+                    combined_anchor_hits: 2,
+                    all_anchors_in_title: false,
+                    all_anchors_in_text: true,
+                    study_or_review_cue: true,
+                }),
+                matched_sources: vec![ArticleSource::EuropePmc],
+                normalized_title: "field-ranked".into(),
+                normalized_abstract: "abstract two".into(),
+                publication_type: Some("Review".into()),
+                insertion_index: 1,
             },
         ];
 
-        let markdown = article_search_markdown("gene=BRAF", &rows).expect("markdown should render");
-        assert!(markdown.contains("## PubTator3"));
-        assert!(markdown.contains("## Europe PMC"));
-        assert!(markdown.contains("| PMID | Title | Journal | Date | Score |"));
-        assert!(markdown.contains("| PMID | Title | Journal | Date | Cit. |"));
+        let markdown = article_search_markdown_with_footer_and_context(
+            "gene=BRAF",
+            &rows,
+            "",
+            crate::entities::article::ArticleSort::Relevance,
+            true,
+            None,
+        )
+        .expect("markdown should render");
+        assert!(markdown.contains("Semantic Scholar: enabled"));
+        assert!(markdown.contains("Ranking: directness-first"));
+        assert!(markdown.contains("| PMID | Title | Source(s) | Date | Why | Cit. |"));
+        assert!(markdown.contains("PubTator3, Semantic Scholar"));
+        assert!(markdown.contains("title 2/2"));
+        assert!(markdown.contains("title+abstract 2/2"));
+        assert!(!markdown.contains("## PubTator3"));
+        assert!(!markdown.contains("## Europe PMC"));
+        assert!(markdown.find("|1|").unwrap() < markdown.find("|2|").unwrap());
+    }
+
+    #[test]
+    fn article_ranking_why_tier1_mixed_shows_title_plus_abstract() {
+        let row = ArticleSearchResult {
+            pmid: "1".into(),
+            title: "Partial coverage".into(),
+            pmcid: None,
+            doi: None,
+            journal: None,
+            date: None,
+            citation_count: None,
+            influential_citation_count: None,
+            source: ArticleSource::EuropePmc,
+            matched_sources: vec![ArticleSource::EuropePmc],
+            score: None,
+            is_retracted: None,
+            abstract_snippet: None,
+            ranking: Some(crate::entities::article::ArticleRankingMetadata {
+                directness_tier: 1,
+                anchor_count: 3,
+                title_anchor_hits: 1,
+                abstract_anchor_hits: 1,
+                combined_anchor_hits: 2,
+                all_anchors_in_title: false,
+                all_anchors_in_text: false,
+                study_or_review_cue: false,
+            }),
+            normalized_title: "partial coverage".into(),
+            normalized_abstract: String::new(),
+            publication_type: None,
+            insertion_index: 0,
+        };
+        let why = article_ranking_why(&row, ArticleSort::Relevance);
+        assert_eq!(why, "title+abstract 2/3");
     }
 
     #[test]
@@ -3139,12 +5498,68 @@ mod tests {
             searches_dispatched: 1,
             searches_with_results: 1,
             wall_time_ms: 42,
+            debug_plan: None,
         };
 
         let markdown = search_all_markdown(&results, false).expect("markdown should render");
         assert!(
             markdown.contains("> No disease-filtered variants found; showing top gene variants.")
         );
+    }
+
+    #[test]
+    fn article_search_markdown_prepends_debug_plan_block() {
+        let debug_plan = DebugPlan {
+            surface: "search_article",
+            query: "gene=BRAF".to_string(),
+            anchor: None,
+            legs: vec![crate::cli::debug_plan::DebugPlanLeg {
+                leg: "article".to_string(),
+                entity: "article".to_string(),
+                filters: vec!["gene=BRAF".to_string()],
+                routing: vec!["planner=federated".to_string()],
+                sources: vec!["PubTator3".to_string(), "Europe PMC".to_string()],
+                matched_sources: vec!["PubTator3".to_string()],
+                count: 1,
+                total: Some(1),
+                note: None,
+                error: None,
+            }],
+        };
+        let rows = vec![ArticleSearchResult {
+            pmid: "1".into(),
+            title: "Entity-ranked".into(),
+            pmcid: None,
+            doi: None,
+            journal: Some("Journal A".into()),
+            date: Some("2025-01-01".into()),
+            citation_count: Some(10),
+            influential_citation_count: Some(4),
+            source: ArticleSource::PubTator,
+            score: Some(99.1),
+            is_retracted: Some(false),
+            abstract_snippet: Some("Abstract one".into()),
+            ranking: None,
+            matched_sources: vec![ArticleSource::PubTator],
+            normalized_title: "entity-ranked".into(),
+            normalized_abstract: "abstract one".into(),
+            publication_type: None,
+            insertion_index: 0,
+        }];
+
+        let markdown = article_search_markdown_with_footer_and_context(
+            "gene=BRAF",
+            &rows,
+            "",
+            crate::entities::article::ArticleSort::Relevance,
+            true,
+            Some(&debug_plan),
+        )
+        .expect("markdown should render");
+
+        assert!(markdown.starts_with("## Debug plan"));
+        assert!(markdown.contains("\"surface\": \"search_article\""));
+        assert!(markdown.contains("# Articles: gene=BRAF"));
     }
 
     #[test]
@@ -3369,6 +5784,7 @@ mod tests {
                     survival_3yr: Some(0.72),
                     survival_5yr: None,
                     event_rate: 0.141176,
+                    km_curve_points: Vec::new(),
                 },
                 StudySurvivalGroupResult {
                     group_name: "TP53-wildtype".to_string(),
@@ -3380,6 +5796,7 @@ mod tests {
                     survival_3yr: Some(0.88),
                     survival_5yr: Some(0.74),
                     event_rate: 0.088889,
+                    km_curve_points: Vec::new(),
                 },
             ],
             log_rank_p: Some(0.0042),

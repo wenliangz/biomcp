@@ -28,8 +28,44 @@ echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 ```bash
 out="$(biomcp get drug pembrolizumab)"
 echo "$out" | mustmatch like "# pembrolizumab"
-echo "$out" | mustmatch like "DrugBank: DB09037"
+echo "$out" | mustmatch like "DrugBank ID: DB09037"
 echo "$out" | mustmatch like "## Targets"
+```
+
+## Get Drug Help Surfaces Supported Sections
+
+The inline help should agree with `biomcp list drug` and the implementation for
+supported typed sections, including the already-working approval and CIViC
+paths.
+
+```bash
+out="$(biomcp get drug --help)"
+echo "$out" | mustmatch like "approvals"
+echo "$out" | mustmatch like "civic"
+echo "$out" | mustmatch like "label"
+echo "$out" | mustmatch like "biomcp get drug pembrolizumab approvals"
+```
+
+## Compact Approval Fields
+
+Drug JSON should expose additive approval aliases and a compact summary so approval questions do not require parsing the base card prose.
+
+```bash
+out="$(biomcp --json get drug pembrolizumab)"
+echo "$out" | jq -e '.approval_date | type == "string"' > /dev/null
+echo "$out" | jq -e '.approval_date_raw | type == "string"' > /dev/null
+echo "$out" | jq -e '.approval_date == .approval_date_raw' > /dev/null
+echo "$out" | jq -e '.approval_date_display | type == "string"' > /dev/null
+echo "$out" | jq -e '.approval_summary | type == "string"' > /dev/null
+```
+
+## Human-Friendly Approval Date
+
+The drug card should render the human-friendly display date in the base header instead of only the raw ISO string.
+
+```bash
+out="$(biomcp get drug pembrolizumab)"
+echo "$out" | mustmatch '/FDA Approved.*[A-Z][a-z]+ [0-9]{1,2}, [0-9]{4}/'
 ```
 
 ## Drug Targets

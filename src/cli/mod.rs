@@ -7,7 +7,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use futures::{StreamExt, future::try_join_all};
 use tracing::{debug, warn};
 
+use crate::cli::debug_plan::{DebugPlan, DebugPlanLeg};
+
 pub mod chart;
+pub mod debug_plan;
+pub mod discover;
 pub mod health;
 pub mod list;
 pub mod search_all;
@@ -43,6 +47,7 @@ pub enum ChartType {
     Box,
     Violin,
     Ridgeline,
+    Survival,
 }
 
 impl ChartType {
@@ -55,6 +60,7 @@ impl ChartType {
             Self::Box => "box",
             Self::Violin => "violin",
             Self::Ridgeline => "ridgeline",
+            Self::Survival => "survival",
         }
     }
 }
@@ -117,6 +123,53 @@ pub struct ChartArgs {
         help_heading = "Chart Styling"
     )]
     pub palette: Option<String>,
+
+    #[arg(long, hide = true, requires = "chart")]
+    pub mcp_inline: bool,
+}
+
+pub struct CliOutput {
+    pub text: String,
+    pub svg: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandOutcome {
+    pub text: String,
+    pub stream: OutputStream,
+    pub exit_code: u8,
+}
+
+impl CommandOutcome {
+    fn stdout(text: String) -> Self {
+        Self {
+            text,
+            stream: OutputStream::Stdout,
+            exit_code: 0,
+        }
+    }
+
+    fn stdout_with_exit(text: String, exit_code: u8) -> Self {
+        Self {
+            text,
+            stream: OutputStream::Stdout,
+            exit_code,
+        }
+    }
+
+    fn stderr_with_exit(text: String, exit_code: u8) -> Self {
+        Self {
+            text,
+            stream: OutputStream::Stderr,
+            exit_code,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -252,6 +305,19 @@ EXAMPLES:
         #[arg(short, long, default_value = "10")]
         limit: usize,
     },
+    /// Resolve free-text biomedical text into typed concepts and suggested commands
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp discover ERBB1
+  biomcp discover Keytruda
+  biomcp discover \"chest pain\"
+  biomcp --json discover diabetes
+
+See also: biomcp list discover")]
+    Discover {
+        /// Free-text biomedical query
+        query: String,
+    },
     /// Show version
     Version {
         /// Include executable provenance and PATH diagnostics
@@ -269,6 +335,7 @@ EXAMPLES:
   biomcp search all --gene BRAF --disease melanoma
   biomcp search all --keyword resistance
   biomcp search all --gene BRAF --counts-only
+  biomcp search all --gene BRAF --debug-plan
 
 See also: biomcp list search-all")]
     All {
@@ -299,6 +366,9 @@ See also: biomcp list search-all")]
         /// Render counts per section only (skip section rows)
         #[arg(long = "counts-only")]
         counts_only: bool,
+        /// Include the executed multi-leg routing plan in markdown or JSON output
+        #[arg(long = "debug-plan")]
+        debug_plan: bool,
     },
     /// Search genes by symbol, name, type, or chromosome (MyGene.info)
     #[command(after_help = "\
@@ -449,7 +519,7 @@ See also: biomcp list gwas")]
         #[arg(long, default_value = "0")]
         offset: usize,
     },
-    /// Search articles by gene, disease, drug, keyword, or author (PubMed/PubTator3)
+    /// Search articles by gene, disease, drug, keyword, or author (PubTator3 + Europe PMC, optional Semantic Scholar)
     #[command(after_help = "\
 EXAMPLES:
   biomcp search article \"BRAF resistance\"
@@ -457,6 +527,7 @@ EXAMPLES:
   biomcp search article -g BRAF --date-from 2024-01-01
   biomcp search article -d melanoma --type review --journal Nature --limit 5
   biomcp search article -g BRAF --source pubtator --limit 20
+  biomcp search article -g BRAF --debug-plan --limit 5
 
 See also: biomcp list article")]
     Article {
@@ -534,6 +605,9 @@ See also: biomcp list article")]
         /// Skip the first N results
         #[arg(long, default_value = "0")]
         offset: usize,
+        /// Include the executed search planner output in markdown or JSON output
+        #[arg(long = "debug-plan")]
+        debug_plan: bool,
     },
     /// Search trials by condition, intervention, mutation, or location (ClinicalTrials.gov)
     #[command(after_help = "\
@@ -674,13 +748,16 @@ See also: biomcp list trial")]
         #[arg(short, long, default_value = "10")]
         limit: usize,
     },
-    /// Search variants by gene, significance, frequency, or consequence (ClinVar/gnomAD)
+    /// Search variants by gene, shorthand alias, significance, frequency, or consequence (ClinVar/gnomAD)
     #[command(after_help = "\
 EXAMPLES:
   biomcp search variant BRAF --limit 5
+  biomcp search variant \"PTPN22 620W\" --limit 5
+  biomcp search variant -g PTPN22 R620W --limit 5
+  biomcp search variant BRAF p.Val600Glu --limit 5
   biomcp search variant -g BRAF --significance pathogenic
   biomcp search variant -g BRCA1 --review-status 2 --revel-min 0.7 --consequence missense_variant --limit 5
-  biomcp search variant --hgvsp V600E -g BRAF --limit 5
+  biomcp search variant --hgvsp p.Val600Glu -g BRAF --limit 5
 
 For variant mentions in trials: biomcp variant trials \"BRAF V600E\"
 See also: biomcp list variant")]
@@ -692,7 +769,7 @@ See also: biomcp list variant")]
         #[arg(value_name = "QUERY", num_args = 0..)]
         positional_query: Vec<String>,
 
-        /// Filter by protein change (e.g., V600E or p.V600E)
+        /// Filter by protein change (e.g., V600E, p.V600E, or p.Val600Glu)
         #[arg(long)]
         hgvsp: Option<String>,
 
@@ -801,18 +878,23 @@ See also: biomcp list drug")]
         #[arg(long, default_value = "0")]
         offset: usize,
     },
-    /// Search pathways by name or keyword (Reactome)
-    #[command(after_help = "\
+    /// Search pathways by name or keyword
+    #[command(
+        override_usage = "biomcp search pathway [OPTIONS] <QUERY>\n       biomcp search pathway [OPTIONS] --top-level [QUERY]",
+        after_help = "\
 EXAMPLES:
   biomcp search pathway \"MAPK signaling\"
-  biomcp search pathway -q \"DNA repair\" --type pathway --top-level --limit 5
+  biomcp search pathway \"Pathways in cancer\" --limit 5
+  biomcp search pathway -q \"DNA repair\" --limit 5
+  biomcp search pathway --top-level --limit 5
 
-See also: biomcp list pathway")]
+See also: biomcp list pathway"
+    )]
     Pathway {
         /// Free text query (pathway name, process, keyword)
         #[arg(short, long)]
         query: Option<String>,
-        /// Optional positional query alias for -q/--query
+        /// Positional alias for -q/--query; required unless --top-level is present, and multi-word queries must be quoted
         #[arg(value_name = "QUERY")]
         positional_query: Option<String>,
         /// Entity type filter (e.g., pathway)
@@ -953,12 +1035,13 @@ pub enum GetEntity {
 EXAMPLES:
   biomcp get gene BRAF
   biomcp get gene BRAF pathways
+  biomcp get gene BRAF hpa
 
 See also: biomcp list gene")]
     Gene {
         /// Gene symbol (e.g., BRAF, TP53, EGFR)
         symbol: String,
-        /// Sections to include (pathways, ontology, diseases, protein, go, interactions, civic, expression, druggability, clingen, all)
+        /// Sections to include (pathways, ontology, diseases, protein, go, interactions, civic, expression, hpa, druggability, clingen, constraint, disgenet, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
@@ -987,7 +1070,7 @@ See also: biomcp list disease")]
     Disease {
         /// Disease name (e.g., melanoma) or ID (e.g., MONDO:0005105)
         name_or_id: String,
-        /// Sections to include (genes, pathways, phenotypes, variants, models, prevalence, civic, all)
+        /// Sections to include (genes, pathways, phenotypes, variants, models, prevalence, civic, disgenet, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
@@ -1023,15 +1106,18 @@ See also: biomcp list trial")]
         #[arg(long, default_value = "ctgov")]
         source: String,
     },
-    /// Get variant by rsID, HGVS, or "GENE CHANGE" (e.g., "BRAF V600E")
+    /// Get variant by exact rsID, HGVS, or "GENE CHANGE" (e.g., "BRAF V600E" or "BRAF p.Val600Glu")
     #[command(after_help = "\
 EXAMPLES:
   biomcp get variant rs113488022
   biomcp get variant \"BRAF V600E\" clinvar
+  biomcp get variant \"BRAF p.Val600Glu\"
+
+Shorthand like \"PTPN22 620W\" or \"R620W\" should go through `biomcp search variant`.
 
 See also: biomcp list variant")]
     Variant {
-        /// rsID, HGVS, or "GENE CHANGE" (e.g., rs113488022, "BRAF V600E")
+        /// Exact rsID, HGVS, or "GENE CHANGE" (e.g., rs113488022, "BRAF V600E", "BRAF p.Val600Glu")
         id: String,
         /// Sections to include (predict, predictions, clinvar, population, conservation, cosmic, cgi, civic, cbioportal, gwas, all)
         #[arg(trailing_var_arg = true)]
@@ -1042,26 +1128,29 @@ See also: biomcp list variant")]
 EXAMPLES:
   biomcp get drug pembrolizumab
   biomcp get drug pembrolizumab targets
+  biomcp get drug pembrolizumab approvals
 
 See also: biomcp list drug")]
     Drug {
         /// Drug name (e.g., pembrolizumab, carboplatin)
         name: String,
-        /// Sections to include (label, shortage, targets, indications, interactions, all)
+        /// Sections to include (label, shortage, targets, indications, interactions, civic, approvals, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
-    /// Get pathway by Reactome stable ID
+    /// Get pathway by ID
     #[command(after_help = "\
 EXAMPLES:
   biomcp get pathway R-HSA-5673001
+  biomcp get pathway hsa05200
   biomcp get pathway R-HSA-5673001 genes
+  biomcp get pathway R-HSA-5673001 events
 
 See also: biomcp list pathway")]
     Pathway {
-        /// Reactome stable ID (e.g., R-HSA-5673001)
+        /// Pathway ID (e.g., R-HSA-5673001, hsa05200)
         id: String,
-        /// Sections to include (genes, events, enrichment, all)
+        /// Sections to include (genes, events (Reactome only), enrichment (Reactome only), all = all sections available for the resolved source)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
@@ -1069,13 +1158,14 @@ See also: biomcp list pathway")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp get protein P15056
+  biomcp get protein P15056 complexes
   biomcp get protein P15056 structures
 
 See also: biomcp list protein")]
     Protein {
         /// UniProt accession or HGNC symbol (e.g., P15056 or BRAF)
         accession: String,
-        /// Sections to include (domains, interactions, structures, all)
+        /// Sections to include (domains, interactions, complexes, structures, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
@@ -1278,6 +1368,20 @@ See also: biomcp list article")]
         #[arg(short, long, default_value = "10")]
         limit: usize,
     },
+    /// Fetch compact summary cards for multiple known article IDs
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp article batch 22663011 24200969
+  biomcp article batch 22663011 10.1056/NEJMoa1203421 --json
+
+Returns compact multi-article summary cards for anchor selection.
+S2_API_KEY adds optional TLDR and citation metadata when available.
+See also: biomcp list article")]
+    Batch {
+        /// PMIDs, PMCIDs, or DOIs
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
     /// Traverse citing papers with Semantic Scholar contexts and intents
     #[command(after_help = "\
 EXAMPLES:
@@ -1429,12 +1533,13 @@ pub enum PathwayCommand {
     #[command(after_help = "\
 EXAMPLES:
   biomcp pathway drugs R-HSA-5673001 --limit 5
+  biomcp pathway drugs hsa05200 --limit 5
   biomcp pathway drugs R-HSA-6802957 --limit 5
 
 Note: Searches free-text fields (e.g., eligibility criteria). Results depend on source document wording.
 See also: biomcp list pathway")]
     Drugs {
-        /// Reactome stable ID (e.g., R-HSA-5673001)
+        /// Pathway ID (e.g., R-HSA-5673001, hsa05200)
         id: String,
         /// Maximum results (default: 10)
         #[arg(short, long, default_value = "10")]
@@ -1447,12 +1552,13 @@ See also: biomcp list pathway")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp pathway articles R-HSA-5673001 --limit 5
+  biomcp pathway articles hsa05200 --limit 5
   biomcp pathway articles R-HSA-6802957 --limit 5
 
 Note: Searches free-text fields (e.g., eligibility criteria). Results depend on source document wording.
 See also: biomcp list pathway")]
     Articles {
-        /// Reactome stable ID (e.g., R-HSA-5673001)
+        /// Pathway ID (e.g., R-HSA-5673001, hsa05200)
         id: String,
         /// Maximum results (default: 10)
         #[arg(short, long, default_value = "10")]
@@ -1465,12 +1571,13 @@ See also: biomcp list pathway")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp pathway trials R-HSA-5673001 --limit 5
+  biomcp pathway trials hsa05200 --limit 5
   biomcp pathway trials R-HSA-5673001 --source nci --limit 5
 
 Note: Searches free-text fields (e.g., eligibility criteria). Results depend on source document wording.
 See also: biomcp list pathway")]
     Trials {
-        /// Reactome stable ID (e.g., R-HSA-5673001)
+        /// Pathway ID (e.g., R-HSA-5673001, hsa05200)
         id: String,
         /// Maximum results (default: 10)
         #[arg(short, long, default_value = "10")]
@@ -1821,6 +1928,149 @@ fn chart_json_conflict(
     Ok(())
 }
 
+fn mcp_output_flag_error() -> crate::error::BioMcpError {
+    crate::error::BioMcpError::InvalidArgument(
+        "MCP chart responses do not support --output/-o. Omit file output and consume the inline SVG image content instead.".into(),
+    )
+}
+
+fn is_charted_mcp_study_command(cli: &Cli) -> Result<bool, crate::error::BioMcpError> {
+    let chart = match &cli.command {
+        Commands::Study {
+            cmd:
+                StudyCommand::Query { chart, .. }
+                | StudyCommand::Survival { chart, .. }
+                | StudyCommand::Compare { chart, .. }
+                | StudyCommand::CoOccurrence { chart, .. },
+        } => chart,
+        _ => return Ok(false),
+    };
+
+    if chart.chart.is_none() || cli.json {
+        return Ok(false);
+    }
+    if chart.output.is_some() {
+        return Err(mcp_output_flag_error());
+    }
+    Ok(true)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum McpChartPass {
+    Text,
+    Svg,
+}
+
+fn require_flag_value(
+    args: &[String],
+    index: usize,
+    flag: &str,
+) -> Result<String, crate::error::BioMcpError> {
+    args.get(index + 1).cloned().ok_or_else(|| {
+        crate::error::BioMcpError::InvalidArgument(format!("{flag} requires a value"))
+    })
+}
+
+fn rewrite_mcp_chart_args(
+    args: &[String],
+    pass: McpChartPass,
+) -> Result<Vec<String>, crate::error::BioMcpError> {
+    let mut rewritten = Vec::with_capacity(args.len() + 1);
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| "biomcp".to_string()),
+    );
+
+    let mut i = 1usize;
+    let mut saw_inline_flag = false;
+    while i < args.len() {
+        let token = &args[i];
+        match token.as_str() {
+            "--chart" => {
+                let value = require_flag_value(args, i, "--chart")?;
+                if pass == McpChartPass::Svg {
+                    rewritten.push(token.clone());
+                    rewritten.push(value);
+                }
+                i += 2;
+            }
+            "--terminal" => {
+                i += 1;
+            }
+            "--output" => {
+                if pass == McpChartPass::Svg {
+                    return Err(mcp_output_flag_error());
+                }
+                let _ = require_flag_value(args, i, "--output")?;
+                i += 2;
+            }
+            "-o" => {
+                if pass == McpChartPass::Svg {
+                    return Err(mcp_output_flag_error());
+                }
+                let _ = require_flag_value(args, i, "-o")?;
+                i += 2;
+            }
+            "--title" | "--theme" | "--palette" => {
+                let value = require_flag_value(args, i, token)?;
+                if pass == McpChartPass::Svg {
+                    rewritten.push(token.clone());
+                    rewritten.push(value);
+                }
+                i += 2;
+            }
+            "--mcp-inline" => {
+                if pass == McpChartPass::Svg {
+                    rewritten.push(token.clone());
+                }
+                saw_inline_flag = true;
+                i += 1;
+            }
+            _ => {
+                if token.starts_with("--chart=") {
+                    if pass == McpChartPass::Svg {
+                        rewritten.push(token.clone());
+                    }
+                    i += 1;
+                    continue;
+                }
+                if token.starts_with("--output=") || token.starts_with("-o=") {
+                    if pass == McpChartPass::Svg {
+                        return Err(mcp_output_flag_error());
+                    }
+                    i += 1;
+                    continue;
+                }
+                if token.starts_with("-o") && token.len() > 2 {
+                    if pass == McpChartPass::Svg {
+                        return Err(mcp_output_flag_error());
+                    }
+                    i += 1;
+                    continue;
+                }
+                if token.starts_with("--title=")
+                    || token.starts_with("--theme=")
+                    || token.starts_with("--palette=")
+                {
+                    if pass == McpChartPass::Svg {
+                        rewritten.push(token.clone());
+                    }
+                    i += 1;
+                    continue;
+                }
+                rewritten.push(token.clone());
+                i += 1;
+            }
+        }
+    }
+
+    if pass == McpChartPass::Svg && !saw_inline_flag {
+        rewritten.push("--mcp-inline".to_string());
+    }
+    Ok(rewritten)
+}
+
 fn normalize_cli_tokens(values: Vec<String>) -> Option<String> {
     let joined = values
         .into_iter()
@@ -1906,14 +2156,45 @@ fn parse_exon_deletion_phrase(query: &str) -> Option<(String, String)> {
     Some((gene.to_string(), "inframe_deletion".to_string()))
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ResolvedVariantQuery {
     gene: Option<String>,
     hgvsp: Option<String>,
     hgvsc: Option<String>,
     rsid: Option<String>,
+    protein_alias: Option<crate::entities::variant::VariantProteinAlias>,
     consequence: Option<String>,
     condition: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct VariantSearchRequest {
+    gene: Option<String>,
+    positional_query: Vec<String>,
+    hgvsp: Option<String>,
+    significance: Option<String>,
+    max_frequency: Option<f64>,
+    min_cadd: Option<f64>,
+    consequence: Option<String>,
+    review_status: Option<String>,
+    population: Option<String>,
+    revel_min: Option<f64>,
+    gerp_min: Option<f64>,
+    tumor_site: Option<String>,
+    condition: Option<String>,
+    impact: Option<String>,
+    lof: bool,
+    has: Option<String>,
+    missing: Option<String>,
+    therapy: Option<String>,
+    limit: usize,
+    offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VariantSearchPlan {
+    Standard(ResolvedVariantQuery),
+    Guidance(crate::entities::variant::VariantGuidance),
 }
 
 fn resolve_variant_query(
@@ -1922,9 +2203,10 @@ fn resolve_variant_query(
     consequence_flag: Option<String>,
     condition_flag: Option<String>,
     positional_tokens: Vec<String>,
-) -> Result<ResolvedVariantQuery, crate::error::BioMcpError> {
+) -> Result<VariantSearchPlan, crate::error::BioMcpError> {
     let gene_flag = normalize_cli_query(gene_flag);
-    let hgvsp_flag = normalize_cli_query(hgvsp_flag);
+    let hgvsp_flag = normalize_cli_query(hgvsp_flag)
+        .map(|value| crate::entities::variant::normalize_protein_change(&value).unwrap_or(value));
     let consequence_flag = normalize_cli_query(consequence_flag);
     let condition_flag = normalize_cli_query(condition_flag);
 
@@ -1937,40 +2219,83 @@ fn resolve_variant_query(
     let positional = normalize_cli_query(Some(positional));
 
     let Some(query) = positional else {
-        return Ok(ResolvedVariantQuery {
+        return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
             gene: gene_flag,
             hgvsp: hgvsp_flag,
             consequence: consequence_flag,
             condition: condition_flag,
             ..Default::default()
-        });
+        }));
     };
 
     let token_count = query.split_whitespace().count();
     if token_count <= 1 {
-        if gene_flag.is_some() {
-            return Err(crate::error::BioMcpError::InvalidArgument(
-                "Use either positional QUERY or --gene, not both".into(),
-            ));
-        }
         if let Ok(crate::entities::variant::VariantIdFormat::RsId(rsid)) =
             crate::entities::variant::parse_variant_id(&query)
         {
-            return Ok(ResolvedVariantQuery {
+            if gene_flag.is_some() {
+                return Err(crate::error::BioMcpError::InvalidArgument(
+                    "Use either positional QUERY or --gene, not both".into(),
+                ));
+            }
+            return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
                 rsid: Some(rsid),
                 hgvsp: hgvsp_flag,
                 consequence: consequence_flag,
                 condition: condition_flag,
                 ..Default::default()
-            });
+            }));
         }
-        return Ok(ResolvedVariantQuery {
+
+        if let Some(gene) = gene_flag.clone() {
+            if let Some(protein_alias) =
+                crate::entities::variant::parse_variant_protein_alias(&query)
+            {
+                if hgvsp_flag.is_some() {
+                    return Err(crate::error::BioMcpError::InvalidArgument(
+                        "Positional residue alias conflicts with --hgvsp".into(),
+                    ));
+                }
+                return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
+                    gene: Some(gene),
+                    protein_alias: Some(protein_alias),
+                    consequence: consequence_flag,
+                    condition: condition_flag,
+                    ..Default::default()
+                }));
+            }
+            if let crate::entities::variant::VariantInputKind::Shorthand(
+                crate::entities::variant::VariantShorthand::ProteinChangeOnly { change },
+            ) = crate::entities::variant::classify_variant_input(&query)
+            {
+                if hgvsp_flag.is_some() {
+                    return Err(crate::error::BioMcpError::InvalidArgument(
+                        "Positional protein change conflicts with --hgvsp".into(),
+                    ));
+                }
+                return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
+                    gene: Some(gene),
+                    hgvsp: Some(change),
+                    consequence: consequence_flag,
+                    condition: condition_flag,
+                    ..Default::default()
+                }));
+            }
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Use either positional QUERY or --gene, not both".into(),
+            ));
+        }
+
+        if let Some(guidance) = crate::entities::variant::variant_guidance(&query) {
+            return Ok(VariantSearchPlan::Guidance(guidance));
+        }
+        return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
             gene: Some(query),
             hgvsp: hgvsp_flag,
             consequence: consequence_flag,
             condition: condition_flag,
             ..Default::default()
-        });
+        }));
     }
 
     if let Some((gene, change)) = parse_simple_gene_change(&query) {
@@ -1984,13 +2309,44 @@ fn resolve_variant_query(
                 "Positional \"GENE CHANGE\" conflicts with --hgvsp".into(),
             ));
         }
-        return Ok(ResolvedVariantQuery {
+        return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
             gene: Some(gene),
             hgvsp: Some(change),
             consequence: consequence_flag,
             condition: condition_flag,
             ..Default::default()
-        });
+        }));
+    }
+
+    if let crate::entities::variant::VariantInputKind::Shorthand(
+        crate::entities::variant::VariantShorthand::GeneResidueAlias {
+            gene,
+            position,
+            residue,
+            ..
+        },
+    ) = crate::entities::variant::classify_variant_input(&query)
+    {
+        if gene_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional residue alias conflicts with --gene".into(),
+            ));
+        }
+        if hgvsp_flag.is_some() {
+            return Err(crate::error::BioMcpError::InvalidArgument(
+                "Positional residue alias conflicts with --hgvsp".into(),
+            ));
+        }
+        return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
+            gene: Some(gene),
+            protein_alias: Some(crate::entities::variant::VariantProteinAlias {
+                position,
+                residue,
+            }),
+            consequence: consequence_flag,
+            condition: condition_flag,
+            ..Default::default()
+        }));
     }
 
     if let Some((gene, hgvsc)) = parse_gene_c_hgvs(&query) {
@@ -1999,14 +2355,14 @@ fn resolve_variant_query(
                 "Positional \"GENE c.HGVS\" conflicts with --gene".into(),
             ));
         }
-        return Ok(ResolvedVariantQuery {
+        return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
             gene: Some(gene),
             hgvsp: hgvsp_flag,
             hgvsc: Some(hgvsc),
             consequence: consequence_flag,
             condition: condition_flag,
             ..Default::default()
-        });
+        }));
     }
 
     if let Some((gene, consequence)) = parse_exon_deletion_phrase(&query) {
@@ -2020,13 +2376,13 @@ fn resolve_variant_query(
                 "Positional exon-deletion query conflicts with --consequence".into(),
             ));
         }
-        return Ok(ResolvedVariantQuery {
+        return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
             gene: Some(gene),
             hgvsp: hgvsp_flag,
             consequence: Some(consequence),
             condition: condition_flag,
             ..Default::default()
-        });
+        }));
     }
 
     if condition_flag.is_some() {
@@ -2034,13 +2390,13 @@ fn resolve_variant_query(
             "Use either positional QUERY or --condition, not both".into(),
         ));
     }
-    Ok(ResolvedVariantQuery {
+    Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
         gene: gene_flag,
         hgvsp: hgvsp_flag,
         consequence: consequence_flag,
         condition: Some(query),
         ..Default::default()
-    })
+    }))
 }
 
 async fn render_gene_card(
@@ -2054,9 +2410,284 @@ async fn render_gene_card(
             &gene,
             crate::render::markdown::gene_evidence_urls(&gene),
             crate::render::markdown::related_gene(&gene),
+            crate::render::provenance::gene_section_sources(&gene),
         )?)
     } else {
         Ok(crate::render::markdown::gene_markdown(&gene, sections)?)
+    }
+}
+
+fn alias_suggestion_markdown(
+    query: &str,
+    requested_entity: crate::entities::discover::DiscoverType,
+    decision: &crate::entities::discover::AliasFallbackDecision,
+) -> String {
+    let err = crate::error::BioMcpError::NotFound {
+        entity: requested_entity.cli_name().to_string(),
+        id: query.trim().to_string(),
+        suggestion: crate::render::markdown::alias_fallback_suggestion(decision),
+    };
+    format!("Error: {err}")
+}
+
+fn alias_suggestion_outcome(
+    query: &str,
+    requested_entity: crate::entities::discover::DiscoverType,
+    decision: &crate::entities::discover::AliasFallbackDecision,
+    json_output: bool,
+) -> anyhow::Result<CommandOutcome> {
+    if json_output {
+        return Ok(CommandOutcome::stdout_with_exit(
+            crate::render::json::to_alias_suggestion_json(decision)?,
+            1,
+        ));
+    }
+    Ok(CommandOutcome::stderr_with_exit(
+        alias_suggestion_markdown(query, requested_entity, decision),
+        1,
+    ))
+}
+
+fn variant_guidance_markdown(guidance: &crate::entities::variant::VariantGuidance) -> String {
+    let err = crate::error::BioMcpError::NotFound {
+        entity: "variant".into(),
+        id: guidance.query.clone(),
+        suggestion: crate::render::markdown::variant_guidance_suggestion(guidance),
+    };
+    format!("Error: {err}")
+}
+
+fn variant_guidance_outcome(
+    guidance: &crate::entities::variant::VariantGuidance,
+    json_output: bool,
+) -> anyhow::Result<CommandOutcome> {
+    if json_output {
+        return Ok(CommandOutcome::stdout_with_exit(
+            crate::render::json::to_variant_guidance_json(guidance)?,
+            1,
+        ));
+    }
+    Ok(CommandOutcome::stderr_with_exit(
+        variant_guidance_markdown(guidance),
+        1,
+    ))
+}
+
+async fn try_alias_fallback_outcome(
+    query: &str,
+    requested_entity: crate::entities::discover::DiscoverType,
+    json_output: bool,
+) -> anyhow::Result<Option<CommandOutcome>> {
+    match crate::cli::discover::resolve_query(
+        query,
+        crate::cli::discover::DiscoverMode::AliasFallback,
+    )
+    .await
+    {
+        Ok(result) => {
+            let decision =
+                crate::entities::discover::classify_alias_fallback(&result, requested_entity);
+            match decision {
+                crate::entities::discover::AliasFallbackDecision::None => Ok(None),
+                other => Ok(Some(alias_suggestion_outcome(
+                    query,
+                    requested_entity,
+                    &other,
+                    json_output,
+                )?)),
+            }
+        }
+        Err(err) => {
+            warn!(
+                query = query.trim(),
+                entity = requested_entity.cli_name(),
+                "alias fallback discovery unavailable: {err}"
+            );
+            Ok(None)
+        }
+    }
+}
+
+async fn render_gene_card_outcome(
+    symbol: &str,
+    sections: &[String],
+    json_output: bool,
+    alias_suggestions_as_json: bool,
+) -> anyhow::Result<CommandOutcome> {
+    match crate::entities::gene::get(symbol, sections).await {
+        Ok(gene) => {
+            let text = if json_output {
+                crate::render::json::to_entity_json(
+                    &gene,
+                    crate::render::markdown::gene_evidence_urls(&gene),
+                    crate::render::markdown::related_gene(&gene),
+                    crate::render::provenance::gene_section_sources(&gene),
+                )?
+            } else {
+                crate::render::markdown::gene_markdown(&gene, sections)?
+            };
+            Ok(CommandOutcome::stdout(text))
+        }
+        Err(err @ crate::error::BioMcpError::NotFound { .. }) => {
+            if let Some(outcome) = try_alias_fallback_outcome(
+                symbol,
+                crate::entities::discover::DiscoverType::Gene,
+                json_output || alias_suggestions_as_json,
+            )
+            .await?
+            {
+                Ok(outcome)
+            } else {
+                Err(err.into())
+            }
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn render_variant_card_outcome(
+    id: &str,
+    sections: &[String],
+    json_output: bool,
+    guidance_as_json: bool,
+) -> anyhow::Result<CommandOutcome> {
+    if let Some(guidance) = crate::entities::variant::variant_guidance(id) {
+        return variant_guidance_outcome(&guidance, json_output || guidance_as_json);
+    }
+
+    match crate::entities::variant::get(id, sections).await {
+        Ok(variant) => {
+            let text = if json_output {
+                crate::render::json::to_entity_json(
+                    &variant,
+                    crate::render::markdown::variant_evidence_urls(&variant),
+                    crate::render::markdown::related_variant(&variant),
+                    crate::render::provenance::variant_section_sources(&variant),
+                )?
+            } else {
+                crate::render::markdown::variant_markdown(&variant, sections)?
+            };
+            Ok(CommandOutcome::stdout(text))
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn render_variant_search_outcome(
+    json_output: bool,
+    guidance_as_json: bool,
+    request: VariantSearchRequest,
+) -> anyhow::Result<CommandOutcome> {
+    let VariantSearchRequest {
+        gene,
+        positional_query,
+        hgvsp,
+        significance,
+        max_frequency,
+        min_cadd,
+        consequence,
+        review_status,
+        population,
+        revel_min,
+        gerp_min,
+        tumor_site,
+        condition,
+        impact,
+        lof,
+        has,
+        missing,
+        therapy,
+        limit,
+        offset,
+    } = request;
+
+    let resolved =
+        match resolve_variant_query(gene, hgvsp, consequence, condition, positional_query)? {
+            VariantSearchPlan::Standard(resolved) => resolved,
+            VariantSearchPlan::Guidance(guidance) => {
+                return variant_guidance_outcome(&guidance, json_output || guidance_as_json);
+            }
+        };
+
+    let filters = crate::entities::variant::VariantSearchFilters {
+        gene: resolved.gene,
+        hgvsp: resolved.hgvsp,
+        hgvsc: resolved.hgvsc,
+        rsid: resolved.rsid,
+        protein_alias: resolved.protein_alias,
+        significance,
+        max_frequency,
+        min_cadd,
+        consequence: resolved.consequence,
+        review_status,
+        population,
+        revel_min,
+        gerp_min,
+        tumor_site,
+        condition: resolved.condition,
+        impact,
+        lof,
+        has,
+        missing,
+        therapy,
+    };
+
+    let mut query = crate::entities::variant::search_query_summary(&filters);
+    if offset > 0 {
+        query = if query.is_empty() {
+            format!("offset={offset}")
+        } else {
+            format!("{query}, offset={offset}")
+        };
+    }
+
+    let page = crate::entities::variant::search_page(&filters, limit, offset).await?;
+    let results = page.results;
+    let pagination = PaginationMeta::offset(offset, limit, results.len(), page.total);
+    if json_output {
+        return Ok(CommandOutcome::stdout(search_json(results, pagination)?));
+    }
+
+    let footer = pagination_footer_offset(&pagination);
+    Ok(CommandOutcome::stdout(
+        crate::render::markdown::variant_search_markdown_with_footer(&query, &results, &footer)?,
+    ))
+}
+
+async fn render_drug_card_outcome(
+    name: &str,
+    sections: &[String],
+    json_output: bool,
+    alias_suggestions_as_json: bool,
+) -> anyhow::Result<CommandOutcome> {
+    match crate::entities::drug::get(name, sections).await {
+        Ok(drug) => {
+            let text = if json_output {
+                crate::render::json::to_entity_json(
+                    &drug,
+                    crate::render::markdown::drug_evidence_urls(&drug),
+                    crate::render::markdown::related_drug(&drug),
+                    crate::render::provenance::drug_section_sources(&drug),
+                )?
+            } else {
+                crate::render::markdown::drug_markdown(&drug, sections)?
+            };
+            Ok(CommandOutcome::stdout(text))
+        }
+        Err(err @ crate::error::BioMcpError::NotFound { .. }) => {
+            if let Some(outcome) = try_alias_fallback_outcome(
+                name,
+                crate::entities::discover::DiscoverType::Drug,
+                json_output || alias_suggestions_as_json,
+            )
+            .await?
+            {
+                Ok(outcome)
+            } else {
+                Err(err.into())
+            }
+        }
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -2086,6 +2717,7 @@ fn trial_locations_json(
         },
         crate::render::markdown::trial_evidence_urls(trial),
         crate::render::markdown::related_trial(trial),
+        crate::render::provenance::trial_section_sources(trial),
     )
     .map_err(Into::into)
 }
@@ -2175,6 +2807,142 @@ fn search_json<T: serde::Serialize>(
         pagination,
         count,
         results,
+    })
+    .map_err(Into::into)
+}
+
+fn article_query_summary(
+    filters: &crate::entities::article::ArticleSearchFilters,
+    source_filter: crate::entities::article::ArticleSourceFilter,
+    include_retracted: bool,
+    offset: usize,
+) -> String {
+    vec![
+        filters.gene.as_deref().map(|v| format!("gene={v}")),
+        filters.disease.as_deref().map(|v| format!("disease={v}")),
+        filters.drug.as_deref().map(|v| format!("drug={v}")),
+        filters.author.as_deref().map(|v| format!("author={v}")),
+        filters.keyword.as_deref().map(|v| format!("keyword={v}")),
+        filters.article_type.as_deref().map(|v| format!("type={v}")),
+        filters
+            .date_from
+            .as_deref()
+            .map(|v| format!("date_from={v}")),
+        filters.date_to.as_deref().map(|v| format!("date_to={v}")),
+        filters.journal.as_deref().map(|v| format!("journal={v}")),
+        filters.open_access.then(|| "open_access=true".to_string()),
+        filters
+            .no_preprints
+            .then(|| "no_preprints=true".to_string()),
+        if include_retracted {
+            Some("include_retracted=true".to_string())
+        } else {
+            filters
+                .exclude_retracted
+                .then(|| "exclude_retracted=true".to_string())
+        },
+        Some(format!("sort={}", filters.sort.as_str())),
+        (source_filter != crate::entities::article::ArticleSourceFilter::All)
+            .then(|| format!("source={}", source_filter.as_str())),
+        (offset > 0).then(|| format!("offset={offset}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
+fn article_debug_filters(
+    filters: &crate::entities::article::ArticleSearchFilters,
+    source_filter: crate::entities::article::ArticleSourceFilter,
+) -> Vec<String> {
+    vec![
+        filters.gene.as_deref().map(|v| format!("gene={v}")),
+        filters.disease.as_deref().map(|v| format!("disease={v}")),
+        filters.drug.as_deref().map(|v| format!("drug={v}")),
+        filters.author.as_deref().map(|v| format!("author={v}")),
+        filters.keyword.as_deref().map(|v| format!("keyword={v}")),
+        filters
+            .date_from
+            .as_deref()
+            .map(|v| format!("date_from={v}")),
+        filters.date_to.as_deref().map(|v| format!("date_to={v}")),
+        filters.article_type.as_deref().map(|v| format!("type={v}")),
+        filters.journal.as_deref().map(|v| format!("journal={v}")),
+        filters.open_access.then(|| "open_access=true".to_string()),
+        filters
+            .no_preprints
+            .then(|| "no_preprints=true".to_string()),
+        Some(format!("exclude_retracted={}", filters.exclude_retracted)),
+        Some(format!("sort={}", filters.sort.as_str())),
+        Some(format!("source={}", source_filter.as_str())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn build_article_debug_plan(
+    query: &str,
+    filters: &crate::entities::article::ArticleSearchFilters,
+    source_filter: crate::entities::article::ArticleSourceFilter,
+    results: &[crate::entities::article::ArticleSearchResult],
+    pagination: &PaginationMeta,
+) -> Result<DebugPlan, crate::error::BioMcpError> {
+    let summary = crate::entities::article::summarize_debug_plan(filters, source_filter, results)?;
+    Ok(DebugPlan {
+        surface: "search_article",
+        query: query.to_string(),
+        anchor: None,
+        legs: vec![DebugPlanLeg {
+            leg: "article".to_string(),
+            entity: "article".to_string(),
+            filters: article_debug_filters(filters, source_filter),
+            routing: summary.routing,
+            sources: summary.sources,
+            matched_sources: summary.matched_sources,
+            count: results.len(),
+            total: pagination.total,
+            note: None,
+            error: None,
+        }],
+    })
+}
+
+fn article_search_json(
+    query: &str,
+    sort: crate::entities::article::ArticleSort,
+    semantic_scholar_enabled: bool,
+    debug_plan: Option<DebugPlan>,
+    results: Vec<crate::entities::article::ArticleSearchResult>,
+    pagination: PaginationMeta,
+) -> anyhow::Result<String> {
+    #[derive(serde::Serialize)]
+    struct ArticleSearchResponse {
+        query: String,
+        sort: String,
+        semantic_scholar_enabled: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ranking_policy: Option<&'static str>,
+        pagination: PaginationMeta,
+        count: usize,
+        results: Vec<crate::entities::article::ArticleSearchResult>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        debug_plan: Option<DebugPlan>,
+    }
+
+    let count = results.len();
+    crate::render::json::to_pretty(&ArticleSearchResponse {
+        query: query.to_string(),
+        sort: sort.as_str().to_string(),
+        semantic_scholar_enabled,
+        ranking_policy: (sort == crate::entities::article::ArticleSort::Relevance).then_some(
+            "directness-first (title coverage > title+abstract coverage > study/review cue > citation support)",
+        ),
+        pagination,
+        count,
+        results,
+        debug_plan,
     })
     .map_err(Into::into)
 }
@@ -2405,68 +3173,11 @@ fn trial_search_query_summary(
     .join(", ")
 }
 
-fn amino_acid_one_letter(code: &str) -> Option<char> {
-    match code.trim().to_ascii_uppercase().as_str() {
-        "A" | "ALA" => Some('A'),
-        "R" | "ARG" => Some('R'),
-        "N" | "ASN" => Some('N'),
-        "D" | "ASP" => Some('D'),
-        "C" | "CYS" => Some('C'),
-        "Q" | "GLN" => Some('Q'),
-        "E" | "GLU" => Some('E'),
-        "G" | "GLY" => Some('G'),
-        "H" | "HIS" => Some('H'),
-        "I" | "ILE" => Some('I'),
-        "L" | "LEU" => Some('L'),
-        "K" | "LYS" => Some('K'),
-        "M" | "MET" => Some('M'),
-        "F" | "PHE" => Some('F'),
-        "P" | "PRO" => Some('P'),
-        "S" | "SER" => Some('S'),
-        "T" | "THR" => Some('T'),
-        "W" | "TRP" => Some('W'),
-        "Y" | "TYR" => Some('Y'),
-        "V" | "VAL" => Some('V'),
-        "*" | "TER" | "STOP" => Some('*'),
-        _ => None,
-    }
-}
-
-fn normalize_protein_change(value: &str) -> String {
-    let trimmed = value
+fn trim_protein_change_prefix(value: &str) -> &str {
+    value
         .trim()
         .trim_start_matches("p.")
-        .trim_start_matches("P.");
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    let bytes = trimmed.as_bytes();
-    let Some(start_digits) = bytes.iter().position(|b| b.is_ascii_digit()) else {
-        return trimmed.to_string();
-    };
-    let end_digits = bytes[start_digits..]
-        .iter()
-        .position(|b| !b.is_ascii_digit())
-        .map(|i| start_digits + i)
-        .unwrap_or(bytes.len());
-
-    if end_digits <= start_digits {
-        return trimmed.to_string();
-    }
-
-    let from = &trimmed[..start_digits];
-    let pos = &trimmed[start_digits..end_digits];
-    let to = &trimmed[end_digits..];
-
-    let Some(from_aa) = amino_acid_one_letter(from) else {
-        return trimmed.to_string();
-    };
-    let Some(to_aa) = amino_acid_one_letter(to) else {
-        return trimmed.to_string();
-    };
-
-    format!("{from_aa}{pos}{to_aa}")
+        .trim_start_matches("P.")
 }
 
 async fn variant_trial_mutation_query(id: &str) -> String {
@@ -2478,7 +3189,8 @@ async fn variant_trial_mutation_query(id: &str) -> String {
     if let Ok(crate::entities::variant::VariantIdFormat::GeneProteinChange { gene, change }) =
         crate::entities::variant::parse_variant_id(id)
     {
-        let normalized = normalize_protein_change(&change);
+        let normalized = crate::entities::variant::normalize_protein_change(&change)
+            .unwrap_or_else(|| trim_protein_change_prefix(&change).to_string());
         if !normalized.is_empty() {
             return format!("{gene} {normalized}");
         }
@@ -2489,7 +3201,10 @@ async fn variant_trial_mutation_query(id: &str) -> String {
         let protein = variant
             .hgvs_p
             .as_deref()
-            .map(normalize_protein_change)
+            .map(|value| {
+                crate::entities::variant::normalize_protein_change(value)
+                    .unwrap_or_else(|| trim_protein_change_prefix(value).to_string())
+            })
             .unwrap_or_default();
         if !gene.is_empty() && !protein.is_empty() {
             return format!("{gene} {protein}");
@@ -2618,6 +3333,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &article,
                         crate::render::markdown::article_evidence_urls(&article),
                         crate::render::markdown::related_article(&article),
+                        crate::render::provenance::article_section_sources(&article),
                     )?)
                 } else {
                     Ok(crate::render::markdown::article_markdown(&article, &sections)?)
@@ -2638,6 +3354,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &disease,
                         crate::render::markdown::disease_evidence_urls(&disease),
                         crate::render::markdown::related_disease(&disease),
+                        crate::render::provenance::disease_section_sources(&disease),
                     )?)
                 } else {
                     Ok(crate::render::markdown::disease_markdown(&disease, &sections)?)
@@ -2654,6 +3371,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &pgx,
                         crate::render::markdown::pgx_evidence_urls(&pgx),
                         crate::render::markdown::related_pgx(&pgx),
+                        crate::render::provenance::pgx_section_sources(&pgx),
                     )?)
                 } else {
                     Ok(crate::render::markdown::pgx_markdown(&pgx, &sections)?)
@@ -2699,6 +3417,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             &trial,
                             crate::render::markdown::trial_evidence_urls(&trial),
                             crate::render::markdown::related_trial(&trial),
+                            crate::render::provenance::trial_section_sources(&trial),
                         )?)
                     }
                 } else {
@@ -2732,6 +3451,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &variant,
                         crate::render::markdown::variant_evidence_urls(&variant),
                         crate::render::markdown::related_variant(&variant),
+                        crate::render::provenance::variant_section_sources(&variant),
                     )?)
                 } else {
                     Ok(crate::render::markdown::variant_markdown(&variant, &sections)?)
@@ -2748,6 +3468,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &drug,
                         crate::render::markdown::drug_evidence_urls(&drug),
                         crate::render::markdown::related_drug(&drug),
+                        crate::render::provenance::drug_section_sources(&drug),
                     )?)
                 } else {
                     Ok(crate::render::markdown::drug_markdown(&drug, &sections)?)
@@ -2764,6 +3485,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &pathway,
                         crate::render::markdown::pathway_evidence_urls(&pathway),
                         crate::render::markdown::related_pathway(&pathway),
+                        crate::render::provenance::pathway_section_sources(&pathway),
                     )?)
                 } else {
                     Ok(crate::render::markdown::pathway_markdown(&pathway, &sections)?)
@@ -2782,7 +3504,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     Ok(crate::render::json::to_entity_json(
                         &protein,
                         crate::render::markdown::protein_evidence_urls(&protein),
-                        crate::render::markdown::related_protein(&protein),
+                        crate::render::markdown::related_protein(&protein, &sections),
+                        crate::render::provenance::protein_section_sources(&protein),
                     )?)
                 } else {
                     Ok(crate::render::markdown::protein_markdown(&protein, &sections)?)
@@ -2805,6 +3528,9 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 &event,
                                 crate::render::markdown::adverse_event_evidence_urls(r),
                                 crate::render::markdown::related_adverse_event(r),
+                                crate::render::provenance::adverse_event_report_section_sources(
+                                    &event,
+                                ),
                             )?)
                         }
                         crate::entities::adverse_event::AdverseEventReport::Device(r) => {
@@ -2812,6 +3538,9 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 &event,
                                 crate::render::markdown::device_event_evidence_urls(r),
                                 crate::render::markdown::related_device_event(r),
+                                crate::render::provenance::adverse_event_report_section_sources(
+                                    &event,
+                                ),
                             )?)
                         }
                     };
@@ -2919,8 +3648,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             results,
                         })?)
                     } else {
-                        Ok(crate::render::markdown::article_search_markdown(
-                            &query, &results,
+                        Ok(crate::render::markdown::article_search_markdown_with_footer_and_context(
+                            &query,
+                            &results,
+                            "",
+                            filters.sort,
+                            crate::entities::article::semantic_scholar_search_enabled(
+                                &filters,
+                                crate::entities::article::ArticleSourceFilter::All,
+                            ),
+                            None,
                         )?)
                     }
                 }
@@ -2940,6 +3677,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             &variant,
                             crate::render::markdown::variant_evidence_urls(&variant),
                             crate::render::markdown::related_variant(&variant),
+                            crate::render::provenance::variant_section_sources(&variant),
                         )?)
                     } else {
                         Ok(crate::render::markdown::variant_markdown(
@@ -3049,6 +3787,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             &drug,
                             crate::render::markdown::drug_evidence_urls(&drug),
                             crate::render::markdown::related_drug(&drug),
+                            crate::render::provenance::drug_section_sources(&drug),
                         )?)
                     } else {
                         Ok(crate::render::markdown::drug_markdown(&drug, empty_sections())?)
@@ -3130,8 +3869,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             results,
                         })?)
                     } else {
-                        Ok(crate::render::markdown::article_search_markdown(
-                            &query, &results,
+                        Ok(crate::render::markdown::article_search_markdown_with_footer_and_context(
+                            &query,
+                            &results,
+                            "",
+                            filters.sort,
+                            crate::entities::article::semantic_scholar_search_enabled(
+                                &filters,
+                                crate::entities::article::ArticleSourceFilter::All,
+                            ),
+                            None,
                         )?)
                     }
                 }
@@ -3198,6 +3945,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             annotations.as_ref(),
                             Some(limit),
                         )?)
+                    }
+                }
+                ArticleCommand::Batch { ids } => {
+                    let results = crate::entities::article::get_batch_compact(&ids).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&results)?)
+                    } else {
+                        Ok(crate::render::markdown::article_batch_markdown(&results)?)
                     }
                 }
                 ArticleCommand::Citations { id, limit } => {
@@ -3356,8 +4111,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             results,
                         })?)
                     } else {
-                        Ok(crate::render::markdown::article_search_markdown(
-                            &query, &results,
+                        Ok(crate::render::markdown::article_search_markdown_with_footer_and_context(
+                            &query,
+                            &results,
+                            "",
+                            filters.sort,
+                            crate::entities::article::semantic_scholar_search_enabled(
+                                &filters,
+                                crate::entities::article::ArticleSourceFilter::All,
+                            ),
+                            None,
                         )?)
                     }
                 }
@@ -3449,8 +4212,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             results,
                         })?)
                     } else {
-                        Ok(crate::render::markdown::article_search_markdown(
-                            &query, &results,
+                        Ok(crate::render::markdown::article_search_markdown_with_footer_and_context(
+                            &query,
+                            &results,
+                            "",
+                            filters.sort,
+                            crate::entities::article::semantic_scholar_search_enabled(
+                                &filters,
+                                crate::entities::article::ArticleSourceFilter::All,
+                            ),
+                            None,
                         )?)
                     }
                 }
@@ -3612,6 +4383,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         crate::render::chart::validate_query_chart_type(query_type, chart_type)?;
                         let options = crate::render::chart::ChartRenderOptions::from_args(
                             chart.terminal,
+                            chart.mcp_inline,
                             chart.output,
                             chart.title,
                             chart.theme,
@@ -3757,11 +4529,12 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         crate::render::chart::validate_standalone_chart_type(
                             "study survival",
                             chart_type,
-                            &[ChartType::Bar],
+                            &[ChartType::Bar, ChartType::Survival],
                         )?;
                         let result = crate::entities::study::survival(&study, &gene, endpoint).await?;
                         let options = crate::render::chart::ChartRenderOptions::from_args(
                             chart.terminal,
+                            chart.mcp_inline,
                             chart.output,
                             chart.title,
                             chart.theme,
@@ -3802,6 +4575,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 .await?;
                                 let options = crate::render::chart::ChartRenderOptions::from_args(
                                     chart.terminal,
+                                    chart.mcp_inline,
                                     chart.output,
                                     chart.title,
                                     chart.theme,
@@ -3839,6 +4613,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                         .await?;
                                 let options = crate::render::chart::ChartRenderOptions::from_args(
                                     chart.terminal,
+                                    chart.mcp_inline,
                                     chart.output,
                                     chart.title,
                                     chart.theme,
@@ -3891,6 +4666,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         let result = crate::entities::study::co_occurrence(&study, &genes).await?;
                         let options = crate::render::chart::ChartRenderOptions::from_args(
                             chart.terminal,
+                            chart.mcp_inline,
                             chart.output,
                             chart.title,
                             chart.theme,
@@ -4193,6 +4969,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     since,
                     limit,
                     counts_only,
+                    debug_plan,
                 } => {
                     let keyword = resolve_query_input(keyword, positional_query, "--keyword")?;
                     let input = crate::cli::search_all::SearchAllInput {
@@ -4204,6 +4981,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         since,
                         limit,
                         counts_only,
+                        debug_plan,
                     };
                     let results = crate::cli::search_all::dispatch(&input).await?;
                     if cli.json {
@@ -4410,6 +5188,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     source,
                     limit,
                     offset,
+                    debug_plan,
                 } => {
                     let disease = normalize_cli_tokens(disease);
                     let drug = normalize_cli_tokens(drug);
@@ -4461,37 +5240,12 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         sort,
                     };
 
-                    let query = vec![
-                        filters.gene.as_deref().map(|v| format!("gene={v}")),
-                        filters.disease.as_deref().map(|v| format!("disease={v}")),
-                        filters.drug.as_deref().map(|v| format!("drug={v}")),
-                        filters.author.as_deref().map(|v| format!("author={v}")),
-                        filters.keyword.as_deref().map(|v| format!("keyword={v}")),
-                        filters
-                            .article_type
-                            .as_deref()
-                            .map(|v| format!("type={v}")),
-                        filters.date_from.as_deref().map(|v| format!("date_from={v}")),
-                        filters.date_to.as_deref().map(|v| format!("date_to={v}")),
-                        filters.journal.as_deref().map(|v| format!("journal={v}")),
-                        filters.open_access.then(|| "open_access=true".to_string()),
-                        filters.no_preprints.then(|| "no_preprints=true".to_string()),
-                        if include_retracted {
-                            Some("include_retracted=true".to_string())
-                        } else {
-                            filters
-                                .exclude_retracted
-                                .then(|| "exclude_retracted=true".to_string())
-                        },
-                        Some(format!("sort={}", filters.sort.as_str())),
-                        (source_filter != crate::entities::article::ArticleSourceFilter::All)
-                            .then(|| format!("source={source}")),
-                        (offset > 0).then(|| format!("offset={offset}")),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    let query = article_query_summary(
+                        &filters,
+                        source_filter,
+                        include_retracted,
+                        offset,
+                    );
 
                     let page =
                         crate::entities::article::search_page(&filters, limit, offset, source_filter)
@@ -4499,12 +5253,40 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     let results = page.results;
                     let pagination =
                         PaginationMeta::offset(offset, limit, results.len(), page.total);
+                    let semantic_scholar_enabled =
+                        crate::entities::article::semantic_scholar_search_enabled(
+                            &filters,
+                            source_filter,
+                        );
+                    let debug_plan = if debug_plan {
+                        Some(build_article_debug_plan(
+                            &query,
+                            &filters,
+                            source_filter,
+                            &results,
+                            &pagination,
+                        )?)
+                    } else {
+                        None
+                    };
                     if cli.json {
-                        search_json(results, pagination)
+                        article_search_json(
+                            &query,
+                            filters.sort,
+                            semantic_scholar_enabled,
+                            debug_plan,
+                            results,
+                            pagination,
+                        )
                     } else {
                         let footer = pagination_footer_offset(&pagination);
-                        Ok(crate::render::markdown::article_search_markdown_with_footer(
-                            &query, &results, &footer,
+                        Ok(crate::render::markdown::article_search_markdown_with_footer_and_context(
+                            &query,
+                            &results,
+                            &footer,
+                            filters.sort,
+                            semantic_scholar_enabled,
+                            debug_plan.as_ref(),
                         )?)
                     }
                 }
@@ -4679,50 +5461,37 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     limit,
                     offset,
                 } => {
-                    let resolved =
-                        resolve_variant_query(gene, hgvsp, consequence, condition, positional_query)?;
-                    let filters = crate::entities::variant::VariantSearchFilters {
-                        gene: resolved.gene,
-                        hgvsp: resolved.hgvsp,
-                        hgvsc: resolved.hgvsc,
-                        rsid: resolved.rsid,
-                        significance,
-                        max_frequency,
-                        min_cadd,
-                        consequence: resolved.consequence,
-                        review_status,
-                        population,
-                        revel_min,
-                        gerp_min,
-                        tumor_site,
-                        condition: resolved.condition,
-                        impact,
-                        lof,
-                        has,
-                        missing,
-                        therapy,
-                    };
-
-                    let mut query = crate::entities::variant::search_query_summary(&filters);
-                    if offset > 0 {
-                        query = if query.is_empty() {
-                            format!("offset={offset}")
-                        } else {
-                            format!("{query}, offset={offset}")
-                        };
-                    }
-
-                    let page = crate::entities::variant::search_page(&filters, limit, offset).await?;
-                    let results = page.results;
-                    let pagination =
-                        PaginationMeta::offset(offset, limit, results.len(), page.total);
-                    if cli.json {
-                        search_json(results, pagination)
+                    let outcome = render_variant_search_outcome(
+                        cli.json,
+                        false,
+                        VariantSearchRequest {
+                            gene,
+                            positional_query,
+                            hgvsp,
+                            significance,
+                            max_frequency,
+                            min_cadd,
+                            consequence,
+                            review_status,
+                            population,
+                            revel_min,
+                            gerp_min,
+                            tumor_site,
+                            condition,
+                            impact,
+                            lof,
+                            has,
+                            missing,
+                            therapy,
+                            limit,
+                            offset,
+                        },
+                    )
+                    .await?;
+                    if outcome.exit_code == 0 {
+                        Ok(outcome.text)
                     } else {
-                        let footer = pagination_footer_offset(&pagination);
-                        Ok(crate::render::markdown::variant_search_markdown_with_footer(
-                            &query, &results, &footer,
-                        )?)
+                        anyhow::bail!("{}", outcome.text)
                     }
                 }
                 SearchEntity::Drug {
@@ -5241,6 +6010,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     Ok(enrich_markdown(&genes, &terms))
                 }
             }
+            Commands::Discover { query } => {
+                crate::cli::discover::run(crate::cli::discover::DiscoverArgs { query }, cli.json)
+                    .await
+            }
             Commands::List { entity } => {
                 crate::cli::list::render(entity.as_deref()).map_err(Into::into)
             }
@@ -5256,6 +6029,158 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
     .await
 }
 
+async fn run_outcome_inner(
+    cli: Cli,
+    alias_suggestions_as_json: bool,
+) -> anyhow::Result<CommandOutcome> {
+    match cli.command {
+        Commands::Get {
+            entity: GetEntity::Gene { symbol, sections },
+        } => {
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                let (sections, json_override) = extract_json_from_sections(&sections);
+                let json_output = json || json_override;
+                render_gene_card_outcome(&symbol, &sections, json_output, alias_suggestions_as_json)
+                    .await
+            })
+            .await
+        }
+        Commands::Get {
+            entity: GetEntity::Drug { name, sections },
+        } => {
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                let (sections, json_override) = extract_json_from_sections(&sections);
+                let json_output = json || json_override;
+                render_drug_card_outcome(&name, &sections, json_output, alias_suggestions_as_json)
+                    .await
+            })
+            .await
+        }
+        Commands::Get {
+            entity: GetEntity::Variant { id, sections },
+        } => {
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                let (sections, json_override) = extract_json_from_sections(&sections);
+                let json_output = json || json_override;
+                render_variant_card_outcome(&id, &sections, json_output, alias_suggestions_as_json)
+                    .await
+            })
+            .await
+        }
+        Commands::Search {
+            entity:
+                SearchEntity::Variant {
+                    gene,
+                    positional_query,
+                    hgvsp,
+                    significance,
+                    max_frequency,
+                    min_cadd,
+                    consequence,
+                    review_status,
+                    population,
+                    revel_min,
+                    gerp_min,
+                    tumor_site,
+                    condition,
+                    impact,
+                    lof,
+                    has,
+                    missing,
+                    therapy,
+                    limit,
+                    offset,
+                },
+        } => {
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                render_variant_search_outcome(
+                    json,
+                    alias_suggestions_as_json,
+                    VariantSearchRequest {
+                        gene,
+                        positional_query,
+                        hgvsp,
+                        significance,
+                        max_frequency,
+                        min_cadd,
+                        consequence,
+                        review_status,
+                        population,
+                        revel_min,
+                        gerp_min,
+                        tumor_site,
+                        condition,
+                        impact,
+                        lof,
+                        has,
+                        missing,
+                        therapy,
+                        limit,
+                        offset,
+                    },
+                )
+                .await
+            })
+            .await
+        }
+        Commands::Gene {
+            cmd: GeneCommand::Definition { symbol },
+        } => {
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                render_gene_card_outcome(&symbol, empty_sections(), json, alias_suggestions_as_json)
+                    .await
+            })
+            .await
+        }
+        Commands::Gene {
+            cmd: GeneCommand::External(args),
+        } => {
+            let symbol = args.join(" ");
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                render_gene_card_outcome(&symbol, empty_sections(), json, alias_suggestions_as_json)
+                    .await
+            })
+            .await
+        }
+        Commands::Drug {
+            cmd: DrugCommand::External(args),
+        } => {
+            let name = args.join(" ");
+            let json = cli.json;
+            let no_cache = cli.no_cache;
+            crate::sources::with_no_cache(no_cache, async move {
+                render_drug_card_outcome(&name, empty_sections(), json, alias_suggestions_as_json)
+                    .await
+            })
+            .await
+        }
+        command => Ok(CommandOutcome::stdout(
+            run(Cli {
+                command,
+                json: cli.json,
+                no_cache: cli.no_cache,
+            })
+            .await?,
+        )),
+    }
+}
+
+pub async fn run_outcome(cli: Cli) -> anyhow::Result<CommandOutcome> {
+    run_outcome_inner(cli, false).await
+}
+
 /// Main CLI execution - called by the MCP `biomcp` tool.
 ///
 /// # Errors
@@ -5266,19 +6191,180 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
         args.push("biomcp".to_string());
     }
     let cli = Cli::try_parse_from(args)?;
-    run(cli).await
+    let outcome = run_outcome(cli).await?;
+    if outcome.exit_code == 0 {
+        Ok(outcome.text)
+    } else {
+        anyhow::bail!("{}", outcome.text)
+    }
+}
+
+pub async fn execute_mcp(mut args: Vec<String>) -> anyhow::Result<CliOutput> {
+    if args.is_empty() {
+        args.push("biomcp".to_string());
+    }
+
+    let cli = Cli::try_parse_from(args.clone())?;
+    if !is_charted_mcp_study_command(&cli)? {
+        let outcome = run_outcome_inner(cli, true).await?;
+        return Ok(CliOutput {
+            text: outcome.text,
+            svg: None,
+        });
+    }
+
+    let text = execute(rewrite_mcp_chart_args(&args, McpChartPass::Text)?).await?;
+    let svg = execute(rewrite_mcp_chart_args(&args, McpChartPass::Svg)?).await?;
+    Ok(CliOutput {
+        text,
+        svg: Some(svg),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand, GetEntity,
-        ProteinCommand, StudyCommand, VariantCommand, execute, extract_json_from_sections,
+        OutputStream, PaginationMeta, ProteinCommand, StudyCommand, VariantCommand,
+        VariantSearchPlan, article_search_json, execute, execute_mcp, extract_json_from_sections,
         paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
-        resolve_query_input, resolve_variant_query, should_try_pathway_trial_fallback,
+        resolve_query_input, resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
         trial_locations_json, trial_search_query_summary, truncate_article_annotations,
     };
     use clap::{CommandFactory, Parser};
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn lock_env() -> tokio::sync::MutexGuard<'static, ()> {
+        crate::test_support::env_lock().lock().await
+    }
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // Safety: tests serialize environment mutation with `lock_env()`.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.name, value),
+                    None => std::env::remove_var(self.name),
+                }
+            }
+        }
+    }
+
+    fn set_env_var(name: &'static str, value: Option<&str>) -> EnvVarGuard {
+        let previous = std::env::var(name).ok();
+        // Safety: tests serialize environment mutation with `lock_env()`.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        EnvVarGuard { name, previous }
+    }
+
+    async fn mount_gene_lookup_miss(server: &MockServer, symbol: &str) {
+        Mock::given(method("GET"))
+            .and(path("/v3/query"))
+            .and(query_param("q", format!("symbol:\"{symbol}\"")))
+            .and(query_param("species", "human"))
+            .and(query_param(
+                "fields",
+                "symbol,name,summary,alias,type_of_gene,ensembl.gene,entrezgene,genomic_pos.chr,genomic_pos.start,genomic_pos.end,genomic_pos.strand,MIM,uniprot,pathway.kegg",
+            ))
+            .and(query_param("size", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"total":0,"hits":[]}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_gene_lookup_hit(server: &MockServer, symbol: &str, name: &str, entrez: &str) {
+        Mock::given(method("GET"))
+            .and(path("/v3/query"))
+            .and(query_param("q", format!("symbol:\"{symbol}\"")))
+            .and(query_param("species", "human"))
+            .and(query_param(
+                "fields",
+                "symbol,name,summary,alias,type_of_gene,ensembl.gene,entrezgene,genomic_pos.chr,genomic_pos.start,genomic_pos.end,genomic_pos.strand,MIM,uniprot,pathway.kegg",
+            ))
+            .and(query_param("size", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                format!(
+                    r#"{{
+                        "total": 1,
+                        "hits": [{{
+                            "symbol": "{symbol}",
+                            "name": "{name}",
+                            "entrezgene": "{entrez}"
+                        }}]
+                    }}"#
+                ),
+                "application/json",
+            ))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_drug_lookup_miss(server: &MockServer, query: &str) {
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param("q", query))
+            .and(query_param("size", "25"))
+            .and(query_param("from", "0"))
+            .and(query_param(
+                "fields",
+                crate::sources::mychem::MYCHEM_FIELDS_GET,
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"total":0,"hits":[]}"#, "application/json"),
+            )
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_ols_alias(
+        server: &MockServer,
+        query: &str,
+        ontology_prefix: &str,
+        obo_id: &str,
+        label: &str,
+        synonyms: &[&str],
+        expected_calls: u64,
+    ) {
+        Mock::given(method("GET"))
+            .and(path("/api/search"))
+            .and(query_param("q", query))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "response": {
+                    "docs": [{
+                        "iri": format!("http://example.org/{ontology_prefix}/{}", obo_id.replace(':', "_")),
+                        "ontology_name": ontology_prefix,
+                        "ontology_prefix": ontology_prefix,
+                        "short_form": obo_id.to_ascii_lowercase(),
+                        "obo_id": obo_id,
+                        "label": label,
+                        "description": [],
+                        "exact_synonyms": synonyms,
+                        "type": "class"
+                    }]
+                }
+            })))
+            .expect(expected_calls)
+            .mount(server)
+            .await;
+    }
 
     #[test]
     fn extract_json_from_sections_detects_trailing_long_flag() {
@@ -5373,6 +6459,21 @@ mod tests {
         String::from_utf8(help).expect("help should be utf-8")
     }
 
+    fn render_pathway_search_long_help() -> String {
+        let mut command = Cli::command();
+        let search = command
+            .find_subcommand_mut("search")
+            .expect("search subcommand should exist");
+        let pathway = search
+            .find_subcommand_mut("pathway")
+            .expect("pathway subcommand should exist");
+        let mut help = Vec::new();
+        pathway
+            .write_long_help(&mut help)
+            .expect("pathway help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
     #[test]
     fn trial_facility_help_names_text_search_and_geo_verify_modes() {
         let help = render_trial_search_long_help();
@@ -5407,6 +6508,39 @@ mod tests {
     }
 
     #[test]
+    fn search_pathway_help_describes_conditional_query_contract() {
+        let help = render_pathway_search_long_help();
+
+        assert!(help.contains("biomcp search pathway [OPTIONS] <QUERY>"));
+        assert!(help.contains("biomcp search pathway [OPTIONS] --top-level [QUERY]"));
+        assert!(help.contains("required unless --top-level is present"));
+        assert!(help.contains("multi-word queries must be quoted"));
+        assert!(help.contains("biomcp search pathway --top-level --limit 5"));
+    }
+
+    #[test]
+    fn pathway_help_describes_source_aware_section_contract() {
+        let mut command = Cli::command();
+        let get = command
+            .find_subcommand_mut("get")
+            .expect("get subcommand should exist");
+        let pathway = get
+            .find_subcommand_mut("pathway")
+            .expect("pathway subcommand should exist");
+        let mut help = Vec::new();
+        pathway
+            .write_long_help(&mut help)
+            .expect("pathway help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("events (Reactome only)"));
+        assert!(help.contains("enrichment (Reactome only)"));
+        assert!(help.contains("all = all sections available for the resolved source"));
+        assert!(help.contains("biomcp get pathway R-HSA-5673001 events"));
+        assert!(!help.contains("biomcp get pathway hsa05200 enrichment"));
+    }
+
+    #[test]
     fn parse_trial_location_paging_extracts_offset_limit_flags() {
         let sections = vec![
             "locations".to_string(),
@@ -5422,7 +6556,7 @@ mod tests {
     }
 
     #[test]
-    fn trial_locations_json_preserves_location_pagination_and_meta() {
+    fn trial_locations_json_preserves_location_pagination_and_section_sources() {
         let trial = crate::entities::trial::Trial {
             nct_id: "NCT00000001".to_string(),
             source: Some("ctgov".to_string()),
@@ -5471,6 +6605,75 @@ mod tests {
         assert_eq!(value["location_pagination"]["limit"], 10);
         assert_eq!(value["location_pagination"]["has_more"], true);
         assert!(value.get("_meta").is_some());
+        assert_eq!(value["_meta"]["section_sources"][0]["key"], "overview");
+        assert_eq!(
+            value["_meta"]["section_sources"][0]["sources"][0],
+            "ClinicalTrials.gov"
+        );
+        assert!(
+            value["_meta"]["section_sources"]
+                .as_array()
+                .expect("section sources array")
+                .iter()
+                .any(|entry| entry["key"] == "locations")
+        );
+    }
+
+    #[test]
+    fn article_search_json_includes_query_and_ranking_context() {
+        let pagination = PaginationMeta::offset(0, 3, 1, Some(1));
+        let json = article_search_json(
+            "gene=BRAF, sort=relevance",
+            crate::entities::article::ArticleSort::Relevance,
+            true,
+            None,
+            vec![crate::entities::article::ArticleSearchResult {
+                pmid: "22663011".into(),
+                pmcid: Some("PMC9984800".into()),
+                doi: Some("10.1056/NEJMoa1203421".into()),
+                title: "BRAF melanoma review".into(),
+                journal: Some("Journal".into()),
+                date: Some("2025-01-01".into()),
+                citation_count: Some(12),
+                influential_citation_count: Some(4),
+                source: crate::entities::article::ArticleSource::EuropePmc,
+                matched_sources: vec![
+                    crate::entities::article::ArticleSource::EuropePmc,
+                    crate::entities::article::ArticleSource::SemanticScholar,
+                ],
+                score: None,
+                is_retracted: Some(false),
+                abstract_snippet: Some("Abstract".into()),
+                ranking: Some(crate::entities::article::ArticleRankingMetadata {
+                    directness_tier: 3,
+                    anchor_count: 2,
+                    title_anchor_hits: 2,
+                    abstract_anchor_hits: 0,
+                    combined_anchor_hits: 2,
+                    all_anchors_in_title: true,
+                    all_anchors_in_text: true,
+                    study_or_review_cue: true,
+                }),
+                normalized_title: "braf melanoma review".into(),
+                normalized_abstract: "abstract".into(),
+                publication_type: Some("Review".into()),
+                insertion_index: 0,
+            }],
+            pagination,
+        )
+        .expect("article search json should render");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("json should parse successfully");
+        assert_eq!(value["query"], "gene=BRAF, sort=relevance");
+        assert_eq!(value["sort"], "relevance");
+        assert_eq!(value["semantic_scholar_enabled"], true);
+        assert!(value["ranking_policy"].as_str().is_some());
+        assert_eq!(value["results"][0]["ranking"]["directness_tier"], 3);
+        assert_eq!(
+            value["results"][0]["matched_sources"][1],
+            serde_json::Value::String("semanticscholar".into())
+        );
     }
 
     #[test]
@@ -5583,6 +6786,10 @@ mod tests {
             parse_simple_gene_change("BRAF p.V600E"),
             Some(("BRAF".into(), "V600E".into()))
         );
+        assert_eq!(
+            parse_simple_gene_change("BRAF p.Val600Glu"),
+            Some(("BRAF".into(), "V600E".into()))
+        );
     }
 
     #[test]
@@ -5596,6 +6803,9 @@ mod tests {
     #[test]
     fn resolve_variant_query_maps_single_token_to_gene() {
         let resolved = resolve_variant_query(None, None, None, None, vec!["BRAF".into()]).unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
         assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
         assert!(resolved.hgvsp.is_none());
         assert!(resolved.hgvsc.is_none());
@@ -5608,6 +6818,29 @@ mod tests {
         let resolved =
             resolve_variant_query(None, None, None, None, vec!["BRAF".into(), "V600E".into()])
                 .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
+        assert_eq!(resolved.hgvsp.as_deref(), Some("V600E"));
+        assert!(resolved.hgvsc.is_none());
+        assert!(resolved.rsid.is_none());
+        assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_long_form_positional_gene_change_to_gene_and_hgvsp() {
+        let resolved = resolve_variant_query(
+            None,
+            None,
+            None,
+            None,
+            vec!["BRAF".into(), "p.Val600Glu".into()],
+        )
+        .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
         assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
         assert_eq!(resolved.hgvsp.as_deref(), Some("V600E"));
         assert!(resolved.hgvsc.is_none());
@@ -5619,6 +6852,9 @@ mod tests {
     fn resolve_variant_query_maps_rsid_to_rsid_filter() {
         let resolved =
             resolve_variant_query(None, None, None, None, vec!["rs113488022".into()]).unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
         assert_eq!(resolved.rsid.as_deref(), Some("rs113488022"));
         assert!(resolved.gene.is_none());
         assert!(resolved.hgvsp.is_none());
@@ -5636,6 +6872,9 @@ mod tests {
             vec!["BRAF".into(), "c.1799T>A".into()],
         )
         .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
         assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
         assert_eq!(resolved.hgvsc.as_deref(), Some("c.1799T>A"));
         assert!(resolved.hgvsp.is_none());
@@ -5653,9 +6892,139 @@ mod tests {
             vec!["EGFR".into(), "Exon".into(), "19".into(), "Deletion".into()],
         )
         .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
         assert_eq!(resolved.gene.as_deref(), Some("EGFR"));
         assert_eq!(resolved.consequence.as_deref(), Some("inframe_deletion"));
         assert!(resolved.hgvsp.is_none());
+        assert!(resolved.hgvsc.is_none());
+        assert!(resolved.rsid.is_none());
+        assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_gene_residue_alias_to_residue_alias_search() {
+        let resolved =
+            resolve_variant_query(None, None, None, None, vec!["PTPN22".into(), "620W".into()])
+                .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("PTPN22"));
+        assert_eq!(
+            resolved.protein_alias,
+            Some(crate::entities::variant::VariantProteinAlias {
+                position: 620,
+                residue: 'W',
+            })
+        );
+        assert!(resolved.hgvsp.is_none());
+        assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_maps_gene_flag_residue_alias_to_residue_alias_search() {
+        let resolved =
+            resolve_variant_query(Some("PTPN22".into()), None, None, None, vec!["620W".into()])
+                .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("PTPN22"));
+        assert_eq!(
+            resolved.protein_alias,
+            Some(crate::entities::variant::VariantProteinAlias {
+                position: 620,
+                residue: 'W',
+            })
+        );
+        assert!(resolved.hgvsp.is_none());
+        assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_uses_gene_context_for_standalone_protein_change() {
+        let resolved = resolve_variant_query(
+            Some("PTPN22".into()),
+            None,
+            None,
+            None,
+            vec!["R620W".into()],
+        )
+        .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("PTPN22"));
+        assert_eq!(resolved.hgvsp.as_deref(), Some("R620W"));
+        assert!(resolved.protein_alias.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_uses_gene_context_for_long_form_single_token_change() {
+        let resolved = resolve_variant_query(
+            Some("BRAF".into()),
+            None,
+            None,
+            None,
+            vec!["p.Val600Glu".into()],
+        )
+        .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
+        assert_eq!(resolved.hgvsp.as_deref(), Some("V600E"));
+        assert!(resolved.protein_alias.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_returns_guidance_for_standalone_protein_change() {
+        let resolved = resolve_variant_query(None, None, None, None, vec!["R620W".into()]).unwrap();
+        let VariantSearchPlan::Guidance(guidance) = resolved else {
+            panic!("expected guidance plan");
+        };
+        assert_eq!(guidance.query, "R620W");
+        assert!(matches!(
+            guidance.kind,
+            crate::entities::variant::VariantGuidanceKind::ProteinChangeOnly { .. }
+        ));
+    }
+
+    #[test]
+    fn resolve_variant_query_returns_guidance_for_long_form_single_token_change() {
+        let resolved =
+            resolve_variant_query(None, None, None, None, vec!["p.Val600Glu".into()]).unwrap();
+        let VariantSearchPlan::Guidance(guidance) = resolved else {
+            panic!("expected guidance plan");
+        };
+        assert_eq!(guidance.query, "p.Val600Glu");
+        assert!(matches!(
+            guidance.kind,
+            crate::entities::variant::VariantGuidanceKind::ProteinChangeOnly { .. }
+        ));
+        assert_eq!(
+            guidance.next_commands.first().map(String::as_str),
+            Some("biomcp search variant --hgvsp V600E --limit 10")
+        );
+    }
+
+    #[test]
+    fn resolve_variant_query_normalizes_long_form_hgvsp_flag() {
+        let resolved = resolve_variant_query(
+            Some("BRAF".into()),
+            Some("p.Val600Glu".into()),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("BRAF"));
+        assert_eq!(resolved.hgvsp.as_deref(), Some("V600E"));
         assert!(resolved.hgvsc.is_none());
         assert!(resolved.rsid.is_none());
         assert!(resolved.condition.is_none());
@@ -5746,6 +7115,16 @@ mod tests {
     }
 
     #[test]
+    fn discover_top_level_command_parses_query() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "discover", "ERBB1"]).expect("discover should parse");
+        match cli.command {
+            Commands::Discover { query } => assert_eq!(query, "ERBB1"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn variant_trials_parses_source_flag() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -5779,7 +7158,16 @@ mod tests {
     #[test]
     fn search_article_parses_source_flag() {
         let cli = Cli::try_parse_from([
-            "biomcp", "search", "article", "-g", "BRAF", "--source", "pubtator", "--limit", "5",
+            "biomcp",
+            "search",
+            "article",
+            "-g",
+            "BRAF",
+            "--source",
+            "pubtator",
+            "--debug-plan",
+            "--limit",
+            "5",
         ])
         .expect("search article with --source should parse");
 
@@ -5789,6 +7177,7 @@ mod tests {
                     super::SearchEntity::Article {
                         gene,
                         source,
+                        debug_plan,
                         limit,
                         offset,
                         ..
@@ -5796,6 +7185,7 @@ mod tests {
             } => {
                 assert_eq!(gene.as_deref(), Some("BRAF"));
                 assert_eq!(source, "pubtator");
+                assert!(debug_plan);
                 assert_eq!(limit, 5);
                 assert_eq!(offset, 0);
             }
@@ -6063,6 +7453,30 @@ mod tests {
     }
 
     #[test]
+    fn article_batch_parses_multiple_ids() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "article",
+            "batch",
+            "22663011",
+            "10.1056/NEJMoa1203421",
+        ])
+        .expect("article batch should parse");
+
+        match cli.command {
+            Commands::Article {
+                cmd: ArticleCommand::Batch { ids },
+            } => {
+                assert_eq!(
+                    ids,
+                    vec!["22663011".to_string(), "10.1056/NEJMoa1203421".to_string()]
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn article_recommendations_parse_positive_and_negative_ids() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -6299,6 +7713,44 @@ mod tests {
     }
 
     #[test]
+    fn study_survival_parses_survival_chart_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "survival",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--gene",
+            "TP53",
+            "--chart",
+            "survival",
+            "--terminal",
+        ])
+        .expect("study survival chart flags should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::Survival { chart, .. },
+            } => {
+                assert_eq!(chart.chart, Some(ChartType::Survival));
+                assert!(chart.terminal);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_chart_subcommand_parses_survival_topic() {
+        let cli = Cli::try_parse_from(["biomcp", "chart", "survival"])
+            .expect("survival chart docs should parse");
+        match cli.command {
+            Commands::Chart { command } => {
+                assert_eq!(format!("{command:?}"), "Some(Survival)");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn chart_auxiliary_flags_require_chart() {
         let err = Cli::try_parse_from([
             "biomcp",
@@ -6350,9 +7802,11 @@ mod tests {
             title: None,
             theme: None,
             palette: None,
+            mcp_inline: false,
         };
         assert_eq!(args.chart, None);
         assert!(!args.terminal);
+        assert!(!args.mcp_inline);
     }
 
     #[test]
@@ -6691,6 +8145,65 @@ mod tests {
     }
 
     #[test]
+    fn search_pathway_parses_multi_word_positional_query() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "pathway",
+            "MAPK signaling",
+            "--limit",
+            "2",
+        ])
+        .expect("search pathway positional query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Pathway {
+                        query,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert!(query.is_none());
+                assert_eq!(positional_query.as_deref(), Some("MAPK signaling"));
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_pathway_parses_quoted_flag_query() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "pathway",
+            "-q",
+            "DNA repair",
+            "--limit",
+            "2",
+        ])
+        .expect("search pathway -q query should parse");
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Pathway {
+                        query,
+                        positional_query,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(query.as_deref(), Some("DNA repair"));
+                assert!(positional_query.is_none());
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn search_adverse_event_parses_positional_query() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -6734,6 +8247,7 @@ mod tests {
             "--since",
             "2024-01-01",
             "--counts-only",
+            "--debug-plan",
             "--limit",
             "4",
         ])
@@ -6748,6 +8262,7 @@ mod tests {
                         keyword,
                         since,
                         counts_only,
+                        debug_plan,
                         limit,
                         ..
                     },
@@ -6757,6 +8272,7 @@ mod tests {
                 assert_eq!(keyword.as_deref(), Some("resistance"));
                 assert_eq!(since.as_deref(), Some("2024-01-01"));
                 assert!(counts_only);
+                assert!(debug_plan);
                 assert_eq!(limit, 4);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -6896,6 +8412,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_pathway_requires_query_unless_top_level() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "search".to_string(),
+            "pathway".to_string(),
+        ])
+        .await
+        .expect_err("search pathway should require query unless --top-level");
+        assert!(
+            err.to_string().contains(
+                "Query is required. Example: biomcp search pathway -q \"MAPK signaling\""
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn study_co_occurrence_requires_2_to_10_genes() {
         let err = execute(vec![
             "biomcp".to_string(),
@@ -6982,6 +8514,250 @@ mod tests {
         .expect_err("study compare should validate type");
         assert!(err.to_string().contains("Unknown comparison type"));
     }
+
+    #[tokio::test]
+    async fn gene_alias_fallback_returns_exit_1_markdown_suggestion() {
+        let _guard = lock_env().await;
+        let mygene = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mygene_base = set_env_var("BIOMCP_MYGENE_BASE", Some(&format!("{}/v3", mygene.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_gene_lookup_miss(&mygene, "ERBB1").await;
+        mount_ols_alias(&ols, "ERBB1", "hgnc", "HGNC:3236", "EGFR", &["ERBB1"], 1).await;
+
+        let cli = Cli::try_parse_from(["biomcp", "get", "gene", "ERBB1"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("alias outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stderr);
+        assert_eq!(outcome.exit_code, 1);
+        assert!(outcome.text.contains("Error: gene 'ERBB1' not found."));
+        assert!(
+            outcome
+                .text
+                .contains("Did you mean: `biomcp get gene EGFR`")
+        );
+    }
+
+    #[tokio::test]
+    async fn gene_alias_fallback_json_writes_stdout_and_exit_1() {
+        let _guard = lock_env().await;
+        let mygene = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mygene_base = set_env_var("BIOMCP_MYGENE_BASE", Some(&format!("{}/v3", mygene.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_gene_lookup_miss(&mygene, "ERBB1").await;
+        mount_ols_alias(&ols, "ERBB1", "hgnc", "HGNC:3236", "EGFR", &["ERBB1"], 1).await;
+
+        let cli = Cli::try_parse_from(["biomcp", "--json", "get", "gene", "ERBB1"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("alias json outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stdout);
+        assert_eq!(outcome.exit_code, 1);
+        let value: serde_json::Value =
+            serde_json::from_str(&outcome.text).expect("valid alias json");
+        assert_eq!(
+            value["_meta"]["alias_resolution"]["canonical"], "EGFR",
+            "json={value}"
+        );
+        assert_eq!(value["_meta"]["next_commands"][0], "biomcp get gene EGFR");
+    }
+
+    #[tokio::test]
+    async fn variant_get_shorthand_json_returns_variant_guidance_metadata() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "--json", "get", "variant", "R620W"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("variant guidance outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stdout);
+        assert_eq!(outcome.exit_code, 1);
+
+        let value: serde_json::Value =
+            serde_json::from_str(&outcome.text).expect("valid variant guidance json");
+        assert_eq!(
+            value["_meta"]["alias_resolution"]["requested_entity"],
+            "variant"
+        );
+        assert_eq!(
+            value["_meta"]["alias_resolution"]["kind"],
+            "protein_change_only"
+        );
+        assert_eq!(value["_meta"]["alias_resolution"]["query"], "R620W");
+        assert_eq!(value["_meta"]["alias_resolution"]["change"], "R620W");
+        assert_eq!(
+            value["_meta"]["next_commands"][0],
+            "biomcp search variant --hgvsp R620W --limit 10"
+        );
+    }
+
+    #[tokio::test]
+    async fn variant_search_shorthand_json_returns_variant_guidance_metadata() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "--json", "search", "variant", "R620W"]).expect("parse");
+        let outcome = run_outcome(cli)
+            .await
+            .expect("variant search guidance outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stdout);
+        assert_eq!(outcome.exit_code, 1);
+
+        let value: serde_json::Value =
+            serde_json::from_str(&outcome.text).expect("valid variant guidance json");
+        assert_eq!(
+            value["_meta"]["alias_resolution"]["requested_entity"],
+            "variant"
+        );
+        assert_eq!(
+            value["_meta"]["alias_resolution"]["kind"],
+            "protein_change_only"
+        );
+        assert_eq!(value["_meta"]["next_commands"][1], "biomcp discover R620W");
+    }
+
+    #[tokio::test]
+    async fn canonical_gene_lookup_skips_discovery() {
+        let _guard = lock_env().await;
+        let mygene = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mygene_base = set_env_var("BIOMCP_MYGENE_BASE", Some(&format!("{}/v3", mygene.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_gene_lookup_hit(&mygene, "TP53", "tumor protein p53", "7157").await;
+        mount_ols_alias(&ols, "TP53", "hgnc", "HGNC:11998", "TP53", &["P53"], 0).await;
+
+        let cli = Cli::try_parse_from(["biomcp", "get", "gene", "TP53"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("success outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stdout);
+        assert_eq!(outcome.exit_code, 0);
+        assert!(outcome.text.contains("# TP53"));
+    }
+
+    #[tokio::test]
+    async fn ambiguous_gene_miss_points_to_discover() {
+        let _guard = lock_env().await;
+        let mygene = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mygene_base = set_env_var("BIOMCP_MYGENE_BASE", Some(&format!("{}/v3", mygene.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_gene_lookup_miss(&mygene, "V600E").await;
+        mount_ols_alias(&ols, "V600E", "so", "SO:0001583", "V600E", &["V600E"], 1).await;
+
+        let cli = Cli::try_parse_from(["biomcp", "get", "gene", "V600E"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("ambiguous outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stderr);
+        assert_eq!(outcome.exit_code, 1);
+        assert!(
+            outcome
+                .text
+                .contains("BioMCP could not map 'V600E' to a single gene.")
+        );
+        assert!(outcome.text.contains("1. biomcp discover V600E"));
+        assert!(outcome.text.contains("2. biomcp search gene -q V600E"));
+    }
+
+    #[tokio::test]
+    async fn alias_fallback_ols_failure_preserves_original_not_found() {
+        let _guard = lock_env().await;
+        let mygene = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mygene_base = set_env_var("BIOMCP_MYGENE_BASE", Some(&format!("{}/v3", mygene.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_gene_lookup_miss(&mygene, "ERBB1").await;
+        Mock::given(method("GET"))
+            .and(path("/api/search"))
+            .and(query_param("q", "ERBB1"))
+            .respond_with(ResponseTemplate::new(500).set_body_raw("upstream down", "text/plain"))
+            .expect(1u64..)
+            .mount(&ols)
+            .await;
+
+        let cli = Cli::try_parse_from(["biomcp", "get", "gene", "ERBB1"]).expect("parse");
+        let err = run_outcome(cli)
+            .await
+            .expect_err("should preserve not found");
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("gene 'ERBB1' not found"));
+        assert!(rendered.contains("Try searching: biomcp search gene -q ERBB1"));
+    }
+
+    #[tokio::test]
+    async fn drug_alias_fallback_returns_exit_1_markdown_suggestion() {
+        let _guard = lock_env().await;
+        let mychem = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mychem_base = set_env_var("BIOMCP_MYCHEM_BASE", Some(&format!("{}/v1", mychem.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_drug_lookup_miss(&mychem, "Keytruda").await;
+        mount_ols_alias(
+            &ols,
+            "Keytruda",
+            "mesh",
+            "MESH:C582435",
+            "pembrolizumab",
+            &["Keytruda"],
+            1,
+        )
+        .await;
+
+        let cli = Cli::try_parse_from(["biomcp", "get", "drug", "Keytruda"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("drug alias outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stderr);
+        assert_eq!(outcome.exit_code, 1);
+        assert!(outcome.text.contains("Error: drug 'Keytruda' not found."));
+        assert!(
+            outcome
+                .text
+                .contains("Did you mean: `biomcp get drug pembrolizumab`")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_mcp_alias_suggestion_returns_structured_json_text() {
+        let _guard = lock_env().await;
+        let mygene = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mygene_base = set_env_var("BIOMCP_MYGENE_BASE", Some(&format!("{}/v3", mygene.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_gene_lookup_miss(&mygene, "ERBB1").await;
+        mount_ols_alias(&ols, "ERBB1", "hgnc", "HGNC:3236", "EGFR", &["ERBB1"], 1).await;
+
+        let output = execute_mcp(vec![
+            "biomcp".to_string(),
+            "get".to_string(),
+            "gene".to_string(),
+            "ERBB1".to_string(),
+        ])
+        .await
+        .expect("mcp alias outcome");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&output.text).expect("valid mcp alias json");
+        assert_eq!(value["_meta"]["alias_resolution"]["kind"], "canonical");
+        assert_eq!(value["_meta"]["alias_resolution"]["canonical"], "EGFR");
+    }
 }
 
 #[cfg(test)]
@@ -7063,6 +8839,7 @@ mod next_commands_validity {
     #[test]
     fn protein_next_commands_parse() {
         assert_parses("biomcp get protein P00533 structures");
+        assert_parses("biomcp get protein P00533 complexes");
         assert_parses("biomcp get gene EGFR");
     }
 
@@ -7077,6 +8854,32 @@ mod next_commands_validity {
     fn device_event_next_commands_parse() {
         assert_parses("biomcp search adverse-event --type device --device HeartValve");
         assert_parses(r#"biomcp search adverse-event --type recall --classification "Class I""#);
+    }
+
+    #[test]
+    fn discover_next_commands_parse() {
+        // gene — unambiguous and ambiguous
+        assert_parses("biomcp get gene EGFR");
+        assert_parses(r#"biomcp search gene -q "ERBB1" --limit 10"#);
+        // drug
+        assert_parses(r#"biomcp get drug "pembrolizumab""#);
+        // disease — unambiguous helpers and ambiguous fallback
+        assert_parses(r#"biomcp get disease "cystic fibrosis""#);
+        assert_parses(r#"biomcp disease trials "cystic fibrosis""#);
+        assert_parses(r#"biomcp search article -k "cystic fibrosis" --limit 5"#);
+        assert_parses(r#"biomcp search disease -q "diabetes" --limit 10"#);
+        // symptom
+        assert_parses(r#"biomcp search disease -q "chest pain" --limit 10"#);
+        assert_parses(r#"biomcp search trial -c "chest pain" --limit 5"#);
+        assert_parses(r#"biomcp search article -k "chest pain" --limit 5"#);
+        // pathway
+        assert_parses(r#"biomcp search pathway -q "MAPK signaling" --limit 5"#);
+        // variant with and without gene inference
+        assert_parses(r#"biomcp get variant "BRAF V600E""#);
+        assert_parses(r#"biomcp search article -k "V600E" --limit 5"#);
+        // trial intent
+        assert_parses(r#"biomcp search trial -c "Breast Cancer" --limit 5"#);
+        assert_parses(r#"biomcp search article -k "Breast Cancer" --limit 5"#);
     }
 }
 
@@ -7123,9 +8926,15 @@ mod next_commands_json_property {
         entity: &T,
         evidence_urls: Vec<(&'static str, String)>,
         next_commands: Vec<String>,
+        section_sources: Vec<crate::render::provenance::SectionSource>,
     ) {
-        let json = crate::render::json::to_entity_json(entity, evidence_urls, next_commands)
-            .unwrap_or_else(|e| panic!("{label}: failed to render entity json: {e}"));
+        let json = crate::render::json::to_entity_json(
+            entity,
+            evidence_urls,
+            next_commands,
+            section_sources,
+        )
+        .unwrap_or_else(|e| panic!("{label}: failed to render entity json: {e}"));
         assert_json_next_commands_parse(label, &json);
     }
 
@@ -7153,8 +8962,11 @@ mod next_commands_json_property {
             interactions: None,
             civic: None,
             expression: None,
+            hpa: None,
             druggability: None,
             clingen: None,
+            constraint: None,
+            disgenet: None,
         };
 
         assert_entity_json_next_commands(
@@ -7162,6 +8974,7 @@ mod next_commands_json_property {
             &gene,
             crate::render::markdown::gene_evidence_urls(&gene),
             crate::render::markdown::related_gene(&gene),
+            crate::render::provenance::gene_section_sources(&gene),
         );
     }
 
@@ -7205,6 +9018,7 @@ mod next_commands_json_property {
             &article,
             crate::render::markdown::article_evidence_urls(&article),
             crate::render::markdown::related_article(&article),
+            crate::render::provenance::article_section_sources(&article),
         );
     }
 
@@ -7219,15 +9033,18 @@ mod next_commands_json_property {
             associated_genes: Vec::new(),
             gene_associations: Vec::new(),
             top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
             treatment_landscape: Vec::new(),
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
             variants: Vec::new(),
+            top_variant: None,
             models: Vec::new(),
             prevalence: Vec::new(),
             prevalence_note: None,
             civic: None,
+            disgenet: None,
             xrefs: std::collections::HashMap::new(),
         };
 
@@ -7236,6 +9053,7 @@ mod next_commands_json_property {
             &disease,
             crate::render::markdown::disease_evidence_urls(&disease),
             crate::render::markdown::related_disease(&disease),
+            crate::render::provenance::disease_section_sources(&disease),
         );
     }
 
@@ -7258,6 +9076,7 @@ mod next_commands_json_property {
             &pgx,
             crate::render::markdown::pgx_evidence_urls(&pgx),
             crate::render::markdown::related_pgx(&pgx),
+            crate::render::provenance::pgx_section_sources(&pgx),
         );
     }
 
@@ -7290,6 +9109,7 @@ mod next_commands_json_property {
             &trial,
             crate::render::markdown::trial_evidence_urls(&trial),
             crate::render::markdown::related_trial(&trial),
+            crate::render::provenance::trial_section_sources(&trial),
         );
     }
 
@@ -7308,6 +9128,7 @@ mod next_commands_json_property {
             &variant,
             crate::render::markdown::variant_evidence_urls(&variant),
             crate::render::markdown::related_variant(&variant),
+            crate::render::provenance::variant_section_sources(&variant),
         );
     }
 
@@ -7322,6 +9143,9 @@ mod next_commands_json_property {
             mechanism: None,
             mechanisms: Vec::new(),
             approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
             brand_names: Vec::new(),
             route: None,
             targets: vec!["EGFR".to_string()],
@@ -7330,7 +9154,9 @@ mod next_commands_json_property {
             interaction_text: None,
             pharm_classes: Vec::new(),
             top_adverse_events: Vec::new(),
+            faers_query: None,
             label: None,
+            label_set_id: None,
             shortage: None,
             approvals: None,
             civic: None,
@@ -7341,14 +9167,16 @@ mod next_commands_json_property {
             &drug,
             crate::render::markdown::drug_evidence_urls(&drug),
             crate::render::markdown::related_drug(&drug),
+            crate::render::provenance::drug_section_sources(&drug),
         );
     }
 
     #[test]
     fn pathway_json_next_commands_parse() {
         let pathway = Pathway {
-            id: "R-HSA-5673001".to_string(),
-            name: "RAF/MAP kinase cascade".to_string(),
+            source: "KEGG".to_string(),
+            id: "hsa05200".to_string(),
+            name: "Pathways in cancer".to_string(),
             species: None,
             summary: None,
             genes: Vec::new(),
@@ -7356,11 +9184,30 @@ mod next_commands_json_property {
             enrichment: Vec::new(),
         };
 
+        let next_commands = crate::render::markdown::related_pathway(&pathway);
+        assert_eq!(
+            next_commands,
+            vec!["biomcp pathway drugs hsa05200".to_string()]
+        );
+        assert!(
+            next_commands
+                .iter()
+                .all(|cmd| !cmd.contains("get pathway hsa05200")),
+            "pathway next_commands should not repeat the current flow"
+        );
+        assert!(
+            next_commands
+                .iter()
+                .all(|cmd| !cmd.contains("events") && !cmd.contains("enrichment")),
+            "pathway next_commands should not suggest unsupported sections"
+        );
+
         assert_entity_json_next_commands(
             "pathway",
             &pathway,
             crate::render::markdown::pathway_evidence_urls(&pathway),
-            crate::render::markdown::related_pathway(&pathway),
+            next_commands,
+            crate::render::provenance::pathway_section_sources(&pathway),
         );
     }
 
@@ -7378,13 +9225,29 @@ mod next_commands_json_property {
             structure_count: None,
             domains: Vec::new(),
             interactions: Vec::new(),
+            complexes: Vec::new(),
         };
+
+        let base_next_commands = crate::render::markdown::related_protein(&protein, &[]);
+        assert!(base_next_commands.contains(&"biomcp get protein P00533 structures".to_string()));
+        assert!(base_next_commands.contains(&"biomcp get protein P00533 complexes".to_string()));
+
+        let section_next_commands =
+            crate::render::markdown::related_protein(&protein, &["complexes".to_string()]);
+        assert!(
+            !section_next_commands.contains(&"biomcp get protein P00533 complexes".to_string())
+        );
+        assert!(
+            section_next_commands.contains(&"biomcp get protein P00533 structures".to_string())
+        );
+        assert!(section_next_commands.contains(&"biomcp get gene EGFR".to_string()));
 
         assert_entity_json_next_commands(
             "protein",
             &protein,
             crate::render::markdown::protein_evidence_urls(&protein),
-            crate::render::markdown::related_protein(&protein),
+            section_next_commands,
+            crate::render::provenance::protein_section_sources(&protein),
         );
     }
 
@@ -7410,6 +9273,7 @@ mod next_commands_json_property {
             &report,
             crate::render::markdown::adverse_event_evidence_urls(&faers),
             crate::render::markdown::related_adverse_event(&faers),
+            crate::render::provenance::adverse_event_report_section_sources(&report),
         );
     }
 
@@ -7431,6 +9295,7 @@ mod next_commands_json_property {
             &report,
             crate::render::markdown::device_event_evidence_urls(&device),
             crate::render::markdown::related_device_event(&device),
+            crate::render::provenance::adverse_event_report_section_sources(&report),
         );
     }
 }

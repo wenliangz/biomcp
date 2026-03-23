@@ -1,4 +1,4 @@
-.PHONY: build test lint check run clean spec spec-pr validate-skills test-contracts
+.PHONY: build test lint check run clean spec spec-pr validate-skills test-contracts install
 
 # Volatile live-network spec headings. These headings fan out across article
 # search backends or have repeated timeout history in GitHub Actions, so they
@@ -15,9 +15,16 @@ SPEC_PR_DESELECT_ARGS = \
 	--deselect "spec/03-variant.md::Variant to Articles" \
 	--deselect "spec/06-article.md::Searching by Gene" \
 	--deselect "spec/06-article.md::Searching by Keyword" \
+	--deselect "spec/06-article.md::Source-Specific PubTator Search Uses Default Retraction Filter" \
+	--deselect "spec/06-article.md::Federated Search Preserves Non-EuropePMC Matches Under Default Retraction Filter" \
+	--deselect "spec/06-article.md::Article Full Text Saved Markdown" \
 	--deselect "spec/06-article.md::Sort Behavior" \
 	--deselect "spec/07-disease.md::Disease to Articles" \
-	--deselect "spec/12-search-positionals.md::GWAS Positional Query"
+	--deselect "spec/12-search-positionals.md::GWAS Positional Query" \
+	--deselect "spec/02-gene.md::Gene DisGeNET Associations" \
+	--deselect "spec/07-disease.md::Disease DisGeNET Associations" \
+	--deselect "spec/19-discover.md" \
+	--deselect "spec/20-alias-fallback.md"
 
 build:
 	cargo build --release
@@ -41,6 +48,11 @@ run:
 
 clean:
 	cargo clean
+
+install:
+	mkdir -p "$(HOME)/.local/bin"
+	cargo build --release --locked
+	install -m 755 target/release/biomcp "$(HOME)/.local/bin/biomcp"
 
 spec:
 	XDG_CACHE_HOME="$(CURDIR)/.cache" PATH="$(CURDIR)/target/release:$(PATH)" \

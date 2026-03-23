@@ -8,6 +8,8 @@ Genes are a primary anchor in BioMCP and frequently drive downstream trial, arti
 | Table structure | `search gene BRAF` | Confirms stable result schema |
 | Detail card | `get gene BRAF` | Confirms rich per-gene card output |
 | Section expansion | `get gene BRAF pathways` | Confirms progressive disclosure |
+| HPA section | `get gene BRAF hpa` | Confirms protein tissue-expression contract |
+| Druggability section | `get gene EGFR druggability` | Confirms combined DGIdb/OpenTargets contract |
 | Trial helper | `gene trials BRAF` | Confirms cross-entity trial pivot |
 | Article helper | `gene articles BRAF` | Confirms cross-entity literature pivot |
 
@@ -52,6 +54,46 @@ echo "$out" | mustmatch like "## Pathways"
 echo "$out" | mustmatch like "| ID | Name |"
 ```
 
+## Constraint Section
+
+The constraint section should render gnomAD provenance even when values evolve over time. These checks assert the stable labels rather than exact floating-point scores.
+
+```bash
+out="$(biomcp get gene TP53 constraint)"
+echo "$out" | mustmatch like "## Constraint"
+echo "$out" | mustmatch like "Source: gnomAD"
+echo "$out" | mustmatch like "Version: v4"
+echo "$out" | mustmatch like "Reference genome: GRCh38"
+echo "$out" | mustmatch like "Transcript:"
+echo "$out" | mustmatch like "pLI:"
+echo "$out" | mustmatch like "LOEUF:"
+```
+
+## Human Protein Atlas Section
+
+The HPA section should expose protein tissue expression, localization context, and stable HPA labels without dumping the raw upstream record.
+
+```bash
+out="$(biomcp get gene BRAF hpa)"
+echo "$out" | mustmatch like "## Human Protein Atlas"
+echo "$out" | mustmatch like "Reliability:"
+echo "$out" | mustmatch like "Subcellular"
+echo "$out" | mustmatch like "| Tissue | Level |"
+```
+
+## Druggability Section
+
+The druggability section should stay as one section while exposing OpenTargets tractability markers and safety-liability context alongside DGIdb interaction data.
+
+```bash
+out="$(biomcp get gene EGFR druggability)"
+echo "$out" | mustmatch like "## Druggability"
+echo "$out" | mustmatch like "OpenTargets tractability"
+echo "$out" | mustmatch like "small molecule"
+echo "$out" | mustmatch like "antibody"
+echo "$out" | mustmatch like "OpenTargets safety liabilities"
+```
+
 ## Gene to Trials
 
 The trial helper uses a gene biomarker pivot, which is a common translational workflow. We assert on the trial result table shape and the query marker for BRAF.
@@ -86,4 +128,19 @@ echo "$out" | mustmatch like "EGFR"
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search gene P53 --limit 5)"
 echo "$out" | mustmatch like "# Genes: P53"
 echo "$out" | mustmatch like "TP53"
+```
+
+## Gene DisGeNET Associations
+
+DisGeNET scored gene-disease associations require `DISGENET_API_KEY`. The section heading and table schema are stable invariants; individual scores and row counts vary by API tier.
+
+```bash
+out="$(biomcp get gene TP53 disgenet)"
+echo "$out" | mustmatch like "## DisGeNET"
+echo "$out" | mustmatch like "| Disease | UMLS CUI | Score | PMIDs | Trials | EL | EI |"
+```
+
+```bash
+out="$(biomcp get gene TP53 disgenet --json)"
+echo "$out" | mustmatch json ".disgenet.associations | length > 0"
 ```

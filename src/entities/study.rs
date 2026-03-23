@@ -141,6 +141,8 @@ pub struct SurvivalGroupResult {
     pub survival_3yr: Option<f64>,
     pub survival_5yr: Option<f64>,
     pub event_rate: f64,
+    #[serde(skip, default)]
+    pub km_curve_points: Vec<(f64, f64)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -658,6 +660,7 @@ impl From<crate::sources::cbioportal_study::SurvivalGroupStats> for SurvivalGrou
             survival_3yr: value.survival_3yr,
             survival_5yr: value.survival_5yr,
             event_rate: value.event_rate,
+            km_curve_points: value.km_curve_points,
         }
     }
 }
@@ -937,14 +940,7 @@ mod tests {
 
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::Mutex;
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     struct TestStudyDir {
         root: PathBuf,
@@ -1068,7 +1064,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_studies_returns_available_data() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("list");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -1091,7 +1087,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_study_mutations_round_trips_source_result() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("query-mutations");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -1116,7 +1112,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_study_unknown_study_returns_not_found() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("unknown-study");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -1132,7 +1128,7 @@ mod tests {
 
     #[tokio::test]
     async fn co_occurrence_validates_gene_count() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("co-occur-count");
         minimal_study_fixture(&fixture.root, "demo_study");
         // SAFETY: tests serialize env var mutation through a process-wide mutex.
@@ -1148,7 +1144,7 @@ mod tests {
 
     #[tokio::test]
     async fn cohort_round_trips_source_result() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("cohort");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1169,7 +1165,7 @@ mod tests {
 
     #[tokio::test]
     async fn survival_round_trips_source_result() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("survival");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1198,7 +1194,7 @@ mod tests {
 
     #[tokio::test]
     async fn compare_expression_round_trips_source_result() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("compare-expression");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1224,7 +1220,7 @@ mod tests {
 
     #[tokio::test]
     async fn filter_round_trips_source_result() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("filter");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1266,7 +1262,7 @@ mod tests {
 
     #[tokio::test]
     async fn compare_mutations_round_trips_source_result() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("compare-mutations");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1289,7 +1285,7 @@ mod tests {
 
     #[tokio::test]
     async fn expression_values_returns_sorted_values() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("expression-values");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {
@@ -1304,7 +1300,7 @@ mod tests {
 
     #[tokio::test]
     async fn compare_expression_values_returns_mutant_then_wildtype_groups() {
-        let _guard = env_lock().lock().await;
+        let _guard = crate::test_support::env_lock().lock().await;
         let fixture = TestStudyDir::new("compare-expression-values");
         minimal_study_fixture(&fixture.root, "demo_study");
         unsafe {

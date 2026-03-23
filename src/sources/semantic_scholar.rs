@@ -12,6 +12,10 @@ const SEMANTIC_SCHOLAR_BASE_ENV: &str = "BIOMCP_S2_BASE";
 const SEMANTIC_SCHOLAR_DOCS_URL: &str = "https://www.semanticscholar.org/product/api";
 const GRAPH_PAPER_FIELDS: &str = "paperId,externalIds,title,venue,year,tldr,citationCount,influentialCitationCount,referenceCount,isOpenAccess,openAccessPdf";
 const BATCH_PAPER_FIELDS: &str = "paperId,externalIds,title,venue,year";
+const BATCH_PAPER_COMPACT_FIELDS: &str =
+    "paperId,externalIds,title,venue,year,tldr,citationCount,influentialCitationCount";
+const SEARCH_PAPER_FIELDS: &str =
+    "paperId,externalIds,title,venue,year,citationCount,influentialCitationCount,abstract";
 const CITATION_EDGE_FIELDS: &str = "contexts,intents,isInfluential,citingPaper.paperId,citingPaper.externalIds,citingPaper.title,citingPaper.venue,citingPaper.year";
 const REFERENCE_EDGE_FIELDS: &str = "contexts,intents,isInfluential,citedPaper.paperId,citedPaper.externalIds,citedPaper.title,citedPaper.venue,citedPaper.year";
 const RECOMMENDATION_FIELDS: &str = "paperId,externalIds,title,venue,year";
@@ -146,6 +150,22 @@ impl SemanticScholarClient {
         &self,
         ids: &[String],
     ) -> Result<Vec<Option<SemanticScholarPaper>>, BioMcpError> {
+        self.paper_batch_with_fields(ids, BATCH_PAPER_FIELDS).await
+    }
+
+    pub async fn paper_batch_compact(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<Option<SemanticScholarPaper>>, BioMcpError> {
+        self.paper_batch_with_fields(ids, BATCH_PAPER_COMPACT_FIELDS)
+            .await
+    }
+
+    async fn paper_batch_with_fields(
+        &self,
+        ids: &[String],
+        fields: &str,
+    ) -> Result<Vec<Option<SemanticScholarPaper>>, BioMcpError> {
         if ids.is_empty() || ids.len() > 500 {
             return Err(BioMcpError::InvalidArgument(
                 "Semantic Scholar batch lookup requires 1-500 paper IDs".into(),
@@ -155,9 +175,30 @@ impl SemanticScholarClient {
         let req = self.with_auth(
             self.client
                 .post(url)
-                .query(&[("fields", BATCH_PAPER_FIELDS)])
+                .query(&[("fields", fields)])
                 .json(&SemanticScholarBatchRequest { ids }),
         )?;
+        self.send_json(req).await
+    }
+
+    pub async fn paper_search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<SemanticScholarSearchResponse, BioMcpError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(BioMcpError::InvalidArgument(
+                "Semantic Scholar paper search query is required".into(),
+            ));
+        }
+        let limit = validate_limit(limit)?;
+        let url = self.endpoint_url("graph/v1/paper/search")?;
+        let req = self.with_auth(self.client.get(url).query(&[
+            ("query", query),
+            ("fields", SEARCH_PAPER_FIELDS),
+            ("limit", &limit.to_string()),
+        ]))?;
         self.send_json(req).await
     }
 
@@ -285,6 +326,8 @@ pub struct SemanticScholarPaper {
     pub citation_count: Option<u64>,
     #[serde(rename = "influentialCitationCount")]
     pub influential_citation_count: Option<u64>,
+    #[serde(rename = "abstract", skip_serializing_if = "Option::is_none")]
+    pub abstract_text: Option<String>,
     #[serde(rename = "referenceCount")]
     pub reference_count: Option<u64>,
     #[serde(rename = "isOpenAccess")]
@@ -294,10 +337,19 @@ pub struct SemanticScholarPaper {
     pub tldr: Option<SemanticScholarTldr>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SemanticScholarSearchResponse {
+    pub total: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_vec_or_default")]
+    pub data: Vec<SemanticScholarPaper>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SemanticScholarExternalIds {
     #[serde(rename = "PubMed")]
     pub pubmed: Option<String>,
+    #[serde(rename = "PubMedCentral")]
+    pub pmcid: Option<String>,
     #[serde(rename = "DOI")]
     pub doi: Option<String>,
     #[serde(rename = "ArXiv")]
@@ -425,6 +477,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn paper_batch_compact_requests_tldr_and_citation_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graph/v1/paper/batch"))
+            .and(query_param("fields", BATCH_PAPER_COMPACT_FIELDS))
+            .and(header("x-api-key", "test-key"))
+            .and(body_string_contains("\"PMID:22663011\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "paperId": "paper-1",
+                    "externalIds": {"PubMed": "22663011"},
+                    "title": "One",
+                    "venue": "NEJM",
+                    "year": 2012,
+                    "tldr": {"text": "Compact summary"},
+                    "citationCount": 12,
+                    "influentialCitationCount": 3
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client =
+            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                .unwrap();
+        let rows = client
+            .paper_batch_compact(&["PMID:22663011".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        let paper = rows[0].as_ref().expect("paper");
+        assert_eq!(
+            paper.tldr.as_ref().and_then(|tldr| tldr.text.as_deref()),
+            Some("Compact summary")
+        );
+        assert_eq!(paper.citation_count, Some(12));
+        assert_eq!(paper.influential_citation_count, Some(3));
+    }
+
+    #[tokio::test]
     async fn recommendations_post_uses_expected_shape() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -461,5 +553,46 @@ mod tests {
 
         let err = client.paper_detail("PMID:22663011").await.unwrap_err();
         assert!(matches!(err, BioMcpError::ApiKeyRequired { .. }));
+    }
+
+    #[tokio::test]
+    async fn paper_search_sends_query_limit_and_parses_abstract_metadata() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/search"))
+            .and(query_param("query", "braf melanoma"))
+            .and(query_param("fields", SEARCH_PAPER_FIELDS))
+            .and(query_param("limit", "3"))
+            .and(header("x-api-key", "test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total": 1,
+                "data": [{
+                    "paperId": "paper-1",
+                    "externalIds": {
+                        "PubMed": "22663011",
+                        "DOI": "10.1056/NEJMoa1203421"
+                    },
+                    "title": "BRAF melanoma response",
+                    "citationCount": 12,
+                    "influentialCitationCount": 4,
+                    "abstract": "Direct answer abstract."
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let client =
+            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                .unwrap();
+        let response = client.paper_search("braf melanoma", 3).await.unwrap();
+        assert_eq!(response.total, Some(1));
+        assert_eq!(response.data.len(), 1);
+        let paper = &response.data[0];
+        assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+        assert_eq!(paper.influential_citation_count, Some(4));
+        assert_eq!(
+            paper.abstract_text.as_deref(),
+            Some("Direct answer abstract.")
+        );
     }
 }

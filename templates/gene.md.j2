@@ -7,9 +7,10 @@ Entrez ID: {{ entrez_id }}
 {% if genomic_coordinates %}Chromosome: {{ genomic_coordinates }}{% elif location %}Location: {{ location }}{% endif %}
 {% if uniprot_id %}UniProt: {{ uniprot_id }}{% endif %}
 {% if gene_type %}Type: {{ gene_type }}{% endif %}
+Source: NCBI Gene / MyGene.info
 
 {% if summary -%}
-## Summary
+## Summary (NCBI Gene)
 
 {{ summary }}
 {% endif -%}
@@ -20,7 +21,7 @@ Diseases: {{ clinical_diseases | join(", ") }}
 Drugs: {{ clinical_drugs | join(", ") }}
 {% endif -%}
 {% if aliases -%}
-## Aliases
+## Aliases (NCBI Gene / MyGene.info)
 
 {{ aliases | join(", ") }}
 {% endif -%}
@@ -28,16 +29,14 @@ Drugs: {{ clinical_drugs | join(", ") }}
 {% if pathways -%}
 ## Pathways
 
-Showing pathway rows from Reactome search results.
-
-| ID | Name |
-|---|---|
+| Source | ID | Name |
+|---|---|---|
 {% for pathway in pathways -%}
-| {{ pathway.id }} | {{ pathway.name | truncate(75) }} |
+| {{ pathway.source }} | {{ pathway.id }} | {{ pathway.name | truncate(75) }} |
 {% endfor -%}
 {% endif -%}
 {% if ontology -%}
-## Ontology
+## Ontology (Enrichr)
 
 Note: single-gene Enrichr p-values are exploratory and should be interpreted cautiously.
 
@@ -50,7 +49,7 @@ Note: single-gene Enrichr p-values are exploratory and should be interpreted cau
 {% endfor -%}
 {% endif -%}
 {% if diseases -%}
-## Diseases
+## Diseases (Enrichr)
 
 | Term | P-value | Library |
 |---|---|---|
@@ -61,7 +60,7 @@ Note: single-gene Enrichr p-values are exploratory and should be interpreted cau
 {% endfor -%}
 {% endif -%}
 {% if protein -%}
-## Protein
+## Protein (UniProt)
 
 - Accession: {{ protein.accession }}
 - Name: {{ protein.name }}
@@ -69,7 +68,7 @@ Note: single-gene Enrichr p-values are exploratory and should be interpreted cau
 {% if protein.function %}- Function: {{ protein.function | truncate(260) }}{% endif %}
 {% endif -%}
 {% if go_terms -%}
-## GO Terms
+## GO Terms (QuickGO)
 
 | ID | Name | Aspect | Evidence |
 |---|---|---|---|
@@ -78,7 +77,7 @@ Note: single-gene Enrichr p-values are exploratory and should be interpreted cau
 {% endfor -%}
 {% endif -%}
 {% if interactions -%}
-## Interactions
+## Interactions (STRING)
 {% for row in interactions -%}
 {{ row.partner }}: {% if row.score is not none %}{{ row.score | score }}{% else %}-{% endif %}
 {% endfor -%}
@@ -121,12 +120,50 @@ No CIViC records returned for this gene query.
 No GTEx expression records returned for this gene query.
 {% endif -%}
 {% endif -%}
+{% if show_hpa_section -%}
+## Human Protein Atlas
+
+{% if hpa and (hpa.tissues or hpa.subcellular_main_location or hpa.subcellular_additional_location or hpa.reliability or hpa.protein_summary or hpa.rna_summary) -%}
+{% if hpa.reliability %}- Reliability: {{ hpa.reliability }}{% endif %}
+{% if hpa.protein_summary %}- Protein summary: {{ hpa.protein_summary }}{% endif %}
+{% if hpa.rna_summary %}- RNA summary: {{ hpa.rna_summary }}{% endif %}
+{% if hpa.subcellular_main_location %}- Subcellular main locations: {{ hpa.subcellular_main_location | join(", ") }}{% endif %}
+{% if hpa.subcellular_additional_location %}- Subcellular additional locations: {{ hpa.subcellular_additional_location | join(", ") }}{% endif %}
+{% if hpa.tissues -%}
+| Tissue | Level |
+|---|---|
+{% for row in hpa.tissues -%}
+| {{ row.tissue }} | {{ row.level }} |
+{% endfor -%}
+{% endif -%}
+{% else -%}
+No Human Protein Atlas records returned for this gene query.
+{% endif -%}
+{% endif -%}
 {% if show_druggability_section -%}
-## Druggability (DGIdb)
+## Druggability (DGIdb / Open Targets)
 
 {% if druggability -%}
 {% if druggability.categories -%}
 Categories: {{ druggability.categories | join(", ") }}
+{% endif -%}
+{% if druggability.tractability -%}
+### OpenTargets tractability
+
+| Modality | Tractable | Evidence |
+|---|---|---|
+{% for row in druggability.tractability -%}
+| {{ row.modality }} | {% if row.tractable %}yes{% else %}no{% endif %} | {% if row.evidence_labels %}{{ row.evidence_labels | join(", ") }}{% else %}-{% endif %} |
+{% endfor -%}
+{% endif -%}
+{% if druggability.safety_liabilities -%}
+### OpenTargets safety liabilities
+
+| Event | Datasource | Effect | Biosample |
+|---|---|---|---|
+{% for row in druggability.safety_liabilities -%}
+| {{ row.event }} | {{ row.datasource or "-" }} | {{ row.effect_direction or "-" }} | {{ row.biosample or "-" }} |
+{% endfor -%}
 {% endif -%}
 {% if druggability.interactions -%}
 | Drug | Interaction Types | Score | Approved | Sources |
@@ -165,6 +202,38 @@ No ClinGen records returned for this gene query.
 {% endif -%}
 {% else -%}
 No ClinGen records returned for this gene query.
+{% endif -%}
+{% endif -%}
+{% if show_constraint_section -%}
+## Constraint (gnomAD)
+
+{% if constraint -%}
+- Source: {{ constraint.source }}
+- Version: {{ constraint.source_version }}
+- Reference genome: {{ constraint.reference_genome }}
+{% if constraint.transcript %}- Transcript: {{ constraint.transcript }}{% endif %}
+{% if constraint.pli is defined and constraint.pli is not none %}- pLI: {{ constraint.pli | score }}{% endif %}
+{% if constraint.loeuf is defined and constraint.loeuf is not none %}- LOEUF: {{ constraint.loeuf | score }}{% endif %}
+{% if constraint.mis_z is defined and constraint.mis_z is not none %}- mis_z: {{ constraint.mis_z | score }}{% endif %}
+{% if constraint.syn_z is defined and constraint.syn_z is not none %}- syn_z: {{ constraint.syn_z | score }}{% endif %}
+{% if (constraint.pli is not defined or constraint.pli is none) and (constraint.loeuf is not defined or constraint.loeuf is none) and (constraint.mis_z is not defined or constraint.mis_z is none) and (constraint.syn_z is not defined or constraint.syn_z is none) -%}
+No gnomAD constraint metrics returned for this gene query.
+{% endif -%}
+{% else -%}
+No gnomAD constraint metrics returned for this gene query.
+{% endif -%}
+{% endif -%}
+{% if show_disgenet_section -%}
+## DisGeNET
+
+{% if disgenet and disgenet.associations -%}
+| Disease | UMLS CUI | Score | PMIDs | Trials | EL | EI |
+|---|---|---|---|---|---|---|
+{% for row in disgenet.associations -%}
+| {{ row.disease_name | truncate(45) }} | {{ row.disease_cui }} | {{ row.score | score }} | {% if row.publication_count is defined and row.publication_count is not none %}{{ row.publication_count }}{% else %}-{% endif %} | {% if row.clinical_trial_count is defined and row.clinical_trial_count is not none %}{{ row.clinical_trial_count }}{% else %}-{% endif %} | {{ row.evidence_level or "-" }} | {% if row.evidence_index is defined and row.evidence_index is not none %}{{ row.evidence_index | score }}{% else %}-{% endif %} |
+{% endfor -%}
+{% else -%}
+No DisGeNET associations returned for this gene query.
 {% endif -%}
 {% endif -%}
 {% if sections_block %}{{ sections_block }}

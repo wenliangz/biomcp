@@ -60,7 +60,8 @@ Remote clients connect to `http://127.0.0.1:8080/mcp`. Probe routes are
 ### From source
 
 ```bash
-cargo build --release --locked
+make install
+"$HOME/.local/bin/biomcp" --version
 ```
 
 ## Quick start
@@ -68,15 +69,17 @@ cargo build --release --locked
 ```bash
 uv tool install biomcp-cli
 biomcp health --apis-only
+biomcp discover "chest pain"
 biomcp list gene
 biomcp search all --gene BRAF --disease melanoma  # unified cross-entity discovery
-biomcp get gene BRAF pathways druggability
+biomcp get gene BRAF pathways hpa
 ```
 
 ## Command grammar
 
 ```text
 search <entity> [filters]    → discovery
+discover <query>            → concept resolution before entity selection
 get <entity> <id> [sections] → focused detail
 <entity> <helper> <id>       → cross-entity pivots
 enrich <GENE1,GENE2,...>     → gene-set enrichment
@@ -87,6 +90,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 ## Feature highlights
 
 - **Federated article search:** PubTator3 and Europe PMC run together for `search article`, then deduplicate by PMID.
+- **Free-text discovery:** `biomcp discover` resolves aliases, brands, symptoms, and pathways before you commit to a typed entity command.
 - **Cross-entity pivots:** move directly from a known entity into trials, articles, drugs, pathways, structures, or article graph helpers.
 - **Study analytics + charts:** `study` commands support local cohort analytics plus native terminal, SVG, and PNG chart output.
 - **Citation graph helpers:** `article citations`, `article references`, and `article recommendations` add literature navigation from a known paper when `S2_API_KEY` is configured.
@@ -96,14 +100,14 @@ search all [slot filters]    → counts-first cross-entity orientation
 
 | Entity | Upstream providers used by BioMCP | Example |
 |--------|-----------------------------------|---------|
-| gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, GTEx, DGIdb, ClinGen | `biomcp get gene BRAF pathways` |
+| gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, GTEx, Human Protein Atlas, DGIdb, ClinGen | `biomcp get gene BRAF pathways hpa` |
 | variant | MyVariant.info, ClinVar, gnomAD fields via MyVariant, CIViC, Cancer Genome Interpreter, OncoKB, cBioPortal, GWAS Catalog, AlphaGenome | `biomcp get variant "BRAF V600E" clinvar` |
 | article | PubMed, PubTator3, Europe PMC, PMC OA, NCBI ID Converter, Semantic Scholar (optional with `S2_API_KEY`) | `biomcp search article -g BRAF --limit 5` |
 | trial | ClinicalTrials.gov API v2, NCI CTS API | `biomcp search trial -c melanoma -s recruiting` |
 | drug | MyChem.info, ChEMBL, OpenTargets, Drugs@FDA, OpenFDA, CIViC | `biomcp get drug pembrolizumab targets` |
 | disease | MyDisease.info, Monarch Initiative, MONDO, OpenTargets, Reactome, CIViC | `biomcp get disease "Lynch syndrome" genes` |
-| pathway | Reactome, g:Profiler, Enrichr-backed enrichment sections | `biomcp get pathway R-HSA-5673001 genes` |
-| protein | UniProt, InterPro, STRING, PDB, AlphaFold | `biomcp get protein P15056 domains` |
+| pathway | Reactome, KEGG, g:Profiler, Enrichr-backed enrichment sections | `biomcp get pathway hsa05200 genes` |
+| protein | UniProt, InterPro, STRING, ComplexPortal, PDB, AlphaFold | `biomcp get protein P15056 complexes` |
 | adverse-event | OpenFDA FAERS, MAUDE, Recalls | `biomcp search adverse-event --drug pembrolizumab` |
 | pgx | CPIC, PharmGKB | `biomcp get pgx CYP2D6 recommendations` |
 | gwas | GWAS Catalog | `biomcp search gwas --trait "type 2 diabetes"` |
@@ -127,6 +131,7 @@ biomcp gene drugs BRAF
 biomcp gene articles BRCA1
 biomcp gene pathways BRAF
 biomcp pathway drugs R-HSA-5673001
+biomcp pathway drugs hsa05200
 biomcp pathway articles R-HSA-5673001
 biomcp pathway trials R-HSA-5673001
 biomcp protein structures P15056
@@ -155,8 +160,17 @@ export S2_API_KEY="..."          # Semantic Scholar TLDR, citations, references,
 export OPENFDA_API_KEY="..."     # OpenFDA rate limits
 export NCI_API_KEY="..."         # NCI CTS trial search (--source nci)
 export ONCOKB_TOKEN="..."        # OncoKB variant helper
+export UMLS_API_KEY="..."        # discover crosswalk enrichment
 export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction
 ```
+
+## Data Sources and Licensing
+
+BioMCP is MIT-licensed. It performs on-demand queries against upstream providers instead of vendoring or mirroring their datasets, but upstream terms govern reuse of retrieved results.
+
+Some providers are fully open, some BioMCP features require registration or API keys, and some queryable sources still impose notable reuse limits. The two biggest cautions are KEGG, which distinguishes academic and non-academic use, and COSMIC, which BioMCP keeps indirect-only because its licensing model is incompatible with a direct open integration.
+
+Use [Source Licensing and Terms](reference/source-licensing.md) for the per-source breakdown and [API Keys](getting-started/api-keys.md) for setup steps and registration links.
 
 ## Skills
 
@@ -182,6 +196,8 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart 
 - [Installation](getting-started/installation.md)
 - [First Query](getting-started/first-query.md)
 - [Search All Workflow](how-to/search-all-workflow.md)
+- [Discover](user-guide/discover.md)
+- [Source Licensing and Terms](reference/source-licensing.md)
 - [Data Sources](reference/data-sources.md)
 - [Quick Reference](reference/quick-reference.md)
 - [Troubleshooting](troubleshooting.md)

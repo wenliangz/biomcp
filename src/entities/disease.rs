@@ -10,6 +10,7 @@ use crate::entities::drug::{self, DrugSearchFilters};
 use crate::entities::trial::{self, TrialSearchFilters, TrialSource};
 use crate::error::BioMcpError;
 use crate::sources::civic::{CivicClient, CivicContext};
+use crate::sources::disgenet::{DisgenetAssociationRecord, DisgenetClient};
 use crate::sources::hpo::HpoClient;
 use crate::sources::monarch::{
     MonarchClient, MonarchGeneAssociation, MonarchModelAssociation, MonarchPhenotypeMatch,
@@ -36,6 +37,8 @@ pub struct Disease {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_genes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_gene_scores: Vec<DiseaseTargetScore>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub treatment_landscape: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recruiting_trial_count: Option<u32>,
@@ -45,6 +48,8 @@ pub struct Disease {
     pub phenotypes: Vec<DiseasePhenotype>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<DiseaseVariantAssociation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_variant: Option<DiseaseVariantAssociation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<DiseaseModelAssociation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -53,6 +58,8 @@ pub struct Disease {
     pub prevalence_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub civic: Option<CivicContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disgenet: Option<DiseaseDisgenet>,
     #[serde(default)]
     pub xrefs: HashMap<String, String>,
 }
@@ -93,6 +100,26 @@ pub struct DiseaseGeneAssociation {
     pub relationship: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opentargets_score: Option<DiseaseAssociationScoreSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiseaseAssociationScoreSummary {
+    pub overall_score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gwas_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rare_variant_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub somatic_mutation_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiseaseTargetScore {
+    pub symbol: String,
+    #[serde(flatten)]
+    pub summary: DiseaseAssociationScoreSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +136,8 @@ pub struct DiseaseVariantAssociation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiseaseModelAssociation {
     pub model: String,
+    #[serde(skip)]
+    pub model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub organism: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -126,6 +155,27 @@ pub struct DiseasePrevalenceEvidence {
     pub context: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiseaseDisgenetAssociation {
+    pub symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entrez_id: Option<u32>,
+    pub score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clinical_trial_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_index: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiseaseDisgenet {
+    pub associations: Vec<DiseaseDisgenetAssociation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +209,7 @@ const DISEASE_SECTION_VARIANTS: &str = "variants";
 const DISEASE_SECTION_MODELS: &str = "models";
 const DISEASE_SECTION_PREVALENCE: &str = "prevalence";
 const DISEASE_SECTION_CIVIC: &str = "civic";
+const DISEASE_SECTION_DISGENET: &str = "disgenet";
 const DISEASE_SECTION_ALL: &str = "all";
 
 pub const DISEASE_SECTION_NAMES: &[&str] = &[
@@ -169,6 +220,7 @@ pub const DISEASE_SECTION_NAMES: &[&str] = &[
     DISEASE_SECTION_MODELS,
     DISEASE_SECTION_PREVALENCE,
     DISEASE_SECTION_CIVIC,
+    DISEASE_SECTION_DISGENET,
     DISEASE_SECTION_ALL,
 ];
 
@@ -183,6 +235,7 @@ struct DiseaseSections {
     include_models: bool,
     include_prevalence: bool,
     include_civic: bool,
+    include_disgenet: bool,
 }
 
 fn parse_sections(sections: &[String]) -> Result<DiseaseSections, BioMcpError> {
@@ -206,6 +259,7 @@ fn parse_sections(sections: &[String]) -> Result<DiseaseSections, BioMcpError> {
             DISEASE_SECTION_MODELS => out.include_models = true,
             DISEASE_SECTION_PREVALENCE => out.include_prevalence = true,
             DISEASE_SECTION_CIVIC => out.include_civic = true,
+            DISEASE_SECTION_DISGENET => out.include_disgenet = true,
             DISEASE_SECTION_ALL => include_all = true,
             _ => {
                 return Err(BioMcpError::InvalidArgument(format!(
@@ -532,28 +586,44 @@ async fn add_genes_section(disease: &mut Disease) -> Result<(), BioMcpError> {
     let client = OpenTargetsClient::new()?;
     for query in queries {
         let rows = client.disease_associated_targets(&query, 10).await?;
+        if rows.is_empty() {
+            continue;
+        }
+
+        let mut associated_genes: Vec<String> = Vec::new();
+        let mut top_gene_scores = Vec::new();
 
         for row in rows {
             let symbol = row.symbol.trim();
             if symbol.is_empty() {
                 continue;
             }
-            if disease
-                .associated_genes
+            if associated_genes
                 .iter()
                 .any(|v| v.eq_ignore_ascii_case(symbol))
             {
                 continue;
             }
-            disease.associated_genes.push(symbol.to_string());
+            associated_genes.push(symbol.to_string());
+            if let Some(summary) = disease_association_summary(&row) {
+                top_gene_scores.push(DiseaseTargetScore {
+                    symbol: symbol.to_string(),
+                    summary,
+                });
+            }
         }
 
-        if !disease.associated_genes.is_empty() {
-            break;
+        if !associated_genes.is_empty() {
+            disease.associated_genes = associated_genes;
+            disease.top_gene_scores = top_gene_scores;
+            disease.associated_genes.truncate(10);
+            disease.top_gene_scores.truncate(10);
+            return Ok(());
         }
     }
 
     disease.associated_genes.truncate(10);
+    disease.top_gene_scores.clear();
     Ok(())
 }
 
@@ -678,7 +748,33 @@ fn map_monarch_gene_association(row: MonarchGeneAssociation) -> Option<DiseaseGe
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
+        opentargets_score: None,
     })
+}
+
+fn disease_association_summary(
+    row: &crate::sources::opentargets::OpenTargetsAssociatedGene,
+) -> Option<DiseaseAssociationScoreSummary> {
+    Some(DiseaseAssociationScoreSummary {
+        overall_score: row.overall_score?,
+        gwas_score: row.gwas_score,
+        rare_variant_score: row.rare_variant_score,
+        somatic_mutation_score: row.somatic_mutation_score,
+    })
+}
+
+fn attach_opentargets_scores(disease: &mut Disease) {
+    let score_map = disease
+        .top_gene_scores
+        .iter()
+        .map(|row| (row.symbol.to_ascii_lowercase(), row.summary.clone()))
+        .collect::<HashMap<_, _>>();
+
+    for association in &mut disease.gene_associations {
+        association.opentargets_score = score_map
+            .get(&association.gene.to_ascii_lowercase())
+            .cloned();
+    }
 }
 
 async fn add_monarch_gene_section(disease: &mut Disease) -> Result<(), BioMcpError> {
@@ -884,6 +980,7 @@ async fn augment_genes_with_civic(disease: &mut Disease) -> Result<(), BioMcpErr
             gene: symbol,
             relationship: Some("associated with disease".into()),
             source: Some("CIViC".into()),
+            opentargets_score: None,
         });
         if disease.gene_associations.len() >= 20 {
             break;
@@ -942,6 +1039,7 @@ async fn add_civic_variants(disease: &mut Disease) -> Result<(), BioMcpError> {
             .then_with(|| a.variant.cmp(&b.variant))
     });
     rows.truncate(20);
+    disease.top_variant = rows.first().cloned();
     disease.variants = rows;
     Ok(())
 }
@@ -953,6 +1051,12 @@ fn map_monarch_model(row: MonarchModelAssociation) -> Option<DiseaseModelAssocia
     }
     Some(DiseaseModelAssociation {
         model: model.to_string(),
+        model_id: row
+            .model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string),
         organism: row
             .organism
             .as_deref()
@@ -1119,12 +1223,45 @@ async fn add_civic_section(disease: &mut Disease) {
     }
 }
 
+fn map_disgenet_disease_association(row: DisgenetAssociationRecord) -> DiseaseDisgenetAssociation {
+    DiseaseDisgenetAssociation {
+        symbol: row.gene_symbol,
+        entrez_id: row.gene_ncbi_id,
+        score: row.score,
+        publication_count: row.publication_count,
+        clinical_trial_count: row.clinical_trial_count,
+        evidence_index: row.evidence_index,
+        evidence_level: row.evidence_level,
+    }
+}
+
+async fn add_disgenet_section(disease: &mut Disease) -> Result<(), BioMcpError> {
+    let client = DisgenetClient::new()?;
+    let associations = client
+        .fetch_disease_associations(disease, 10)
+        .await?
+        .into_iter()
+        .map(map_disgenet_disease_association)
+        .collect();
+    disease.disgenet = Some(DiseaseDisgenet { associations });
+    Ok(())
+}
+
 async fn enrich_base_context(disease: &mut Disease) {
     if let Err(err) = add_genes_section(disease).await {
         warn!("OpenTargets unavailable for disease genes context: {err}");
     }
 
-    disease.top_genes = disease.associated_genes.iter().take(5).cloned().collect();
+    disease.top_genes = if disease.top_gene_scores.is_empty() {
+        disease.associated_genes.iter().take(5).cloned().collect()
+    } else {
+        disease
+            .top_gene_scores
+            .iter()
+            .take(5)
+            .map(|row| row.symbol.clone())
+            .collect()
+    };
 
     if let Err(err) = add_treatment_landscape(disease).await {
         warn!("Drug lookup unavailable for disease treatment landscape: {err}");
@@ -1135,7 +1272,10 @@ async fn enrich_base_context(disease: &mut Disease) {
     }
 }
 
-async fn apply_requested_sections(disease: &mut Disease, sections: DiseaseSections) {
+async fn apply_requested_sections(
+    disease: &mut Disease,
+    sections: DiseaseSections,
+) -> Result<(), BioMcpError> {
     if sections.include_genes {
         if let Err(err) = add_monarch_gene_section(disease).await {
             warn!("Monarch unavailable for disease genes section: {err}");
@@ -1143,6 +1283,7 @@ async fn apply_requested_sections(disease: &mut Disease, sections: DiseaseSectio
         if let Err(err) = augment_genes_with_civic(disease).await {
             warn!("CIViC unavailable for disease gene augmentation: {err}");
         }
+        attach_opentargets_scores(disease);
     }
     if sections.include_pathways
         && let Err(err) = add_pathways_section(disease).await
@@ -1177,6 +1318,9 @@ async fn apply_requested_sections(disease: &mut Disease, sections: DiseaseSectio
     if sections.include_civic {
         add_civic_section(disease).await;
     }
+    if sections.include_disgenet {
+        add_disgenet_section(disease).await?;
+    }
 
     if !sections.include_genes && !sections.include_pathways {
         disease.associated_genes.clear();
@@ -1187,6 +1331,7 @@ async fn apply_requested_sections(disease: &mut Disease, sections: DiseaseSectio
     }
     if !sections.include_variants {
         disease.variants.clear();
+        disease.top_variant = None;
     }
     if !sections.include_models {
         disease.models.clear();
@@ -1198,6 +1343,11 @@ async fn apply_requested_sections(disease: &mut Disease, sections: DiseaseSectio
     if !sections.include_civic {
         disease.civic = None;
     }
+    if !sections.include_disgenet {
+        disease.disgenet = None;
+    }
+
+    Ok(())
 }
 
 pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMcpError> {
@@ -1221,7 +1371,7 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
         let mut disease = transform::disease::from_mydisease_hit(hit);
         disease.parents = resolve_parent_names(&client, &disease.parents).await;
         enrich_base_context(&mut disease).await;
-        apply_requested_sections(&mut disease, parsed_sections).await;
+        apply_requested_sections(&mut disease, parsed_sections).await?;
         return Ok(disease);
     }
 
@@ -1231,7 +1381,7 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
     let mut disease = transform::disease::from_mydisease_hit(hit);
     disease.parents = resolve_parent_names(&client, &disease.parents).await;
     enrich_base_context(&mut disease).await;
-    apply_requested_sections(&mut disease, parsed_sections).await;
+    apply_requested_sections(&mut disease, parsed_sections).await?;
     Ok(disease)
 }
 
@@ -1664,6 +1814,7 @@ mod tests {
             "variants".to_string(),
             "models".to_string(),
             "prevalence".to_string(),
+            "disgenet".to_string(),
             "all".to_string(),
         ])
         .expect("sections should parse");
@@ -1674,6 +1825,13 @@ mod tests {
         assert!(flags.include_models);
         assert!(flags.include_prevalence);
         assert!(flags.include_civic);
+        assert!(flags.include_disgenet);
+    }
+
+    #[test]
+    fn parse_sections_all_keeps_disgenet_opt_in() {
+        let flags = parse_sections(&["all".to_string()]).expect("sections should parse");
+        assert!(!flags.include_disgenet);
     }
 
     #[test]

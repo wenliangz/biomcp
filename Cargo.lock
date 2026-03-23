@@ -296,11 +296,12 @@ dependencies = [
 
 [[package]]
 name = "biomcp-cli"
-version = "0.8.16"
+version = "0.8.17"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.8",
+ "base64 0.22.1",
  "clap",
  "csv",
  "dirs",
@@ -317,6 +318,7 @@ dependencies = [
  "reqwest-middleware",
  "reqwest-retry",
  "rmcp",
+ "roxmltree",
  "rust-embed",
  "semver",
  "serde",

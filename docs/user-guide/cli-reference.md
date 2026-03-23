@@ -20,13 +20,15 @@ Section names are positional trailing arguments after `<id>`.
 
 `get` responses include outbound evidence links in markdown output where available.
 In JSON mode, links are exposed under `_meta.evidence_urls` and can include
-Ensembl, OMIM, NCBI Gene, and UniProt URLs.
+Ensembl, OMIM, NCBI Gene, and UniProt URLs. Section-level provenance is exposed
+under `_meta.section_sources`.
 
 ## Top-level commands
 
 ```text
 biomcp search ...
 biomcp get ...
+biomcp discover <query>
 biomcp enrich <GENE1,GENE2,...> [--limit N]
 biomcp batch <entity> <id1,id2,...> [--sections ...] [--source ...]
 biomcp chart [type]
@@ -58,12 +60,26 @@ browsable embedded catalog.
 
 ## Search command families
 
+## Discover
+
+```bash
+biomcp discover ERBB1
+biomcp discover "chest pain"
+biomcp --json discover diabetes
+```
+
+Use `discover` when the user starts with free text rather than a known entity
+type. Markdown output groups resolved concepts by type and suggests concrete
+follow-up BioMCP commands. JSON adds `_meta.discovery_sources` alongside the
+standard `_meta.next_commands` and `_meta.section_sources` metadata.
+
 ### All (cross-entity)
 
 ```bash
 biomcp search all --gene BRAF --disease melanoma
 biomcp search all --gene BRAF --counts-only
 biomcp search all --keyword "immunotherapy resistance" --since 2024-01-01
+biomcp search all --gene BRAF --debug-plan
 ```
 
 See also: [Search All Workflow](../how-to/search-all-workflow.md)
@@ -104,6 +120,7 @@ biomcp search gwas --trait "type 2 diabetes" --limit 10
 
 ```bash
 biomcp search article -g BRAF -d melanoma --since 2024-01-01 --limit 5 --offset 0
+biomcp --json search article -g BRAF --debug-plan --limit 5
 ```
 
 ### Trial
@@ -128,6 +145,7 @@ biomcp search drug -q "kinase inhibitor" --limit 5 --offset 0
 
 ```bash
 biomcp search pathway -q "MAPK signaling" --limit 5 --offset 0
+biomcp search pathway -q "Pathways in cancer" --limit 5 --offset 0
 ```
 
 ### Protein
@@ -152,7 +170,7 @@ biomcp search adverse-event --type device --product-code PQP --limit 5
 ```bash
 biomcp get gene BRAF
 biomcp get gene BRAF pathways ontology diseases protein
-biomcp get gene BRAF go interactions civic expression druggability clingen
+biomcp get gene BRAF go interactions civic expression hpa druggability clingen constraint
 biomcp get gene BRAF all
 ```
 
@@ -180,11 +198,15 @@ biomcp get pgx warfarin annotations
 biomcp get article 22663011
 biomcp get article 22663011 fulltext
 biomcp get article 22663011 tldr
+biomcp article batch 22663011 24200969
 ```
 
 `S2_API_KEY` is optional. It unlocks `get article ... tldr` plus the explicit
-`article citations|references|recommendations` helpers; `search article`
-remains PubTator3 + Europe PMC.
+`article citations|references|recommendations` helpers. `search article`
+remains PubTator3 + Europe PMC, and can add an optional Semantic Scholar leg
+when the key is present and the filter set is compatible. `article batch`
+stays available without the key and adds optional TLDR/citation metadata when
+Semantic Scholar is configured.
 
 ### Trial
 
@@ -213,6 +235,8 @@ biomcp get drug carboplatin shortage
 ```bash
 biomcp get pathway R-HSA-5673001
 biomcp get pathway R-HSA-5673001 genes
+biomcp get pathway hsa05200
+biomcp get pathway hsa05200 genes
 ```
 
 ### Protein
@@ -220,6 +244,7 @@ biomcp get pathway R-HSA-5673001 genes
 ```bash
 biomcp get protein P15056
 biomcp get protein P15056 domains interactions
+biomcp get protein P15056 complexes
 ```
 
 ### Adverse event
@@ -274,6 +299,7 @@ biomcp gene drugs BRAF
 biomcp gene articles BRCA1
 biomcp gene pathways BRAF
 biomcp pathway drugs R-HSA-5673001
+biomcp pathway drugs hsa05200
 biomcp pathway articles R-HSA-5673001
 biomcp pathway trials R-HSA-5673001
 biomcp protein structures P15056

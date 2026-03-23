@@ -14,11 +14,21 @@ OPENFDA_SPEC_NODEIDS = {
 }
 
 S2_SPEC_NODEIDS = {
+    "spec/06-article.md::Article Search JSON With Semantic Scholar Key",
     "spec/06-article.md::Semantic Scholar TLDR Section",
     "spec/06-article.md::Semantic Scholar Citations",
     "spec/06-article.md::Semantic Scholar References",
     "spec/06-article.md::Semantic Scholar Recommendations (Single Seed)",
     "spec/06-article.md::Semantic Scholar Recommendations (Multi Seed)",
+}
+
+DISGENET_SPEC_NODEIDS = {
+    "spec/02-gene.md::Gene DisGeNET Associations",
+    "spec/07-disease.md::Disease DisGeNET Associations",
+}
+
+UMLS_SPEC_NODEIDS = {
+    "spec/19-discover.md::UMLS Crosswalks",
 }
 
 
@@ -28,6 +38,14 @@ def _has_openfda_api_key() -> bool:
 
 def _has_s2_api_key() -> bool:
     return bool(os.environ.get("S2_API_KEY", "").strip())
+
+
+def _has_disgenet_api_key() -> bool:
+    return bool(os.environ.get("DISGENET_API_KEY", "").strip())
+
+
+def _has_umls_api_key() -> bool:
+    return bool(os.environ.get("UMLS_API_KEY", "").strip())
 
 
 def pytest_collection_modifyitems(
@@ -51,6 +69,20 @@ def pytest_collection_modifyitems(
             )
         )
 
+    disgenet_skip = None
+    if not _has_disgenet_api_key():
+        disgenet_skip = pytest.mark.skip(
+            reason=(
+                "requires DISGENET_API_KEY for DisGeNET scored association live-spec coverage"
+            )
+        )
+
+    umls_skip = None
+    if not _has_umls_api_key():
+        umls_skip = pytest.mark.skip(
+            reason="requires UMLS_API_KEY for discover crosswalk live-spec coverage"
+        )
+
     for item in items:
         if openfda_skip and any(
             item.nodeid.startswith(nodeid) for nodeid in OPENFDA_SPEC_NODEIDS
@@ -58,3 +90,9 @@ def pytest_collection_modifyitems(
             item.add_marker(openfda_skip)
         if s2_skip and any(item.nodeid.startswith(nodeid) for nodeid in S2_SPEC_NODEIDS):
             item.add_marker(s2_skip)
+        if disgenet_skip and any(
+            item.nodeid.startswith(nodeid) for nodeid in DISGENET_SPEC_NODEIDS
+        ):
+            item.add_marker(disgenet_skip)
+        if umls_skip and any(item.nodeid.startswith(nodeid) for nodeid in UMLS_SPEC_NODEIDS):
+            item.add_marker(umls_skip)

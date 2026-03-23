@@ -51,3 +51,64 @@ out="$(biomcp search all -k "checkpoint inhibitor" --limit 3)"
 echo "$out" | mustmatch like "# Search All: keyword=checkpoint inhibitor"
 echo "$out" | mustmatch like "## Articles"
 ```
+
+## JSON Search All Preserves Article Metadata
+
+The article section in `search all` should reuse the stabilized article search
+pipeline rather than flattening away row-level source and ranking metadata.
+
+```bash
+out="$(biomcp --json search all -g BRAF --limit 3)"
+echo "$out" | mustmatch like "\"entity\": \"article\""
+echo "$out" | mustmatch like "\"source\":"
+echo "$out" | mustmatch like "\"ranking\": {"
+```
+
+## Debug Plan
+
+`search all` should expose the executed typed legs and routing markers only when
+explicitly requested.
+
+```bash
+out="$(biomcp search all -g BRAF --debug-plan --limit 3)"
+echo "$out" | mustmatch like "## Debug plan"
+echo "$out" | mustmatch like "\"surface\": \"search_all\""
+echo "$out" | mustmatch like "\"anchor\": \"gene\""
+echo "$out" | mustmatch like "\"anchor=gene\""
+
+json_out="$(biomcp --json search all -g BRAF --debug-plan --limit 3)"
+echo "$json_out" | mustmatch like "\"debug_plan\": {"
+echo "$json_out" | mustmatch like "\"surface\": \"search_all\""
+echo "$json_out" | mustmatch like "\"anchor\": \"gene\""
+echo "$json_out" | mustmatch like "\"legs\": ["
+```
+
+## Shared Disease And Keyword Token
+
+When the same normalized token appears in both `--disease` and `--keyword`,
+`search all` should keep the disease leg typed, keep the article orientation
+leg keyword-driven, and avoid duplicated follow-up commands.
+
+```bash
+out="$(biomcp search all -d cancer -k cancer --debug-plan --counts-only)"
+echo "$out" | mustmatch like "## Debug plan"
+echo "$out" | mustmatch like "fallback=shared_disease_keyword_orientation"
+echo "$out" | mustmatch like "\"filters\": ["
+echo "$out" | mustmatch like "\"keyword=cancer\""
+echo "$out" | mustmatch not like "cancer cancer"
+echo "$out" | mustmatch not like "--disease cancer --keyword cancer"
+```
+
+## Distinct Disease And Keyword Stay Separate
+
+Distinct disease and keyword inputs may stay combined on the article leg, but
+they should not be cross-routed into typed trial queries.
+
+```bash
+out="$(biomcp search all -d melanoma -k BRAF --debug-plan --counts-only)"
+echo "$out" | mustmatch like "## Debug plan"
+echo "$out" | mustmatch like "--disease melanoma --keyword BRAF"
+echo "$out" | mustmatch like "\"condition=melanoma\""
+echo "$out" | mustmatch not like "condition=melanoma BRAF"
+echo "$out" | mustmatch not like "fallback=shared_disease_keyword_orientation"
+```

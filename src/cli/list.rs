@@ -20,11 +20,12 @@ pub fn render(entity: Option<&str>) -> Result<String, BioMcpError> {
             "study" => Ok(list_study()),
             "adverse-event" | "adverse_event" | "adverseevent" => Ok(list_adverse_event()),
             "search-all" | "search_all" | "searchall" => Ok(list_search_all()),
+            "discover" => Ok(list_discover()),
             "batch" => Ok(list_batch()),
             "enrich" => Ok(list_enrich()),
             "skill" | "skills" => Ok(crate::cli::skill::list_use_cases()?),
             other => Err(BioMcpError::InvalidArgument(format!(
-                "Unknown entity: {other}\n\nValid entities:\n- gene\n- variant\n- article\n- trial\n- drug\n- disease\n- phenotype\n- pgx\n- gwas\n- pathway\n- protein\n- study\n- adverse-event\n- search-all\n- batch\n- enrich\n- skill"
+                "Unknown entity: {other}\n\nValid entities:\n- gene\n- variant\n- article\n- trial\n- drug\n- disease\n- phenotype\n- pgx\n- gwas\n- pathway\n- protein\n- study\n- adverse-event\n- search-all\n- discover\n- batch\n- enrich\n- skill"
             ))),
         },
     }
@@ -47,6 +48,17 @@ fn list_all() -> String {
     out
 }
 
+fn list_discover() -> String {
+    r#"# discover
+
+## Commands
+
+- `discover <query>` - resolve free-text biomedical text into typed concepts and suggested BioMCP follow-up commands
+- `--json discover <query>` - emit structured concepts plus discover-specific `_meta` metadata for agents
+"#
+    .to_string()
+}
+
 fn list_gene() -> String {
     r#"# gene
 
@@ -61,8 +73,11 @@ fn list_gene() -> String {
 - `get gene <symbol> interactions` - STRING interactions
 - `get gene <symbol> civic` - CIViC evidence/assertion summary
 - `get gene <symbol> expression` - GTEx tissue expression summary
-- `get gene <symbol> druggability` - DGIdb target categories/interactions
+- `get gene <symbol> hpa` - Human Protein Atlas protein tissue expression + localization
+- `get gene <symbol> druggability` - DGIdb interactions plus OpenTargets tractability/safety
 - `get gene <symbol> clingen` - ClinGen validity + dosage sensitivity
+- `get gene <symbol> constraint` - gnomAD gene constraint (pLI, LOEUF, mis_z, syn_z)
+- `get gene <symbol> disgenet` - DisGeNET scored gene-disease associations (requires `DISGENET_API_KEY`)
 - `get gene <symbol> all` - include every section
 - `gene definition <symbol>` - same card as `get gene <symbol>`
 - `gene get <symbol>` - alias for `gene definition <symbol>`
@@ -144,7 +159,7 @@ fn list_variant() -> String {
 Supported formats:
 - rsID: `rs113488022`
 - HGVS genomic: `chr7:g.140453136A>T`
-- Gene + protein: `BRAF V600E`
+- Gene + protein: `BRAF V600E`, `BRAF p.Val600Glu`
 
 ## Helpers
 
@@ -172,6 +187,7 @@ fn list_article() -> String {
 - `get article <id> fulltext` - download/cache full text
 - `get article <id> all` - include all article sections
 - `article entities <pmid> --limit <N>` - annotated entities with next commands
+- `article batch <id> [<id>...]` - compact multi-article summary cards
 - `article citations <id> --limit <N>` - citation graph with contexts/intents (`S2_API_KEY`)
 - `article references <id> --limit <N>` - reference graph with contexts/intents (`S2_API_KEY`)
 - `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` - related papers (`S2_API_KEY`)
@@ -192,13 +208,15 @@ fn list_article() -> String {
 - `search article --include-retracted`
 - `search article --sort <date|citations|relevance>`
 - `search article --source <all|pubtator|europepmc>`
+- `search article --debug-plan` - include executed planner/routing metadata in markdown or JSON
 - `search article ... --limit <N> --offset <N>`
 
 ## Notes
 
 - Set `NCBI_API_KEY` to increase throughput for NCBI-backed article enrichment.
-- Set `S2_API_KEY` to unlock optional Semantic Scholar TLDR, citation graph, and recommendation helpers.
-- `search article` remains PubTator3 + Europe PMC only; Semantic Scholar is enrichment/navigation, not search fan-out.
+- Set `S2_API_KEY` to unlock optional Semantic Scholar search fan-out plus TLDR, citation graph, and recommendation helpers.
+- `search article` still keeps `--source <all|pubtator|europepmc>` in v1; Semantic Scholar is automatic when the key is present and the filter set is compatible.
+- Default `search article --sort relevance` is directness-first rather than citation-first.
 "#
     .to_string()
 }
@@ -285,14 +303,15 @@ fn list_disease() -> String {
 
 ## Commands
 
-- `get disease <name_or_id>` - resolve MONDO/DOID or best match by name
-- `get disease <name_or_id> genes` - Monarch associations augmented with CIViC drivers
+- `get disease <name_or_id>` - resolve MONDO/DOID or best match by name with OpenTargets gene scores
+- `get disease <name_or_id> genes` - Monarch associations augmented with CIViC drivers and OpenTargets scores
 - `get disease <name_or_id> pathways` - Reactome pathways from associated genes
 - `get disease <name_or_id> phenotypes` - HPO phenotypes with resolved names
 - `get disease <name_or_id> variants` - CIViC disease-associated molecular profiles
 - `get disease <name_or_id> models` - Monarch model-organism evidence
 - `get disease <name_or_id> prevalence` - OpenTargets prevalence-like evidence
 - `get disease <name_or_id> civic` - CIViC disease-context evidence
+- `get disease <name_or_id> disgenet` - DisGeNET scored disease-gene associations (requires `DISGENET_API_KEY`)
 - `get disease <name_or_id> all` - include all disease sections
 - `search disease <query>` - positional search by name
 - `search disease -q <query>` - search by name
@@ -466,6 +485,7 @@ fn list_search_all() -> String {
 - `--since <YYYY|YYYY-MM|YYYY-MM-DD>` - applies to date-capable sections
 - `--limit <N>` - rows per section (default: 3)
 - `--counts-only` - section counts without row tables
+- `--debug-plan` - include executed leg/routing metadata in markdown or JSON
 - `--json` - machine-readable sections + links contract
 
 ## Notes
@@ -491,16 +511,16 @@ fn list_pathway() -> String {
 
 ## Commands
 
-- `search pathway <query>` - positional pathway search (Reactome)
-- `search pathway -q <query>` - pathway search (Reactome)
+- `search pathway <query>` - positional pathway search (Reactome + KEGG)
+- `search pathway -q <query>` - pathway search (Reactome + KEGG)
 - `search pathway -q <query> --type pathway`
 - `search pathway --top-level`
 - `search pathway -q <query> --limit <N> --offset <N>`
 - `get pathway <id>` - base pathway card
 - `get pathway <id> genes` - pathway participant genes
-- `get pathway <id> events` - contained events
-- `get pathway <id> enrichment` - g:Profiler enrichment from pathway genes
-- `get pathway <id> all` - include all sections
+- `get pathway <id> events` - contained events (Reactome only)
+- `get pathway <id> enrichment` - g:Profiler enrichment from pathway genes (Reactome only)
+- `get pathway <id> all` - include all sections supported by that pathway source
 
 ## Search filters
 
@@ -519,7 +539,8 @@ fn list_pathway() -> String {
 ## Workflow examples
 
 - To find pathways for an altered gene, run `biomcp search pathway "<gene or process>" --limit 5`.
-- To inspect pathway composition, run `biomcp get pathway <id> genes events`.
+- To inspect pathway composition, run `biomcp get pathway <id> genes`.
+- For Reactome pathways, events are also available: `biomcp get pathway R-HSA-5673001 events`.
 - To pivot to clinical context, run `biomcp pathway trials <id>` and `biomcp pathway articles <id>`.
 "#
     .to_string()
@@ -580,6 +601,7 @@ fn list_protein() -> String {
 - `get protein <accession_or_symbol>` - base protein card
 - `get protein <accession> domains` - InterPro domains
 - `get protein <accession> interactions` - STRING interactions
+- `get protein <accession> complexes` - ComplexPortal protein complexes
 - `get protein <accession> structures` - structure IDs (PDB/AlphaFold)
 - `get protein <accession> all` - include all sections
 
@@ -601,6 +623,7 @@ fn list_protein() -> String {
 ## Workflow examples
 
 - To find a target protein from a gene symbol, run `biomcp search protein BRAF --limit 5`.
+- To inspect complex membership, run `biomcp get protein <accession> complexes`.
 - To inspect structural context, run `biomcp get protein <accession> structures`.
 - To continue result browsing, run `biomcp search protein <query> --limit <N> --offset <N>`.
 "#
@@ -641,8 +664,17 @@ mod tests {
         let out = render(None).expect("list root should render");
         assert!(out.contains("## Quickstart"));
         assert!(out.contains("`skill install` - install BioMCP skill guidance to your agent"));
+        assert!(out.contains("`discover <query>`"));
         assert!(!out.contains("`skill list`"));
         assert!(!out.contains("Run `biomcp skill list` to browse all skills."));
+    }
+
+    #[test]
+    fn list_discover_page_exists() {
+        let out = render(Some("discover")).expect("list discover should render");
+        assert!(out.contains("# discover"));
+        assert!(out.contains("discover <query>"));
+        assert!(out.contains("--json discover <query>"));
     }
 
     #[test]
@@ -707,8 +739,17 @@ mod tests {
     fn list_gene_mentions_new_gene_sections() {
         let out = list_gene();
         assert!(out.contains("get gene <symbol> expression"));
+        assert!(out.contains("get gene <symbol> hpa"));
         assert!(out.contains("get gene <symbol> druggability"));
         assert!(out.contains("get gene <symbol> clingen"));
+        assert!(out.contains("get gene <symbol> constraint"));
+        assert!(out.contains("get gene <symbol> disgenet"));
+    }
+
+    #[test]
+    fn list_disease_mentions_disgenet_section() {
+        let out = render(Some("disease")).expect("list disease should render");
+        assert!(out.contains("get disease <name_or_id> disgenet"));
     }
 
     #[test]
@@ -718,6 +759,21 @@ mod tests {
 
         let article = render(Some("article")).expect("list article should render");
         assert!(article.contains("--since <YYYY-MM-DD>"));
+        assert!(article.contains("article batch <id> [<id>...]"));
+    }
+
+    #[test]
+    fn list_pathway_describes_source_aware_sections() {
+        let out = render(Some("pathway")).expect("list pathway should render");
+        assert!(out.contains("get pathway <id> events` - contained events (Reactome only)"));
+        assert!(out.contains(
+            "get pathway <id> enrichment` - g:Profiler enrichment from pathway genes (Reactome only)"
+        ));
+        assert!(out.contains(
+            "get pathway <id> all` - include all sections supported by that pathway source"
+        ));
+        assert!(out.contains("biomcp get pathway <id> genes"));
+        assert!(out.contains("Reactome pathways, events are also available"));
     }
 
     #[test]
@@ -739,5 +795,6 @@ mod tests {
         assert!(msg.contains("- enrich"));
         assert!(msg.contains("- batch"));
         assert!(msg.contains("- study"));
+        assert!(msg.contains("- discover"));
     }
 }

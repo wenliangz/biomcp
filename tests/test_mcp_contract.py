@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -7,6 +11,14 @@ from mcp import types
 from mcp.shared.exceptions import McpError
 
 EXPECTED_HELP_RESOURCE = ("biomcp://help", "BioMCP Overview")
+
+
+def _mime_type(content: object) -> str | None:
+    return getattr(content, "mimeType", getattr(content, "mime_type", None))
+
+
+def _is_error(result: object) -> bool | None:
+    return getattr(result, "isError", getattr(result, "is_error", None))
 
 
 @pytest.mark.asyncio
@@ -28,7 +40,16 @@ async def test_list_tools_includes_biomcp(mcp_session_factory) -> None:
         result = await session.list_tools()
         names = {tool.name for tool in result.tools}
         assert "biomcp" in names
-        assert 'shell' not in names
+        assert "shell" not in names
+
+        biomcp = next(tool for tool in result.tools if tool.name == "biomcp")
+        annotations = biomcp.annotations
+        assert annotations is not None
+        assert getattr(annotations, "title", None) == "BioMCP"
+        read_only = getattr(annotations, "readOnlyHint", None)
+        if read_only is None:
+            read_only = getattr(annotations, "read_only_hint", None)
+        assert read_only is True
 
 
 @pytest.mark.asyncio
@@ -105,3 +126,119 @@ async def test_invalid_resource_uri_returns_mcp_error(
 
         assert exc_info.value.error.code == -32002
         assert "Unknown resource:" in exc_info.value.error.message
+
+
+@pytest.mark.asyncio
+async def test_charted_study_call_returns_text_then_svg_image(
+    mcp_session_factory,
+    study_fixture_env,
+) -> None:
+    async with mcp_session_factory(study_fixture_env) as (session, _initialize_result):
+        result = await session.call_tool(
+            "biomcp",
+            arguments={
+                "command": (
+                    "biomcp study query --study msk_impact_2017 --gene TP53 "
+                    "--type mutations --chart bar"
+                )
+            },
+        )
+
+    assert _is_error(result) is False
+    assert len(result.content) == 2
+    assert isinstance(result.content[0], types.TextContent)
+    assert isinstance(result.content[1], types.ImageContent)
+
+    text = result.content[0].text
+    assert "# Study Mutation Frequency: TP53 (msk_impact_2017)" in text
+
+    image = result.content[1]
+    assert _mime_type(image) == "image/svg+xml"
+    svg = base64.b64decode(image.data).decode("utf-8")
+    stripped = svg.lstrip()
+    assert stripped.startswith("<svg") or stripped.startswith("<?xml")
+    assert "<svg" in svg
+
+
+@pytest.mark.asyncio
+async def test_charted_study_call_rejects_output_file_in_mcp_mode(
+    mcp_session_factory,
+    study_fixture_env,
+) -> None:
+    async with mcp_session_factory(study_fixture_env) as (session, _initialize_result):
+        result = await session.call_tool(
+            "biomcp",
+            arguments={
+                "command": (
+                    "biomcp study query --study msk_impact_2017 --gene TP53 "
+                    "--type mutations --chart bar --output out.svg"
+                )
+            },
+        )
+
+    assert _is_error(result) is True
+    assert result.content
+    assert isinstance(result.content[0], types.TextContent)
+    assert "MCP chart responses do not support --output" in result.content[0].text
+
+
+class _Ols4StubHandler(BaseHTTPRequestHandler):
+    """Minimal OLS4 stub returning a single HGNC hit for any query."""
+
+    _RESPONSE = json.dumps({
+        "response": {
+            "numFound": 1,
+            "start": 0,
+            "docs": [
+                {
+                    "iri": "http://identifiers.org/hgnc/1100",
+                    "ontology_name": "hgnc",
+                    "ontology_prefix": "HGNC",
+                    "short_form": "HGNC_1100",
+                    "obo_id": "HGNC:1100",
+                    "label": "BRCA1",
+                    "description": ["BRCA1 DNA repair associated"],
+                    "type": "class",
+                    "is_defining_ontology": True,
+                }
+            ],
+        }
+    }).encode()
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(self._RESPONSE)
+
+    def log_message(self, *_args: object) -> None:
+        pass
+
+
+@pytest.fixture()
+def ols4_stub() -> str:
+    """Start a local OLS4 stub and return its base URL."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Ols4StubHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{port}"
+    server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_discover_command_is_allowed_via_mcp(
+    mcp_session_factory, ols4_stub
+) -> None:
+    async with mcp_session_factory(
+        extra_env={"BIOMCP_OLS4_BASE": ols4_stub, "UMLS_API_KEY": ""}
+    ) as (session, _initialize_result):
+        result = await session.call_tool(
+            "biomcp",
+            arguments={"command": "biomcp discover BRCA1"},
+        )
+
+    assert _is_error(result) is False
+    assert result.content
+    assert isinstance(result.content[0], types.TextContent)
+    assert "BRCA1" in result.content[0].text

@@ -1,6 +1,6 @@
 [package]
 name = "biomcp-cli"
-version = "0.8.16"
+version = "0.8.17"
 edition = "2024"
 description = "Biomedical CLI and MCP server — genes, variants, trials, articles, drugs, diseases, pathways, proteins, adverse events, PGx"
 homepage = "https://biomcp.org"
@@ -46,6 +46,7 @@ zstd = "0.13"
 # JSON
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 
 # Hashing (download cache keys)
 md5 = "0.7"
@@ -53,6 +54,7 @@ md5 = "0.7"
 # Parsing
 regex = "1"
 csv = "1"
+roxmltree = "0.20"
 
 # MCP
 rmcp = { version = "1.1.1", features = ["server", "transport-io", "transport-streamable-http-server"] }

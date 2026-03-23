@@ -166,6 +166,49 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`" in ux
 
 
+def test_source_integration_architecture_doc_captures_repo_contract() -> None:
+    technical = _read_repo("design/technical/overview.md")
+    source_integration = _read_repo("design/technical/source-integration.md")
+
+    assert "source-integration.md" in technical
+    assert "# BioMCP Source Integration Architecture" in source_integration
+    assert "## New Source vs Existing Source" in source_integration
+    assert "`src/sources/<source>.rs`" in source_integration
+    assert "`src/sources/mod.rs`" in source_integration
+    assert "`shared_client()`" in source_integration
+    assert "`streaming_http_client()`" in source_integration
+    assert "`env_base(default, ENV_VAR)`" in source_integration
+    assert "`read_limited_body()`" in source_integration
+    assert "`body_excerpt()`" in source_integration
+    assert "`retry_send()`" in source_integration
+    assert "## Section-First Entity Integration" in source_integration
+    assert "`src/cli/mod.rs`" in source_integration
+    assert "`src/cli/list.rs`" in source_integration
+    assert "`docs/user-guide/cli-reference.md`" in source_integration
+    assert "default `get` output stays concise" in source_integration
+    assert "## Provenance and Rendering" in source_integration
+    assert "`source_label`" in source_integration
+    assert "source-specific notes" in source_integration
+    assert "## Auth, Cache, and Secrets" in source_integration
+    assert "`BioMcpError::ApiKeyRequired`" in source_integration
+    assert "`apply_cache_mode_with_auth(..., true)`" in source_integration
+    assert "`docs/getting-started/api-keys.md`" in source_integration
+    assert "`docs/reference/data-sources.md`" in source_integration
+    assert "Do not log secrets" in source_integration
+    assert "## Graceful Degradation and Timeouts" in source_integration
+    assert "Optional enrichments must not take down the whole command" in source_integration
+    assert "truthful about missing or unavailable data" in source_integration
+    assert "## Rate Limits and Operational Constraints" in source_integration
+    assert "`biomcp serve-http`" in source_integration
+    assert "process-local" in source_integration
+    assert "## Source Addition Checklist" in source_integration
+    assert "`docs/reference/source-versioning.md`" in source_integration
+    assert "`src/cli/health.rs`" in source_integration
+    assert "`scripts/contract-smoke.sh`" in source_integration
+    assert "`spec/`" in source_integration
+    assert "`CHANGELOG.md`" in source_integration
+
+
 def test_pull_request_contract_gate_matches_release_validation() -> None:
     ci = _read_repo(".github/workflows/ci.yml")
     release = _read_repo(".github/workflows/release.yml")
@@ -257,7 +300,7 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
 def test_makefile_spec_split_contract_is_documented_and_executable() -> None:
     makefile = _read_repo("Makefile")
 
-    assert ".PHONY: build test lint check run clean spec spec-pr validate-skills test-contracts" in makefile
+    assert ".PHONY: build test lint check run clean spec spec-pr validate-skills test-contracts install" in makefile
     assert "Volatile live-network spec headings." in makefile
     assert "PR gate: repo-local checks plus live-backed headings that have been stable" in makefile
     assert "Smoke lane: `search article`, `gene articles`, `variant articles`," in makefile
@@ -272,6 +315,14 @@ def test_makefile_spec_split_contract_is_documented_and_executable() -> None:
         'spec/07-disease.md::Disease to Articles',
     ):
         assert f'--deselect "{node_id}"' in makefile
+    assert re.search(
+        r'^install:\n'
+        r'\tmkdir -p "\$\(HOME\)/\.local/bin"\n'
+        r"\tcargo build --release --locked\n"
+        r'\tinstall -m 755 target/release/biomcp "\$\(HOME\)/\.local/bin/biomcp"$',
+        makefile,
+        flags=re.MULTILINE,
+    )
     assert re.search(
         r"^spec-pr:\n\tXDG_CACHE_HOME=\"\$\(CURDIR\)/\.cache\" PATH=\"\$\(CURDIR\)/target/release:\$\(PATH\)\" \\\n\t\tuv run --extra dev sh -c 'PATH=\"\$\(CURDIR\)/target/release:\$\$PATH\" pytest spec/ --mustmatch-lang bash --mustmatch-timeout 60 -v \$\(SPEC_PR_DESELECT_ARGS\)'$",
         makefile,

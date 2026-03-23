@@ -30,9 +30,15 @@ biomcp search drug --indication melanoma --limit 5
 biomcp get drug pembrolizumab
 ```
 
-Default output provides concise identity and mechanism context.
+Default output provides concise identity and mechanism context. Approval-bearing
+JSON now includes additive `approval_date_raw`, `approval_date_display`, and
+`approval_summary` fields, while markdown renders the human-friendly display
+date in the base card.
 
 ## Request drug sections
+
+Supported sections: `label`, `shortage`, `targets`, `indications`,
+`interactions`, `civic`, `approvals`, `all`.
 
 FDA label section:
 

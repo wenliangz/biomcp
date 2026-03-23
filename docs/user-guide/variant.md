@@ -9,7 +9,10 @@ BioMCP supports multiple input forms:
 
 - rsID: `rs113488022`
 - HGVS genomic: `chr7:g.140453136A>T`
-- gene-protein form: `BRAF V600E`
+- gene-protein form: `BRAF V600E`, `BRAF p.Val600Glu`
+
+These exact formats are accepted by `biomcp get variant` and the exact-ID
+helper commands.
 
 ## Get a variant record
 
@@ -17,9 +20,13 @@ BioMCP supports multiple input forms:
 biomcp get variant rs113488022
 biomcp get variant "chr7:g.140453136A>T"
 biomcp get variant "BRAF V600E"
+biomcp get variant "BRAF p.Val600Glu"
 ```
 
 The default output favors concise, clinically relevant context first.
+
+Shorthand such as `PTPN22 620W` or `R620W` is not treated as an exact variant
+ID. Use `biomcp search variant` for those inputs.
 
 ## Request variant sections
 
@@ -35,11 +42,18 @@ ClinVar-focused section:
 biomcp get variant rs113488022 clinvar
 ```
 
+ClinVar JSON also exposes `top_disease` when condition aggregation is available,
+reusing the highest-ranked ClinVar condition row already shown in the section.
+
 Population section:
 
 ```bash
 biomcp get variant "chr7:g.140453136A>T" population
 ```
+
+Population JSON exposes additive compact frequency fields:
+`allele_frequency_raw` and `allele_frequency_percent`. Markdown keeps the raw
+gnomAD AF line and appends the compact percent inline.
 
 CIViC section:
 
@@ -52,6 +66,10 @@ GWAS section (trait associations from GWAS Catalog):
 ```bash
 biomcp get variant rs7903146 gwas
 ```
+
+GWAS JSON exposes `supporting_pmids` as an ordered, deduplicated array. `null`
+means the GWAS section was not loaded; `[]` means the section loaded but no
+PMIDs were available.
 
 Predictions (aggregated prediction scores):
 
@@ -103,7 +121,24 @@ By gene and protein change:
 
 ```bash
 biomcp search variant -g BRAF --hgvsp V600E --limit 5
+biomcp search variant -g BRAF --hgvsp p.Val600Glu --limit 5
+biomcp search variant BRAF p.Val600Glu --limit 5
 ```
+
+By residue alias shorthand:
+
+```bash
+biomcp search variant "PTPN22 620W" --limit 5
+```
+
+By protein shorthand when gene context is already supplied:
+
+```bash
+biomcp search variant -g PTPN22 R620W --limit 5
+```
+
+Standalone protein shorthand like `R620W` returns variant-specific recovery
+guidance instead of falling back to gene or condition discovery.
 
 By significance:
 

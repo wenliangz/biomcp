@@ -75,7 +75,7 @@ uv tool install biomcp-cli
 biomcp health --apis-only
 biomcp list gene
 biomcp search all --gene BRAF --disease melanoma  # unified cross-entity discovery
-biomcp get gene BRAF pathways druggability
+biomcp get gene BRAF pathways hpa
 ```
 
 ## Command grammar
@@ -91,7 +91,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 
 ## Feature highlights
 
-- **Federated article search:** `search article` fans out across PubTator3 and Europe PMC, deduplicates by PMID, and can add Semantic Scholar follow-ups when `S2_API_KEY` is set.
+- **Federated article search:** `search article` fans out across PubTator3 and Europe PMC, optionally adds a Semantic Scholar search leg when `S2_API_KEY` is set, merges identifiers across PMID/PMCID/DOI, and ranks relevance directness-first.
 - **Cross-entity pivots:** move directly from a gene, variant, drug, disease, pathway, protein, or article into the next built-in view.
 - **Study analytics and charting:** downloaded studies support query, cohort, survival, compare, and co-occurrence workflows with native terminal or SVG charts.
 - **Citation graphs and article helpers:** `article citations`, `article references`, `article recommendations`, and `article entities` support literature navigation from a known paper.
@@ -101,14 +101,14 @@ search all [slot filters]    → counts-first cross-entity orientation
 
 | Entity | Upstream providers used by BioMCP | Example |
 |--------|-----------------------------------|---------|
-| gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, GTEx, DGIdb, ClinGen | `biomcp get gene BRAF pathways` |
+| gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, GTEx, Human Protein Atlas, DGIdb, ClinGen | `biomcp get gene BRAF pathways hpa` |
 | variant | MyVariant.info, ClinVar, gnomAD fields via MyVariant, CIViC, Cancer Genome Interpreter, OncoKB, cBioPortal, GWAS Catalog, AlphaGenome | `biomcp get variant "BRAF V600E" clinvar` |
 | article | PubMed, PubTator3, Europe PMC, PMC OA, NCBI ID Converter, Semantic Scholar (optional with `S2_API_KEY`) | `biomcp search article -g BRAF --limit 5` |
 | trial | ClinicalTrials.gov API v2, NCI CTS API | `biomcp search trial -c melanoma -s recruiting` |
 | drug | MyChem.info, ChEMBL, OpenTargets, Drugs@FDA, OpenFDA, CIViC | `biomcp get drug pembrolizumab targets` |
 | disease | MyDisease.info, Monarch Initiative, MONDO, OpenTargets, Reactome, CIViC | `biomcp get disease "Lynch syndrome" genes` |
-| pathway | Reactome, g:Profiler, Enrichr-backed enrichment sections | `biomcp get pathway R-HSA-5673001 genes` |
-| protein | UniProt, InterPro, STRING, PDB, AlphaFold | `biomcp get protein P15056 domains` |
+| pathway | Reactome, KEGG, g:Profiler, Enrichr-backed enrichment sections | `biomcp get pathway hsa05200 genes` |
+| protein | UniProt, InterPro, STRING, ComplexPortal, PDB, AlphaFold | `biomcp get protein P15056 complexes` |
 | adverse-event | OpenFDA FAERS, MAUDE, Recalls | `biomcp search adverse-event --drug pembrolizumab` |
 | pgx | CPIC, PharmGKB | `biomcp get pgx CYP2D6 recommendations` |
 | gwas | GWAS Catalog | `biomcp search gwas --trait "type 2 diabetes"` |
@@ -134,6 +134,7 @@ biomcp gene drugs BRAF
 biomcp gene articles BRCA1
 biomcp gene pathways BRAF
 biomcp pathway drugs R-HSA-5673001
+biomcp pathway drugs hsa05200
 biomcp pathway articles R-HSA-5673001
 biomcp pathway trials R-HSA-5673001
 biomcp protein structures P15056
@@ -159,6 +160,7 @@ Every `get` command supports selectable sections for focused output:
 ```bash
 biomcp get gene BRAF                    # summary card
 biomcp get gene BRAF pathways           # add pathway section
+biomcp get gene BRAF hpa                # protein tissue expression + localization
 biomcp get gene BRAF civic interactions # multiple sections
 biomcp get gene BRAF all                # everything
 
@@ -170,8 +172,8 @@ biomcp get trial NCT02576665 eligibility locations outcomes
 ```
 
 In JSON mode, `get` responses expose `_meta.next_commands` for the next likely
-follow-ups, and `batch ... --json` returns per-entity objects with the same
-metadata shape.
+follow-ups and `_meta.section_sources` for section-level provenance. `batch ...
+--json` returns per-entity objects with the same metadata shape.
 
 ## API keys
 
@@ -180,15 +182,17 @@ unlock optional enrichments:
 
 ```bash
 export NCBI_API_KEY="..."        # PubTator, PMC OA, NCBI ID converter
-export S2_API_KEY="..."          # Semantic Scholar TLDR, citations, references, recommendations
+export S2_API_KEY="..."          # Semantic Scholar search leg, TLDR, citations, references, recommendations
 export OPENFDA_API_KEY="..."     # OpenFDA rate limits
 export NCI_API_KEY="..."         # NCI CTS trial search (--source nci)
 export ONCOKB_TOKEN="..."        # OncoKB variant helper
 export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction
 ```
 
-`search article` still uses PubTator3 + Europe PMC. `S2_API_KEY` only unlocks
-optional article enrichment and explicit Semantic Scholar helper commands.
+`search article` works without `S2_API_KEY`; when the key is present it also
+fans out to Semantic Scholar and exposes ranking/support metadata in the search
+output. `--source` still remains `all|pubtator|europepmc` in v1, so the S2 leg
+is automatic rather than directly selectable.
 References and recommendations can be empty for paywalled papers because of
 publisher elision in Semantic Scholar upstream coverage.
 
@@ -256,6 +260,7 @@ Full documentation at [biomcp.org](https://biomcp.org/).
 - [Getting Started](docs/getting-started/installation.md)
 - [Search All Workflow](docs/how-to/search-all-workflow.md)
 - [Cross-Entity Pivot Guide](docs/how-to/cross-entity-pivots.md)
+- [Source Licensing and Terms](docs/reference/source-licensing.md)
 - [Data Sources](docs/reference/data-sources.md)
 - [Quick Reference](docs/reference/quick-reference.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -264,6 +269,14 @@ Full documentation at [biomcp.org](https://biomcp.org/).
 
 If you use BioMCP in research, cite it via [`CITATION.cff`](CITATION.cff).
 GitHub also exposes `Cite this repository` in the repository sidebar when that file is present.
+
+## Data Sources and Licensing
+
+BioMCP is MIT-licensed. It performs on-demand queries against upstream providers instead of vendoring or mirroring their datasets, but upstream terms govern reuse of retrieved results.
+
+Some providers are fully open, some BioMCP features require registration or API keys, and some queryable sources still impose notable reuse limits. The two biggest cautions are KEGG, which distinguishes academic and non-academic use, and COSMIC, which BioMCP keeps indirect-only because its licensing model is incompatible with a direct open integration.
+
+Use [Source Licensing and Terms](docs/reference/source-licensing.md) for the per-source breakdown and [API Keys](docs/getting-started/api-keys.md) for setup steps and registration links.
 
 ## License
 

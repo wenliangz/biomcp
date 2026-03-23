@@ -23,15 +23,21 @@ pub(crate) mod chembl;
 pub(crate) mod civic;
 pub(crate) mod clingen;
 pub(crate) mod clinicaltrials;
+pub(crate) mod complexportal;
 pub(crate) mod cpic;
 pub(crate) mod dgidb;
+pub(crate) mod disgenet;
 pub(crate) mod enrichr;
 pub(crate) mod europepmc;
+pub(crate) mod gnomad;
 pub(crate) mod gprofiler;
 pub(crate) mod gtex;
 pub(crate) mod gwas;
+pub(crate) mod hpa;
 pub(crate) mod hpo;
 pub(crate) mod interpro;
+pub(crate) mod kegg;
+pub(crate) mod medlineplus;
 pub(crate) mod monarch;
 pub(crate) mod mychem;
 pub(crate) mod mydisease;
@@ -39,6 +45,7 @@ pub(crate) mod mygene;
 pub(crate) mod myvariant;
 pub(crate) mod ncbi_idconv;
 pub(crate) mod nci_cts;
+pub(crate) mod ols4;
 pub(crate) mod oncokb;
 pub(crate) mod openfda;
 pub(crate) mod opentargets;
@@ -50,7 +57,9 @@ pub(crate) mod rate_limit;
 pub(crate) mod reactome;
 pub(crate) mod semantic_scholar;
 pub(crate) mod string;
+pub(crate) mod umls;
 pub(crate) mod uniprot;
+pub(crate) mod wikipathways;
 
 const ERROR_BODY_MAX_BYTES: usize = 2048;
 pub(crate) const DEFAULT_MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -176,6 +185,8 @@ fn retry_sleep_duration(attempt: u32, retry_after_floor: Option<Duration>) -> Du
 /// Returns a shared HTTP client with retry and caching middleware.
 ///
 /// - Retry: 3 attempts with exponential backoff for transient errors
+/// - Retry log level: `DEBUG` — retry attempts are suppressed at the default `WARN` verbosity and
+///   visible with `RUST_LOG=debug`
 /// - Cache: Disk-based HTTP cache in XDG cache directory
 /// - Cache TTL: `Cache-Control: max-stale=86400` makes “no caching headers” responses usable for 24h
 pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
@@ -214,7 +225,10 @@ pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
             manager: CACacheManager { path: cache_path },
             options: cache_options,
         }))
-        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .with(
+            RetryTransientMiddleware::new_with_policy(retry_policy)
+                .with_retry_log_level(tracing::Level::DEBUG),
+        )
         .with(rate_limit::RateLimitMiddleware::new())
         .build();
 

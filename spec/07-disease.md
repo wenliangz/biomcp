@@ -29,6 +29,7 @@ The disease detail card should resolve the query label to a normalized concept. 
 out="$(biomcp get disease melanoma)"
 echo "$out" | mustmatch like "# melanoma"
 echo "$out" | mustmatch like "ID: MONDO:0005105"
+echo "$out" | mustmatch like "OT "
 ```
 
 ## Disease Genes
@@ -38,7 +39,25 @@ Associated-gene expansion is central for translating phenotype-level queries int
 ```bash
 out="$(biomcp get disease melanoma genes)"
 echo "$out" | mustmatch like "## Associated Genes"
-echo "$out" | mustmatch like "| Gene | Relationship | Source |"
+echo "$out" | mustmatch like "| Gene | Relationship | Source | OpenTargets |"
+echo "$out" | mustmatch like "overall "
+```
+
+## Disease Top Variant Summary
+
+Variant expansions should expose the top-ranked disease-to-variant anchor directly in both JSON and markdown, while keeping the full table intact.
+
+```bash
+out="$(biomcp --json get disease melanoma variants)"
+echo "$out" | jq -e '.top_variant.variant | type == "string"' > /dev/null
+echo "$out" | jq -e '.top_variant.source | type == "string"' > /dev/null
+echo "$out" | jq -e '.top_variant.evidence_count | type == "number"' > /dev/null
+```
+
+```bash
+out="$(biomcp get disease melanoma variants)"
+echo "$out" | mustmatch like "## Variants"
+echo "$out" | mustmatch like "Top Variant:"
 ```
 
 ## Disease to Trials
@@ -79,4 +98,19 @@ Exact disease labels should be reranked to the front of the returned page even w
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search disease "colorectal cancer" --limit 10)"
 echo "$out" | mustmatch like "| ID | Name | Synonyms |"
 echo "$out" | mustmatch like "| MONDO:0024331 | colorectal carcinoma |"
+```
+
+## Disease DisGeNET Associations
+
+DisGeNET scored disease-gene associations require `DISGENET_API_KEY`. The section heading and table schema are stable invariants; individual scores and row counts vary by API tier.
+
+```bash
+out="$(biomcp get disease melanoma disgenet)"
+echo "$out" | mustmatch like "## DisGeNET"
+echo "$out" | mustmatch like "| Gene | Entrez ID | Score | PMIDs | Trials | EL | EI |"
+```
+
+```bash
+out="$(biomcp get disease melanoma disgenet --json)"
+echo "$out" | mustmatch json ".disgenet.associations | length > 0"
 ```

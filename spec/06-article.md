@@ -6,9 +6,12 @@ Article commands provide literature retrieval and annotation-focused enrichment 
 |---|---|---|
 | Gene search | `search article -g BRAF` | Confirms gene-linked literature lookup |
 | Keyword search | `search article -k immunotherapy` | Confirms free-text discovery |
+| PubTator source search | `search article --source pubtator` | Confirms default filtering still allows source-specific PubTator results |
+| Federated source preservation | `--json search article -q ...` | Confirms default filtering still preserves non-EuropePMC matches |
 | Article detail | `get article 22663011` | Confirms canonical article card output |
 | Annotation section | `get article ... annotations` | Confirms PubTator integration |
 | Entity helper | `article entities 22663011` | Confirms entity extraction pivot |
+| Batch helper | `article batch 22663011 24200969` | Confirms compact multi-article fetch |
 | Semantic Scholar detail | `get article 22663011 tldr` | Confirms optional-key enrichment section |
 | Semantic Scholar graph | `article citations|references 22663011` | Confirms citation graph pivots |
 | Semantic Scholar recommendations | `article recommendations ...` | Confirms related-paper pivots |
@@ -33,6 +36,31 @@ echo "$out" | mustmatch like "keyword=immunotherapy"
 echo "$out" | mustmatch like "PMID"
 ```
 
+## Source-Specific PubTator Search Uses Default Retraction Filter
+
+Default article search still excludes confirmed retractions, but PubTator rows
+without retraction metadata should remain eligible when the user selects the
+PubTator source directly.
+
+```bash
+out="$(biomcp search article -q 'alternative microexon splicing metastasis' --source pubtator --limit 3)"
+echo "$out" | mustmatch like "| PMID | Title |"
+echo "$out" | mustmatch not like "No articles found"
+```
+
+## Federated Search Preserves Non-EuropePMC Matches Under Default Retraction Filter
+
+JSON article search preserves the tri-state `is_retracted` contract as
+`true`, `false`, or `null`. Under the default filter, only confirmed
+retractions are excluded, so federated search can still surface PubTator or
+other non-EuropePMC matches when those sources lack retraction metadata.
+
+```bash
+out="$(biomcp --json search article -q 'alternative microexon splicing metastasis' --limit 5)"
+echo "$out" | mustmatch like "\"matched_sources\": ["
+echo "$out" | mustmatch like "\"pubtator\""
+```
+
 ## Getting Article Details
 
 The article detail card should preserve stable bibliographic anchors for reproducible referencing. We assert on PMID and journal markers.
@@ -53,6 +81,31 @@ echo "$out" | mustmatch like "## PubTator Annotations"
 echo "$out" | mustmatch like "Genes:"
 ```
 
+## Article Full Text Saved Markdown
+
+Full text remains a path-based contract on stdout. The proof needs to confirm
+that BioMCP still prints `Saved to:` while the cached file now contains
+structured Markdown from PMC/JATS instead of flattened XML.
+
+```bash
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+out="$(TMPDIR="$tmpdir" biomcp get article 27083046 fulltext)"
+echo "$out" | mustmatch like "## Full Text"
+echo "$out" | mustmatch like "Saved to:"
+path="$(printf '%s\n' "$out" | sed -n 's/^Saved to: //p' | head -n1)"
+test -n "$path"
+test -f "$path"
+saved="$(cat "$path")"
+echo "$saved" | mustmatch like "# Synaptotagmin-1 C2B domain interacts simultaneously"
+echo "$saved" | mustmatch like "## Abstract"
+echo "$saved" | mustmatch like "## Introduction"
+echo "$saved" | mustmatch like "## References"
+echo "$saved" | mustmatch like "Zhou et al., 2015"
+echo "$saved" | mustmatch not like "Creative Commons Attribution License"
+echo "$saved" | mustmatch not like "eLife Sciences Publications"
+```
+
 ## Article to Entities
 
 `article entities` exposes actionable next-command pivots by entity class. We check top-level heading and genes subsection marker.
@@ -61,6 +114,52 @@ echo "$out" | mustmatch like "Genes:"
 out="$(biomcp article entities 22663011)"
 echo "$out" | mustmatch like "# Entities in PMID 22663011"
 echo "$out" | mustmatch like "## Genes"
+```
+
+## Article Batch
+
+`article batch` returns compact numbered cards for known IDs without
+changing single-article output. The markdown contract exposes a stable heading,
+numbered card sections with PMID/bibliographic fields, and degrades cleanly
+without Semantic Scholar TLDR data.
+
+```bash
+out="$(biomcp article batch 22663011 24200969)"
+echo "$out" | mustmatch like "# Article Batch (2)"
+echo "$out" | mustmatch like "## 1."
+echo "$out" | mustmatch like "## 2."
+echo "$out" | mustmatch like "PMID: 22663011"
+echo "$out" | mustmatch like "PMID: 24200969"
+
+json_out="$(biomcp --json article batch 22663011 24200969)"
+echo "$json_out" | mustmatch like "\"requested_id\": \"22663011\""
+echo "$json_out" | mustmatch like "\"pmid\": \"22663011\""
+echo "$json_out" | mustmatch like "\"title\":"
+echo "$json_out" | mustmatch like "\"year\":"
+
+no_key_out="$(env -u S2_API_KEY biomcp --json article batch 22663011)"
+echo "$no_key_out" | mustmatch like "\"requested_id\": \"22663011\""
+echo "$no_key_out" | mustmatch like "\"title\":"
+echo "$no_key_out" | mustmatch not like "\"tldr\":"
+```
+
+## Article Batch Invalid Identifier
+
+An unsupported identifier format should fail with the existing supported
+identifier guidance rather than a generic error.
+
+```bash
+out="$(biomcp article batch S1535610826000103 2>&1 || true)"
+echo "$out" | mustmatch like "Unsupported identifier"
+```
+
+## Article Batch Limit Enforcement
+
+More than 20 IDs should fail immediately, before any network work.
+
+```bash
+out="$(biomcp article batch 1000001 1000002 1000003 1000004 1000005 1000006 1000007 1000008 1000009 1000010 1000011 1000012 1000013 1000014 1000015 1000016 1000017 1000018 1000019 1000020 1000021 2>&1 || true)"
+echo "$out" | mustmatch like "limited to 20"
 ```
 
 ## Optional-Key Get Article Path
@@ -74,6 +173,49 @@ out="$(env -u S2_API_KEY biomcp get article 22663011)"
 echo "$out" | mustmatch like "PMID: 22663011"
 echo "$out" | mustmatch like "Journal:"
 echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Article Search JSON Without Semantic Scholar Key
+
+No-key article search must stay explicit and functional. JSON should report the
+disabled state while still surfacing ranking metadata from the local relevance
+policy.
+
+```bash
+out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --limit 3)"
+echo "$out" | mustmatch like "\"semantic_scholar_enabled\": false"
+echo "$out" | mustmatch like "\"ranking\": {"
+echo "$out" | mustmatch not like "\"source\": \"semanticscholar\""
+```
+
+## Article Search JSON With Semantic Scholar Key
+
+When `S2_API_KEY` is present, article search should expose the keyed search-leg
+state and merged source metadata in JSON.
+
+```bash
+out="$(biomcp --json search article -g BRAF -d melanoma --include-retracted --limit 5)"
+echo "$out" | mustmatch like "\"semantic_scholar_enabled\": true"
+echo "$out" | mustmatch like "\"matched_sources\": ["
+echo "$out" | mustmatch like "\"ranking\": {"
+```
+
+## Article Debug Plan
+
+The optional debug plan should expose the actual search surface, planner
+markers, and sources in both markdown and JSON without changing default output.
+
+```bash
+out="$(env -u S2_API_KEY biomcp search article -g BRAF --debug-plan --limit 3)"
+echo "$out" | mustmatch like "## Debug plan"
+echo "$out" | mustmatch like "\"surface\": \"search_article\""
+echo "$out" | mustmatch like "\"planner=federated\""
+
+json_out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --debug-plan --limit 3)"
+echo "$json_out" | mustmatch like "\"debug_plan\": {"
+echo "$json_out" | mustmatch like "\"surface\": \"search_article\""
+echo "$json_out" | mustmatch like "\"leg\": \"article\""
+echo "$json_out" | mustmatch like "\"sources\": ["
 ```
 
 ## Semantic Scholar TLDR Section

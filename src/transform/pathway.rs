@@ -1,8 +1,11 @@
 use crate::entities::pathway::{Pathway, PathwaySearchResult};
+use crate::sources::kegg::{KeggPathwayHit, KeggPathwayRecord};
 use crate::sources::reactome::{ReactomePathwayHit, ReactomePathwayRecord};
+use crate::sources::wikipathways::{WikiPathwaysHit, WikiPathwaysRecord};
 
 pub fn from_reactome_hit(hit: ReactomePathwayHit) -> PathwaySearchResult {
     PathwaySearchResult {
+        source: "Reactome".to_string(),
         id: hit.id,
         name: hit.name,
     }
@@ -10,10 +13,53 @@ pub fn from_reactome_hit(hit: ReactomePathwayHit) -> PathwaySearchResult {
 
 pub fn from_reactome_record(record: ReactomePathwayRecord) -> Pathway {
     Pathway {
+        source: "Reactome".to_string(),
         id: record.id,
         name: record.name,
         species: record.species,
         summary: record.summary,
+        genes: Vec::new(),
+        events: Vec::new(),
+        enrichment: Vec::new(),
+    }
+}
+
+pub fn from_kegg_hit(hit: KeggPathwayHit) -> PathwaySearchResult {
+    PathwaySearchResult {
+        source: "KEGG".to_string(),
+        id: hit.id,
+        name: hit.name,
+    }
+}
+
+pub fn from_kegg_record(record: KeggPathwayRecord) -> Pathway {
+    Pathway {
+        source: "KEGG".to_string(),
+        id: record.id,
+        name: record.name,
+        species: Some("Homo sapiens".to_string()),
+        summary: record.summary,
+        genes: record.genes,
+        events: Vec::new(),
+        enrichment: Vec::new(),
+    }
+}
+
+pub fn from_wikipathways_hit(hit: WikiPathwaysHit) -> PathwaySearchResult {
+    PathwaySearchResult {
+        source: "WikiPathways".to_string(),
+        id: hit.id,
+        name: hit.name,
+    }
+}
+
+pub fn from_wikipathways_record(record: WikiPathwaysRecord) -> Pathway {
+    Pathway {
+        source: "WikiPathways".to_string(),
+        id: record.id,
+        name: record.name,
+        species: record.species,
+        summary: None,
         genes: Vec::new(),
         events: Vec::new(),
         enrichment: Vec::new(),
@@ -32,6 +78,7 @@ mod tests {
         };
 
         let out = from_reactome_hit(hit);
+        assert_eq!(out.source, "Reactome");
         assert_eq!(out.id, "R-HSA-5673001");
         assert_eq!(out.name, "RAF/MAP kinase cascade");
     }
@@ -46,6 +93,7 @@ mod tests {
         };
 
         let out = from_reactome_record(record);
+        assert_eq!(out.source, "Reactome");
         assert_eq!(out.id, "R-HSA-5673001");
         assert_eq!(out.name, "RAF/MAP kinase cascade");
         assert_eq!(out.species.as_deref(), Some("Homo sapiens"));
@@ -82,5 +130,67 @@ mod tests {
         assert_eq!(out.id, "R-HSA-69278");
         assert_eq!(out.name, "Cell Cycle, Mitotic");
         assert_eq!(out.species.as_deref(), Some("Homo sapiens"));
+    }
+
+    #[test]
+    fn from_kegg_hit_maps_fields() {
+        let hit = KeggPathwayHit {
+            id: "hsa04010".to_string(),
+            name: "MAPK signaling pathway".to_string(),
+        };
+
+        let out = from_kegg_hit(hit);
+        assert_eq!(out.source, "KEGG");
+        assert_eq!(out.id, "hsa04010");
+        assert_eq!(out.name, "MAPK signaling pathway");
+    }
+
+    #[test]
+    fn from_kegg_record_maps_fields() {
+        let record = KeggPathwayRecord {
+            id: "hsa05200".to_string(),
+            name: "Pathways in cancer".to_string(),
+            summary: Some("Cancer overview.".to_string()),
+            genes: vec!["BRAF".to_string(), "EGFR".to_string()],
+        };
+
+        let out = from_kegg_record(record);
+        assert_eq!(out.source, "KEGG");
+        assert_eq!(out.id, "hsa05200");
+        assert_eq!(out.species.as_deref(), Some("Homo sapiens"));
+        assert_eq!(out.genes, vec!["BRAF".to_string(), "EGFR".to_string()]);
+        assert!(out.events.is_empty());
+    }
+
+    #[test]
+    fn from_wikipathways_hit_maps_fields() {
+        let hit = WikiPathwaysHit {
+            id: "WP254".to_string(),
+            name: "Apoptosis".to_string(),
+        };
+
+        let out = from_wikipathways_hit(hit);
+        assert_eq!(out.source, "WikiPathways");
+        assert_eq!(out.id, "WP254");
+        assert_eq!(out.name, "Apoptosis");
+    }
+
+    #[test]
+    fn from_wikipathways_record_maps_fields() {
+        let record = WikiPathwaysRecord {
+            id: "WP254".to_string(),
+            name: "Apoptosis".to_string(),
+            species: Some("Homo sapiens".to_string()),
+        };
+
+        let out = from_wikipathways_record(record);
+        assert_eq!(out.source, "WikiPathways");
+        assert_eq!(out.id, "WP254");
+        assert_eq!(out.name, "Apoptosis");
+        assert_eq!(out.species.as_deref(), Some("Homo sapiens"));
+        assert!(out.summary.is_none());
+        assert!(out.genes.is_empty());
+        assert!(out.events.is_empty());
+        assert!(out.enrichment.is_empty());
     }
 }

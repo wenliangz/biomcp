@@ -25,9 +25,12 @@ By MONDO identifier:
 biomcp get disease MONDO:0005105
 ```
 
+The base disease card includes concise OpenTargets gene-score summaries when OpenTargets
+returns ranked associated targets.
+
 ## Disease sections
 
-Genes (Monarch-backed associations with relationship/source when available):
+Genes (Monarch-backed associations with relationship/source when available, augmented with OpenTargets scores when present):
 
 ```bash
 biomcp get disease MONDO:0005105 genes
@@ -39,11 +42,15 @@ Phenotypes (HPO phenotypes with qualifiers):
 biomcp get disease MONDO:0005105 phenotypes
 ```
 
-Variants (Monarch disease-associated variants):
+Variants (CIViC disease-associated variants):
 
 ```bash
 biomcp get disease MONDO:0005105 variants
 ```
+
+When the variants section is loaded, JSON also exposes `top_variant` as the
+highest-ranked CIViC-backed association, and markdown shows the same compact
+anchor above the full variants table.
 
 Models (Monarch model-organism evidence):
 
@@ -106,6 +113,9 @@ biomcp search article -d melanoma --limit 5
 biomcp --json get disease MONDO:0005105 all
 biomcp --json search phenotype "HP:0001250 HP:0001263"
 ```
+
+`biomcp --json get disease MONDO:0005105` now includes `top_gene_scores[]` with
+overall OpenTargets scores and any available GWAS, rare-variant, or somatic subtype scores.
 
 ## Practical tips
 

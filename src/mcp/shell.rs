@@ -2,11 +2,12 @@ use std::future::Future;
 use std::time::Duration;
 
 use axum::{Json, Router, routing::get};
+use base64::Engine;
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{
-    AnnotateAble, Implementation, ListResourcesResult, PaginatedRequestParams, RawResource,
-    ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
-    ServerInfo,
+    AnnotateAble, CallToolResult, Content, Implementation, ListResourcesResult,
+    PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult,
+    ResourceContents, ServerCapabilities, ServerInfo,
 };
 use rmcp::schemars;
 use rmcp::service::RequestContext;
@@ -38,6 +39,10 @@ impl BioMcpServer {
             tool_router: Self::tool_router(),
         }
     }
+
+    fn tool_error(message: impl Into<String>) -> CallToolResult {
+        CallToolResult::error(vec![Content::text(message.into())])
+    }
 }
 
 impl Default for BioMcpServer {
@@ -54,7 +59,9 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
 
     match cmd.as_str() {
         "search" | "get" | "variant" | "drug" | "disease" | "article" | "gene" | "pathway"
-        | "protein" | "study" | "list" | "version" | "health" | "batch" | "enrich" => true,
+        | "protein" | "study" | "list" | "version" | "health" | "batch" | "enrich" | "discover" => {
+            true
+        }
         "skill" => {
             // Allow read-only skill commands: list, show, numeric lookup
             // (e.g. "skill 03"), and slug lookup (e.g. "skill variant-to-treatment").
@@ -72,18 +79,22 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
 #[tool_router]
 impl BioMcpServer {
     #[doc = include_str!(concat!(env!("OUT_DIR"), "/mcp_shell_description.txt"))]
-    #[tool]
+    #[tool(annotations(title = "BioMCP", read_only_hint = true))]
     async fn biomcp(
         &self,
         Parameters(ShellCommand { command }): Parameters<ShellCommand>,
-    ) -> Result<String, String> {
+    ) -> Result<CallToolResult, McpError> {
         if command.len() > 1024 {
-            return Err("Error: command is too long".to_string());
+            return Ok(Self::tool_error("Error: command is too long"));
         }
 
         let split = match shlex::split(&command) {
             Some(args) => args,
-            None => return Err(format!("Error: Invalid command syntax: {command}")),
+            None => {
+                return Ok(Self::tool_error(format!(
+                    "Error: Invalid command syntax: {command}"
+                )));
+            }
         };
 
         let mut args = vec!["biomcp".to_string()];
@@ -94,15 +105,23 @@ impl BioMcpServer {
         }
 
         if !is_allowed_mcp_command(&args) {
-            return Err(
-                "Error: BioMCP allows read-only commands only (search/get/helpers/study/list/version/health/batch/enrich/skill)."
+            return Ok(Self::tool_error(
+                "Error: BioMCP allows read-only commands only (search/get/helpers/study/list/version/health/batch/enrich/discover/skill)."
                     .to_string(),
-            );
+            ));
         }
 
-        crate::cli::execute(args)
-            .await
-            .map_err(|e| format!("Error: {e}"))
+        match crate::cli::execute_mcp(args).await {
+            Ok(output) => {
+                let mut content = vec![Content::text(output.text)];
+                if let Some(svg) = output.svg {
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(svg.as_bytes());
+                    content.push(Content::image(encoded, "image/svg+xml"));
+                }
+                Ok(CallToolResult::success(content))
+            }
+            Err(err) => Ok(Self::tool_error(format!("Error: {err}"))),
+        }
     }
 }
 
@@ -338,6 +357,11 @@ mod tests {
             "biomcp".into(),
             "study".into(),
             "list".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "discover".into(),
+            "BRCA1".into()
         ]));
         assert!(!is_allowed_mcp_command(&["biomcp".into(), "update".into()]));
         assert!(!is_allowed_mcp_command(&[

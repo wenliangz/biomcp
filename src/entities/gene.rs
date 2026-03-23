@@ -9,11 +9,18 @@ use crate::entities::SearchPage;
 use crate::error::BioMcpError;
 use crate::sources::civic::{CivicClient, CivicContext};
 use crate::sources::clingen::{ClinGenClient, GeneClinGen};
-use crate::sources::dgidb::{DgidbClient, GeneDruggability};
+use crate::sources::dgidb::{
+    DgidbClient, GeneDruggability, GeneSafetyLiability, GeneTractabilityModality,
+};
+use crate::sources::disgenet::{DisgenetAssociationRecord, DisgenetClient};
 use crate::sources::enrichr::EnrichrClient;
+use crate::sources::gnomad::{
+    GNOMAD_CONSTRAINT_REFERENCE_GENOME, GNOMAD_CONSTRAINT_VERSION, GnomadClient,
+};
 use crate::sources::gtex::{GeneExpression, GtexClient};
+use crate::sources::hpa::{GeneHpa, HpaClient};
 use crate::sources::mygene::MyGeneClient;
-use crate::sources::opentargets::OpenTargetsClient;
+use crate::sources::opentargets::{OpenTargetsClient, OpenTargetsTargetDruggabilityContext};
 use crate::sources::quickgo::QuickGoClient;
 use crate::sources::reactome::ReactomeClient;
 use crate::sources::string::StringClient;
@@ -58,13 +65,20 @@ pub struct Gene {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expression: Option<GeneExpression>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub hpa: Option<GeneHpa>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub druggability: Option<GeneDruggability>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clingen: Option<GeneClinGen>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<GeneConstraint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disgenet: Option<GeneDisgenet>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenePathway {
+    pub source: String,
     pub id: String,
     pub name: String,
 }
@@ -94,6 +108,43 @@ pub struct GeneInteraction {
     pub partner: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneConstraint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pli: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loeuf: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mis_z: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub syn_z: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<String>,
+    pub source: String,
+    pub source_version: String,
+    pub reference_genome: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneDisgenetAssociation {
+    pub disease_name: String,
+    pub disease_cui: String,
+    pub score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clinical_trial_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_index: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GeneDisgenet {
+    pub associations: Vec<GeneDisgenetAssociation>,
 }
 
 /// Search result (lighter than full Gene)
@@ -127,8 +178,11 @@ enum GeneIncludeType {
     Interactions,
     Civic,
     Expression,
+    Hpa,
     Druggability,
     ClinGen,
+    Constraint,
+    Disgenet,
 }
 
 const GENE_SECTION_PATHWAYS: &str = "pathways";
@@ -139,8 +193,11 @@ const GENE_SECTION_GO: &str = "go";
 const GENE_SECTION_INTERACTIONS: &str = "interactions";
 const GENE_SECTION_CIVIC: &str = "civic";
 const GENE_SECTION_EXPRESSION: &str = "expression";
+const GENE_SECTION_HPA: &str = "hpa";
 const GENE_SECTION_DRUGGABILITY: &str = "druggability";
 const GENE_SECTION_CLINGEN: &str = "clingen";
+const GENE_SECTION_CONSTRAINT: &str = "constraint";
+const GENE_SECTION_DISGENET: &str = "disgenet";
 const GENE_SECTION_ALL: &str = "all";
 
 pub const GENE_SECTION_NAMES: &[&str] = &[
@@ -152,8 +209,11 @@ pub const GENE_SECTION_NAMES: &[&str] = &[
     GENE_SECTION_INTERACTIONS,
     GENE_SECTION_CIVIC,
     GENE_SECTION_EXPRESSION,
+    GENE_SECTION_HPA,
     GENE_SECTION_DRUGGABILITY,
     GENE_SECTION_CLINGEN,
+    GENE_SECTION_CONSTRAINT,
+    GENE_SECTION_DISGENET,
     GENE_SECTION_ALL,
 ];
 
@@ -168,8 +228,11 @@ impl GeneIncludeType {
             GENE_SECTION_INTERACTIONS | "interaction" => Some(Self::Interactions),
             GENE_SECTION_CIVIC => Some(Self::Civic),
             GENE_SECTION_EXPRESSION => Some(Self::Expression),
+            GENE_SECTION_HPA => Some(Self::Hpa),
             GENE_SECTION_DRUGGABILITY | "drugs" => Some(Self::Druggability),
             GENE_SECTION_CLINGEN => Some(Self::ClinGen),
+            GENE_SECTION_CONSTRAINT => Some(Self::Constraint),
+            GENE_SECTION_DISGENET => Some(Self::Disgenet),
             _ => None,
         }
     }
@@ -185,8 +248,11 @@ impl GeneIncludeType {
             | Self::Interactions
             | Self::Civic
             | Self::Expression
+            | Self::Hpa
             | Self::Druggability
-            | Self::ClinGen => &[],
+            | Self::ClinGen
+            | Self::Constraint
+            | Self::Disgenet => &[],
         }
     }
 }
@@ -389,8 +455,11 @@ async fn enrich_gene(
             | GeneIncludeType::Interactions
             | GeneIncludeType::Civic
             | GeneIncludeType::Expression
+            | GeneIncludeType::Hpa
             | GeneIncludeType::Druggability
-            | GeneIncludeType::ClinGen => {}
+            | GeneIncludeType::ClinGen
+            | GeneIncludeType::Constraint
+            | GeneIncludeType::Disgenet => {}
             GeneIncludeType::Ontology => {
                 if let Some(v) = ontology.as_mut() {
                     v.push(result);
@@ -446,8 +515,10 @@ fn parse_sections(sections: &[String]) -> Result<Vec<GeneIncludeType>, BioMcpErr
             GeneIncludeType::Interactions,
             GeneIncludeType::Civic,
             GeneIncludeType::Expression,
+            GeneIncludeType::Hpa,
             GeneIncludeType::Druggability,
             GeneIncludeType::ClinGen,
+            GeneIncludeType::Constraint,
         ];
     }
 
@@ -646,7 +717,11 @@ async fn fetch_pathways_section(symbol: &str) -> Result<Option<Vec<GenePathway>>
         if out.iter().any(|p| p.id.eq_ignore_ascii_case(&id)) {
             continue;
         }
-        out.push(GenePathway { id, name });
+        out.push(GenePathway {
+            source: "Reactome".to_string(),
+            id,
+            name,
+        });
     }
 
     if out.is_empty() {
@@ -654,6 +729,39 @@ async fn fetch_pathways_section(symbol: &str) -> Result<Option<Vec<GenePathway>>
     } else {
         Ok(Some(out))
     }
+}
+
+fn merge_pathways(
+    existing: Option<Vec<GenePathway>>,
+    additional: Option<Vec<GenePathway>>,
+) -> Option<Vec<GenePathway>> {
+    let mut out = Vec::new();
+    let mut push_rows = |rows: Vec<GenePathway>| {
+        for row in rows {
+            let source = row.source.trim().to_string();
+            let id = row.id.trim().to_string();
+            let name = row.name.trim().to_string();
+            if source.is_empty() || id.is_empty() || name.is_empty() {
+                continue;
+            }
+            if out.iter().any(|existing: &GenePathway| {
+                existing.source.eq_ignore_ascii_case(&source)
+                    && existing.id.eq_ignore_ascii_case(&id)
+            }) {
+                continue;
+            }
+            out.push(GenePathway { source, id, name });
+        }
+    };
+
+    if let Some(rows) = existing {
+        push_rows(rows);
+    }
+    if let Some(rows) = additional {
+        push_rows(rows);
+    }
+
+    (!out.is_empty()).then_some(out)
 }
 
 async fn add_clinical_context(gene: &mut Gene) -> Result<(), BioMcpError> {
@@ -737,6 +845,44 @@ async fn add_expression_section(gene: &mut Gene) {
     }
 }
 
+async fn add_hpa_section(gene: &mut Gene) {
+    let Some(ensembl_id) = gene
+        .ensembl_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        gene.hpa = Some(GeneHpa::default());
+        return;
+    };
+
+    let hpa_fut = async {
+        let client = HpaClient::new()?;
+        client.protein_data(ensembl_id).await
+    };
+
+    match tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, hpa_fut).await {
+        Ok(Ok(hpa)) => gene.hpa = Some(hpa),
+        Ok(Err(err)) => {
+            warn!(
+                symbol = %gene.symbol,
+                ensembl_id = %ensembl_id,
+                "HPA unavailable for gene section: {err}"
+            );
+            gene.hpa = Some(GeneHpa::default());
+        }
+        Err(_) => {
+            warn!(
+                symbol = %gene.symbol,
+                ensembl_id = %ensembl_id,
+                timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
+                "HPA gene section timed out"
+            );
+            gene.hpa = Some(GeneHpa::default());
+        }
+    }
+}
+
 async fn add_druggability_section(gene: &mut Gene) {
     let symbol = gene.symbol.trim();
     if symbol.is_empty() {
@@ -744,19 +890,25 @@ async fn add_druggability_section(gene: &mut Gene) {
         return;
     }
 
-    let dgidb_fut = async {
+    let dgidb_fut = tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, async {
         let client = DgidbClient::new()?;
         client.gene_interactions(symbol).await
-    };
+    });
+    let opentargets_fut = tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, async {
+        let client = OpenTargetsClient::new()?;
+        client.target_druggability_context(symbol).await
+    });
 
-    match tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, dgidb_fut).await {
-        Ok(Ok(druggability)) => gene.druggability = Some(druggability),
+    let (dgidb_result, opentargets_result) = tokio::join!(dgidb_fut, opentargets_fut);
+
+    let dgidb_result = match dgidb_result {
+        Ok(Ok(druggability)) => Ok(druggability),
         Ok(Err(err)) => {
             warn!(
                 symbol = %gene.symbol,
                 "DGIdb unavailable for gene druggability section: {err}"
             );
-            gene.druggability = Some(GeneDruggability::default());
+            Err(err)
         }
         Err(_) => {
             warn!(
@@ -764,9 +916,72 @@ async fn add_druggability_section(gene: &mut Gene) {
                 timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
                 "DGIdb gene section timed out"
             );
-            gene.druggability = Some(GeneDruggability::default());
+            Err(BioMcpError::Api {
+                api: "dgidb".to_string(),
+                message: "timed out".to_string(),
+            })
         }
+    };
+
+    let opentargets_result = match opentargets_result {
+        Ok(Ok(context)) => Ok(context),
+        Ok(Err(err)) => {
+            warn!(
+                symbol = %gene.symbol,
+                "OpenTargets unavailable for gene druggability section: {err}"
+            );
+            Err(err)
+        }
+        Err(_) => {
+            warn!(
+                symbol = %gene.symbol,
+                timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
+                "OpenTargets gene druggability section timed out"
+            );
+            Err(BioMcpError::Api {
+                api: "opentargets".to_string(),
+                message: "timed out".to_string(),
+            })
+        }
+    };
+
+    gene.druggability = Some(merge_druggability_results(dgidb_result, opentargets_result));
+}
+
+fn merge_druggability_results(
+    dgidb_result: Result<GeneDruggability, BioMcpError>,
+    opentargets_result: Result<OpenTargetsTargetDruggabilityContext, BioMcpError>,
+) -> GeneDruggability {
+    let mut merged = GeneDruggability::default();
+
+    if let Ok(dgidb) = dgidb_result {
+        merged.categories = dgidb.categories;
+        merged.interactions = dgidb.interactions;
     }
+
+    if let Ok(context) = opentargets_result {
+        merged.tractability = context
+            .tractability
+            .into_iter()
+            .map(|row| GeneTractabilityModality {
+                modality: row.modality,
+                tractable: row.tractable,
+                evidence_labels: row.evidence_labels,
+            })
+            .collect();
+        merged.safety_liabilities = context
+            .safety_liabilities
+            .into_iter()
+            .map(|row| GeneSafetyLiability {
+                event: row.event,
+                datasource: row.datasource,
+                effect_direction: row.effect_direction,
+                biosample: row.biosample,
+            })
+            .collect();
+    }
+
+    merged
 }
 
 async fn add_clingen_section(gene: &mut Gene) {
@@ -807,6 +1022,92 @@ async fn add_clingen_section(gene: &mut Gene) {
     }
 }
 
+fn gnomad_constraint_section(
+    transcript: Option<String>,
+    pli: Option<f64>,
+    loeuf: Option<f64>,
+    mis_z: Option<f64>,
+    syn_z: Option<f64>,
+) -> GeneConstraint {
+    GeneConstraint {
+        pli,
+        loeuf,
+        mis_z,
+        syn_z,
+        transcript,
+        source: "gnomAD".to_string(),
+        source_version: GNOMAD_CONSTRAINT_VERSION.to_string(),
+        reference_genome: GNOMAD_CONSTRAINT_REFERENCE_GENOME.to_string(),
+    }
+}
+
+async fn add_constraint_section(gene: &mut Gene) {
+    let symbol = gene.symbol.trim();
+    if symbol.is_empty() {
+        gene.constraint = Some(gnomad_constraint_section(None, None, None, None, None));
+        return;
+    }
+
+    let constraint_fut = async {
+        let client = GnomadClient::new()?;
+        client.gene_constraint(symbol).await
+    };
+
+    match tokio::time::timeout(OPTIONAL_ENRICHMENT_TIMEOUT, constraint_fut).await {
+        Ok(Ok(Some(constraint))) => {
+            gene.constraint = Some(gnomad_constraint_section(
+                constraint.transcript,
+                constraint.pli,
+                constraint.loeuf,
+                constraint.mis_z,
+                constraint.syn_z,
+            ));
+        }
+        Ok(Ok(None)) => {
+            gene.constraint = Some(gnomad_constraint_section(None, None, None, None, None));
+        }
+        Ok(Err(err)) => {
+            warn!(
+                symbol = %gene.symbol,
+                "gnomAD unavailable for gene constraint section: {err}"
+            );
+            gene.constraint = Some(gnomad_constraint_section(None, None, None, None, None));
+        }
+        Err(_) => {
+            warn!(
+                symbol = %gene.symbol,
+                timeout_secs = OPTIONAL_ENRICHMENT_TIMEOUT.as_secs(),
+                "gnomAD gene constraint section timed out"
+            );
+            gene.constraint = Some(gnomad_constraint_section(None, None, None, None, None));
+        }
+    }
+}
+
+fn map_disgenet_gene_association(row: DisgenetAssociationRecord) -> GeneDisgenetAssociation {
+    GeneDisgenetAssociation {
+        disease_name: row.disease_name,
+        disease_cui: row.disease_umls_cui,
+        score: row.score,
+        publication_count: row.publication_count,
+        clinical_trial_count: row.clinical_trial_count,
+        evidence_index: row.evidence_index,
+        evidence_level: row.evidence_level,
+    }
+}
+
+async fn add_disgenet_section(gene: &mut Gene) -> Result<(), BioMcpError> {
+    let client = DisgenetClient::new()?;
+    let associations = client
+        .fetch_gene_associations(gene, 10)
+        .await?
+        .into_iter()
+        .map(map_disgenet_gene_association)
+        .collect();
+    gene.disgenet = Some(GeneDisgenet { associations });
+    Ok(())
+}
+
 pub async fn get(symbol: &str, sections: &[String]) -> Result<Gene, BioMcpError> {
     if symbol.trim().is_empty() {
         return Err(BioMcpError::InvalidArgument(
@@ -827,7 +1128,7 @@ pub async fn get(symbol: &str, sections: &[String]) -> Result<Gene, BioMcpError>
 
     if include.contains(&GeneIncludeType::Pathways) {
         gene.pathways = match fetch_pathways_section(&gene.symbol).await {
-            Ok(v) => v,
+            Ok(v) => merge_pathways(gene.pathways.take(), v),
             Err(err) => {
                 warn!("Reactome unavailable for gene pathways section: {err}");
                 gene.pathways
@@ -887,12 +1188,24 @@ pub async fn get(symbol: &str, sections: &[String]) -> Result<Gene, BioMcpError>
         add_expression_section(&mut gene).await;
     }
 
+    if include.contains(&GeneIncludeType::Hpa) {
+        add_hpa_section(&mut gene).await;
+    }
+
     if include.contains(&GeneIncludeType::Druggability) {
         add_druggability_section(&mut gene).await;
     }
 
     if include.contains(&GeneIncludeType::ClinGen) {
         add_clingen_section(&mut gene).await;
+    }
+
+    if include.contains(&GeneIncludeType::Constraint) {
+        add_constraint_section(&mut gene).await;
+    }
+
+    if include.contains(&GeneIncludeType::Disgenet) {
+        add_disgenet_section(&mut gene).await?;
     }
 
     Ok(gene)
@@ -1255,24 +1568,110 @@ mod tests {
     #[test]
     fn gene_section_names_include_new_enrichment_sections() {
         assert!(GENE_SECTION_NAMES.contains(&"expression"));
+        assert!(GENE_SECTION_NAMES.contains(&"hpa"));
         assert!(GENE_SECTION_NAMES.contains(&"druggability"));
         assert!(GENE_SECTION_NAMES.contains(&"clingen"));
+        assert!(GENE_SECTION_NAMES.contains(&"constraint"));
+        assert!(GENE_SECTION_NAMES.contains(&"disgenet"));
     }
 
     #[test]
     fn parse_sections_accepts_new_enrichment_sections() {
         let parsed = parse_sections(&[
             "expression".to_string(),
+            "hpa".to_string(),
             "druggability".to_string(),
             "clingen".to_string(),
+            "constraint".to_string(),
+            "disgenet".to_string(),
         ])
         .expect("new gene sections should parse");
-        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed.len(), 6);
     }
 
     #[test]
-    fn parse_sections_all_includes_new_gene_sections() {
+    fn parse_sections_all_keeps_disgenet_opt_in() {
         let parsed = parse_sections(&["all".to_string()]).expect("all should parse");
-        assert_eq!(parsed.len(), 10);
+        assert_eq!(parsed.len(), 12);
+        assert!(!parsed.contains(&GeneIncludeType::Disgenet));
+    }
+
+    #[test]
+    fn merge_pathways_keeps_kegg_then_appends_reactome_without_duplicates() {
+        let merged = merge_pathways(
+            Some(vec![GenePathway {
+                source: "KEGG".to_string(),
+                id: "hsa04010".to_string(),
+                name: "MAPK signaling pathway".to_string(),
+            }]),
+            Some(vec![
+                GenePathway {
+                    source: "Reactome".to_string(),
+                    id: "R-HSA-5673001".to_string(),
+                    name: "RAF/MAP kinase cascade".to_string(),
+                },
+                GenePathway {
+                    source: "KEGG".to_string(),
+                    id: "HSA04010".to_string(),
+                    name: "duplicate".to_string(),
+                },
+            ]),
+        )
+        .expect("merged");
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].source, "KEGG");
+        assert_eq!(merged[1].source, "Reactome");
+    }
+
+    #[test]
+    fn merge_druggability_keeps_successful_source_data_when_other_source_fails() {
+        let merged = merge_druggability_results(
+            Err(BioMcpError::Api {
+                api: "dgidb".to_string(),
+                message: "down".to_string(),
+            }),
+            Ok(
+                crate::sources::opentargets::OpenTargetsTargetDruggabilityContext {
+                    tractability: vec![
+                        crate::sources::opentargets::OpenTargetsTractabilityModality {
+                            modality: "small molecule".to_string(),
+                            tractable: true,
+                            evidence_labels: vec!["Approved Drug".to_string()],
+                        },
+                    ],
+                    safety_liabilities: vec![
+                        crate::sources::opentargets::OpenTargetsSafetyLiability {
+                            event: "Skin rash".to_string(),
+                            datasource: Some("ForceGenetics".to_string()),
+                            effect_direction: Some("activation".to_string()),
+                            biosample: Some("Skin".to_string()),
+                        },
+                    ],
+                },
+            ),
+        );
+
+        assert!(merged.categories.is_empty());
+        assert!(merged.interactions.is_empty());
+        assert_eq!(merged.tractability.len(), 1);
+        assert_eq!(merged.safety_liabilities.len(), 1);
+
+        let merged = merge_druggability_results(
+            Ok(GeneDruggability {
+                categories: vec!["Kinase".to_string()],
+                interactions: Vec::new(),
+                tractability: Vec::new(),
+                safety_liabilities: Vec::new(),
+            }),
+            Err(BioMcpError::Api {
+                api: "opentargets".to_string(),
+                message: "down".to_string(),
+            }),
+        );
+
+        assert_eq!(merged.categories, vec!["Kinase"]);
+        assert!(merged.tractability.is_empty());
+        assert!(merged.safety_liabilities.is_empty());
     }
 }

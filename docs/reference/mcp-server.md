@@ -44,6 +44,51 @@ assert "enable_tools()" in shell
 assert "enable_resources()" in shell
 ```
 
+## Tool Response Content
+
+The `biomcp` tool keeps non-chart calls text-only. In MCP mode, charted `study`
+commands return two success content blocks in order:
+
+- `text` with the normal markdown/table output
+- `image` with `mimeType = "image/svg+xml"` and base64-encoded SVG data
+
+MCP chart calls do not write files. If the caller supplies `--output` or `-o`,
+the tool returns a tool error instructing the caller to consume the inline image
+instead.
+
+Alias fallback is the main exception to the usual CLI stderr contract: failed
+`get gene` / `get drug` alias suggestions are returned to MCP as structured JSON
+ text content with `_meta.alias_resolution` and `_meta.next_commands` so agents
+ can apply their own retry policy without parsing markdown.
+
+```python
+from pathlib import Path
+
+repo_root = Path.cwd()
+shell = (repo_root / "src/mcp/shell.rs").read_text()
+cli = (repo_root / "src/cli/mod.rs").read_text()
+
+assert "crate::cli::execute_mcp(args)" in shell
+assert "CallToolResult::success" in shell
+assert 'Content::image(encoded, "image/svg+xml")' in shell
+assert "MCP chart responses do not support --output/-o" in cli
+assert 'annotations(title = "BioMCP", read_only_hint = true)' in shell
+```
+
+## Read-only Allowlist
+
+The MCP `biomcp` tool accepts read-only CLI commands, including `discover`.
+Mutating commands remain blocked.
+
+```python
+from pathlib import Path
+
+repo_root = Path.cwd()
+shell = (repo_root / "src/mcp/shell.rs").read_text()
+assert '"discover" => true' in shell or '| "discover" => true' in shell
+assert "discover/skill" in shell or "discover/skill)." in shell
+```
+
 ## Resource Catalog
 
 Current builds always publish the help resource:
@@ -110,7 +155,9 @@ Protocol-level checks are implemented in Python integration tests:
 These tests validate both transport modes:
 
 - `biomcp serve` stdio initialize/resource behavior,
+- stdio charted-study `text` + `image/svg+xml` responses and MCP `--output` rejection,
 - Streamable HTTP `initialize`/`tools/list`/`tools/call`,
+- Streamable HTTP charted-study `text` + `image/svg+xml` responses,
 - `GET /`, `GET /health`, and `GET /readyz`,
 - invalid URI error semantics.
 
