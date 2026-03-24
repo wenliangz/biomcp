@@ -32,6 +32,17 @@ echo "$out" | mustmatch like "DrugBank ID: DB09037"
 echo "$out" | mustmatch like "## Targets"
 ```
 
+## Drug Indications
+
+Indications are sourced from OpenTargets and should render user-facing stage labels instead of leaking GraphQL failures or raw field names. This checks the repaired indication path without binding the spec to a particular disease row.
+
+```bash
+out="$(biomcp get drug pembrolizumab indications)"
+echo "$out" | mustmatch like "## Indications (Open Targets)"
+echo "$out" | mustmatch not like "Cannot query field"
+echo "$out" | mustmatch '/\((Approved|Phase [0-9](\/[0-9])?|Early Phase 1)\)/'
+```
+
 ## Get Drug Help Surfaces Supported Sections
 
 The inline help should agree with `biomcp list drug` and the implementation for
