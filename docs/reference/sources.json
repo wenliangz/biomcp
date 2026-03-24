@@ -170,6 +170,28 @@
     "notes": "DisGeNET's public site advertises free and commercial plans. BioMCP documents the API as key-gated and treats it as provider-controlled."
   },
   {
+    "id": "ema",
+    "name": "EMA",
+    "tier": 1,
+    "integration_mode": "direct_api",
+    "via": null,
+    "bioMcp_surfaces": [
+      "search drug --region eu|all",
+      "get drug <name> regulatory --region eu|all",
+      "get drug <name> safety --region eu|all",
+      "get drug <name> shortage --region eu|all"
+    ],
+    "bioMcp_auth": "none",
+    "env_var": null,
+    "provider_access": "manual download of the EMA website JSON batch or set BIOMCP_EMA_DIR",
+    "license_summary": "EMA website material may be reused with source attribution; third-party content can carry separate rights",
+    "redistribution_summary": "EMA-published website data is generally reusable with attribution, but embedded third-party materials may need separate permission",
+    "terms_url": "https://www.ema.europa.eu/en/about-us/about-website/legal-notice",
+    "key_url": null,
+    "reviewed_on": "2026-03-24",
+    "notes": "BioMCP reads the downloaded human-medicines JSON batch from BIOMCP_EMA_DIR or the default data directory; it does not query a live EMA API."
+  },
+  {
     "id": "enrichr",
     "name": "Enrichr",
     "tier": 1,

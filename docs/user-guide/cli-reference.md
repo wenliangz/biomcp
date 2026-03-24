@@ -139,6 +139,7 @@ biomcp search variant -g BRAF --hgvsp V600E --limit 5 --offset 0
 
 ```bash
 biomcp search drug -q "kinase inhibitor" --limit 5 --offset 0
+biomcp search drug Keytruda --region eu --limit 5
 ```
 
 ### Pathway
@@ -227,8 +228,12 @@ biomcp get variant rs7903146 gwas
 
 ```bash
 biomcp get drug pembrolizumab
+biomcp get drug Keytruda regulatory --region eu
+biomcp get drug Ozempic safety --region eu
 biomcp get drug carboplatin shortage
 ```
+
+`search drug --region` defaults to `us`. For `get drug`, use `--region` only with `regulatory`, `safety`, `shortage`, or `all`; `approvals` stays U.S.-only.
 
 ### Pathway
 

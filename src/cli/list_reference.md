@@ -38,6 +38,7 @@ New to BioMCP? Try:
 - `search all [slot filters]` - curated multi-entity orientation (`--gene/--variant/--disease/--drug/--keyword`)
 - `search trial [filters]` - trial search is filter-only
 - `get <entity> <id> [section...]` - fetch by identifier with optional sections
+- `get drug <name> regulatory|safety|shortage [--region <us|eu|all>]` - region-aware U.S./EU drug context
 - `get trial <nct_id> locations --offset <N> --limit <N>` - page trial locations
 - `enrich <GENE1,GENE2,...>` - gene-set enrichment via g:Profiler
 - `batch <entity> <id1,id2,...>` - parallel get operations
@@ -51,6 +52,7 @@ New to BioMCP? Try:
 - `search protein ... --reviewed --disease --existence` (default reviewed mode)
 - `search trial ... --mutation --criteria --study-type --has-results --date-from --date-to`
 - `search article ... --date-from --date-to --journal --source <all|pubtator|europepmc>`
+- `search drug ... --region <us|eu|all>` (EU/all is plain name/alias search only)
 
 ## Helpers
 
@@ -90,6 +92,7 @@ Results depend on source document wording and may vary across sources.
 
 - Set `NCBI_API_KEY` to increase NCBI request throughput for article annotation/full-text paths.
 - Set `S2_API_KEY` to unlock Semantic Scholar TLDR, citation graph, and recommendation paths.
+- Place the EMA human-medicines JSON batch in the default data dir or set `BIOMCP_EMA_DIR` to enable EU drug regulatory/safety/shortage context.
 - In multi-worker environments, run one shared `biomcp serve-http` process so workers share one Streamable HTTP `/mcp` endpoint and one limiter budget.
 
 ## Ops

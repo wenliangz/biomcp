@@ -270,18 +270,21 @@ fn list_drug() -> String {
 
 - `get drug <name>` - get by name (MyChem.info aggregation)
 - `get drug <name> label` - show key FDA label sections inline
-- `get drug <name> shortage` - query current shortage status
+- `get drug <name> regulatory [--region <us|eu|all>]` - regional regulatory summary (Drugs@FDA and/or EMA)
+- `get drug <name> safety [--region <us|eu|all>]` - regional safety context (OpenFDA and/or EMA)
+- `get drug <name> shortage [--region <us|eu|all>]` - query current shortage status
 - `get drug <name> targets` - enrich with ChEMBL/OpenTargets targets
 - `get drug <name> indications` - enrich with OpenTargets indications
 - `get drug <name> interactions` - OpenFDA label interaction text when available; otherwise a truthful public-data fallback
 - `get drug <name> civic` - CIViC therapy evidence/assertion summary
-- `get drug <name> approvals` - Drugs@FDA approval/application details
+- `get drug <name> approvals` - Drugs@FDA approval/application details (US-only legacy section)
 - `get drug <name> all` - include all sections
 
 ## Search
 
 - `search drug <query>`
 - `search drug -q <query>`
+- `search drug <query> --region <us|eu|all>`
 - `search drug --target <gene>`
 - `search drug --indication <disease>`
 - `search drug --mechanism <text>`
@@ -294,6 +297,12 @@ fn list_drug() -> String {
 
 - `drug trials <name>`
 - `drug adverse-events <name>`
+
+## Notes
+
+- `--region us` is the default.
+- `search drug --region eu|all` supports plain name/alias lookups only; structured filters remain U.S.-only.
+- EU regional commands require the EMA human-medicines JSON batch via `BIOMCP_EMA_DIR` or the default data directory.
 "#
     .to_string()
 }
