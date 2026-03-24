@@ -1274,9 +1274,15 @@ async fn enrich_indications(drug: &mut Drug) {
                 let indications = sections
                     .indications
                     .into_iter()
-                    .map(|i| match i.max_phase {
-                        Some(phase) => format!("{} (max phase {:.0})", i.disease_name, phase),
-                        None => i.disease_name,
+                    .map(|i| {
+                        match i
+                            .max_clinical_stage
+                            .as_deref()
+                            .and_then(format_opentargets_clinical_stage)
+                        {
+                            Some(stage) => format!("{} ({stage})", i.disease_name),
+                            None => i.disease_name,
+                        }
                     })
                     .collect::<Vec<_>>();
                 merge_unique_casefold(&mut drug.indications, indications);
@@ -1287,6 +1293,44 @@ async fn enrich_indications(drug: &mut Drug) {
     }
 
     drug.indications.truncate(12);
+}
+
+fn format_opentargets_clinical_stage(stage: &str) -> Option<String> {
+    let normalized = stage.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let normalized = normalized.to_ascii_uppercase();
+    let label = match normalized.as_str() {
+        "UNKNOWN" => return None,
+        "APPROVAL" => "Approved".to_string(),
+        "EARLY_PHASE_1" => "Early Phase 1".to_string(),
+        "PHASE_1" => "Phase 1".to_string(),
+        "PHASE_2" => "Phase 2".to_string(),
+        "PHASE_3" => "Phase 3".to_string(),
+        "PHASE_4" => "Phase 4".to_string(),
+        "PHASE_1_2" => "Phase 1/2".to_string(),
+        "PHASE_2_3" => "Phase 2/3".to_string(),
+        other => other
+            .replace('_', " ")
+            .split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                let Some(first) = chars.next() else {
+                    return String::new();
+                };
+                let mut out = String::new();
+                out.extend(first.to_uppercase());
+                out.push_str(&chars.as_str().to_ascii_lowercase());
+                out
+            })
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+
+    (!label.is_empty()).then_some(label)
 }
 
 async fn add_civic_section(drug: &mut Drug) {
@@ -1625,6 +1669,44 @@ mod tests {
     fn parse_sections_all_with_explicit_label_keeps_label() {
         let flags = parse_sections(&["all".to_string(), "label".to_string()]).unwrap();
         assert!(flags.include_label);
+    }
+
+    #[test]
+    fn format_opentargets_clinical_stage_maps_known_stages() {
+        assert_eq!(
+            format_opentargets_clinical_stage("APPROVAL").as_deref(),
+            Some("Approved")
+        );
+        assert_eq!(
+            format_opentargets_clinical_stage("PHASE_3").as_deref(),
+            Some("Phase 3")
+        );
+        assert_eq!(
+            format_opentargets_clinical_stage("PHASE_1_2").as_deref(),
+            Some("Phase 1/2")
+        );
+        assert_eq!(
+            format_opentargets_clinical_stage("PHASE_2_3").as_deref(),
+            Some("Phase 2/3")
+        );
+        assert_eq!(
+            format_opentargets_clinical_stage("EARLY_PHASE_1").as_deref(),
+            Some("Early Phase 1")
+        );
+    }
+
+    #[test]
+    fn format_opentargets_clinical_stage_suppresses_unknown_and_blank() {
+        assert_eq!(format_opentargets_clinical_stage("UNKNOWN"), None);
+        assert_eq!(format_opentargets_clinical_stage("   "), None);
+    }
+
+    #[test]
+    fn format_opentargets_clinical_stage_falls_back_for_future_values() {
+        assert_eq!(
+            format_opentargets_clinical_stage("PRECLINICAL").as_deref(),
+            Some("Preclinical")
+        );
     }
 
     #[test]

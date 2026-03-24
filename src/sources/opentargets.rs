@@ -93,13 +93,15 @@ query DrugSections($chemblId: String!) {
     name
     indications {
       rows {
-        maxPhaseForIndication
+        maxClinicalStage
         disease { name }
       }
     }
-    linkedTargets {
+    mechanismsOfAction {
       rows {
-        approvedSymbol
+        targets {
+          approvedSymbol
+        }
       }
     }
   }
@@ -144,7 +146,7 @@ query DrugSections($chemblId: String!) {
                 }
                 indications.push(OpenTargetsIndication {
                     disease_name: name,
-                    max_phase: row.max_phase_for_indication,
+                    max_clinical_stage: row.max_clinical_stage,
                 });
             }
         } else {
@@ -152,8 +154,13 @@ query DrugSections($chemblId: String!) {
         }
 
         let mut targets = Vec::new();
-        if let Some(linked) = drug.linked_targets {
-            for row in linked.rows.into_iter().take(size) {
+        if let Some(mechanisms) = drug.mechanisms_of_action {
+            for row in mechanisms
+                .rows
+                .into_iter()
+                .flat_map(|row| row.targets)
+                .take(size)
+            {
                 let Some(symbol) = row.approved_symbol.map(|v| v.trim().to_string()) else {
                     continue;
                 };
@@ -165,7 +172,7 @@ query DrugSections($chemblId: String!) {
                 });
             }
         } else {
-            warn_missing_field("DrugSections", "data.drug.linkedTargets");
+            warn_missing_field("DrugSections", "data.drug.mechanismsOfAction");
         }
 
         Ok(OpenTargetsDrugSections {
@@ -806,7 +813,7 @@ pub struct OpenTargetsDrugSections {
 #[derive(Debug, Clone)]
 pub struct OpenTargetsIndication {
     pub disease_name: String,
-    pub max_phase: Option<f64>,
+    pub max_clinical_stage: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -883,7 +890,7 @@ struct DrugSectionsData {
 #[serde(rename_all = "camelCase")]
 struct DrugNode {
     indications: Option<DrugIndications>,
-    linked_targets: Option<LinkedTargets>,
+    mechanisms_of_action: Option<DrugMechanismsOfAction>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -895,7 +902,7 @@ struct DrugIndications {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IndicationRow {
-    max_phase_for_indication: Option<f64>,
+    max_clinical_stage: Option<String>,
     disease: Option<SimpleDisease>,
 }
 
@@ -905,9 +912,15 @@ struct SimpleDisease {
 }
 
 #[derive(Debug, Deserialize)]
-struct LinkedTargets {
+struct DrugMechanismsOfAction {
     #[serde(default)]
-    rows: Vec<TargetNode>,
+    rows: Vec<MechanismOfActionRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MechanismOfActionRow {
+    #[serde(default)]
+    targets: Vec<TargetNode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1324,15 +1337,23 @@ mod tests {
                         "indications": {
                             "rows": [
                                 {
-                                    "maxPhaseForIndication": 4,
+                                    "maxClinicalStage": "APPROVAL",
                                     "disease": {"name": "Melanoma"}
                                 }
                             ]
                         },
-                        "linkedTargets": {
+                        "mechanismsOfAction": {
                             "rows": [
-                                {"approvedSymbol": "BRAF"},
-                                {"approvedSymbol": "MAP2K1"}
+                                {
+                                    "targets": [
+                                        {"approvedSymbol": "BRAF"}
+                                    ]
+                                },
+                                {
+                                    "targets": [
+                                        {"approvedSymbol": "MAP2K1"}
+                                    ]
+                                }
                             ]
                         }
                     }
@@ -1345,8 +1366,13 @@ mod tests {
         let sections = client.drug_sections("CHEMBL25", 5).await.unwrap();
         assert_eq!(sections.indications.len(), 1);
         assert_eq!(sections.indications[0].disease_name, "Melanoma");
+        assert_eq!(
+            sections.indications[0].max_clinical_stage.as_deref(),
+            Some("APPROVAL")
+        );
         assert_eq!(sections.targets.len(), 2);
         assert_eq!(sections.targets[0].approved_symbol, "BRAF");
+        assert_eq!(sections.targets[1].approved_symbol, "MAP2K1");
     }
 
     #[tokio::test]
@@ -1359,9 +1385,13 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "data": {
                     "drug": {
-                        "linkedTargets": {
+                        "mechanismsOfAction": {
                             "rows": [
-                                {"approvedSymbol": "BRAF"}
+                                {
+                                    "targets": [
+                                        {"approvedSymbol": "BRAF"}
+                                    ]
+                                }
                             ]
                         }
                     }
@@ -1860,12 +1890,19 @@ mod tests {
                     "drug": {
                         "indications": {
                             "rows": [
-                                {"maxPhaseForIndication": 4, "disease": {"name": "Non-small cell lung cancer"}}
+                                {
+                                    "maxClinicalStage": "APPROVAL",
+                                    "disease": {"name": "Non-small cell lung cancer"}
+                                }
                             ]
                         },
-                        "linkedTargets": {
+                        "mechanismsOfAction": {
                             "rows": [
-                                {"approvedSymbol": "EGFR"}
+                                {
+                                    "targets": [
+                                        {"approvedSymbol": "EGFR"}
+                                    ]
+                                }
                             ]
                         }
                     }
@@ -1882,6 +1919,13 @@ mod tests {
                 .first()
                 .map(|i| i.disease_name.as_str()),
             Some("Non-small cell lung cancer")
+        );
+        assert_eq!(
+            sections
+                .indications
+                .first()
+                .and_then(|i| i.max_clinical_stage.as_deref()),
+            Some("APPROVAL")
         );
         assert_eq!(
             sections.targets.first().map(|t| t.approved_symbol.as_str()),
