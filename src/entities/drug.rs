@@ -8,6 +8,7 @@ use crate::entities::SearchPage;
 use crate::error::BioMcpError;
 use crate::sources::chembl::ChemblClient;
 use crate::sources::civic::{CivicClient, CivicContext};
+use crate::sources::ema::{EmaClient, EmaDrugIdentity};
 use crate::sources::mychem::{
     MYCHEM_FIELDS_GET, MYCHEM_FIELDS_SEARCH, MyChemClient, MyChemHit, MyChemNdcField,
 };
@@ -68,6 +69,14 @@ pub struct Drug {
     pub shortage: Option<Vec<DrugShortageEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approvals: Option<Vec<DrugApproval>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub us_safety_warnings: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ema_regulatory: Option<Vec<EmaRegulatoryRow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ema_safety: Option<EmaSafetyInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ema_shortage: Option<Vec<EmaShortageEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub civic: Option<CivicContext>,
 }
@@ -161,6 +170,141 @@ pub struct DrugSearchResult {
     pub target: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DrugRegion {
+    #[default]
+    Us,
+    Eu,
+    All,
+}
+
+impl DrugRegion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Us => "us",
+            Self::Eu => "eu",
+            Self::All => "all",
+        }
+    }
+
+    pub fn includes_us(self) -> bool {
+        matches!(self, Self::Us | Self::All)
+    }
+
+    pub fn includes_eu(self) -> bool {
+        matches!(self, Self::Eu | Self::All)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaDrugSearchResult {
+    pub name: String,
+    pub active_substance: String,
+    pub ema_product_number: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaRegulatoryRow {
+    pub medicine_name: String,
+    pub active_substance: String,
+    pub ema_product_number: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holder: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_activity: Vec<EmaRegulatoryActivity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaRegulatoryActivity {
+    pub first_published_date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_updated_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EmaSafetyInfo {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dhpcs: Vec<EmaDhpcEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub referrals: Vec<EmaReferralEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub psusas: Vec<EmaPsusaEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaDhpcEntry {
+    pub medicine_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dhpc_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regulatory_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_published_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_updated_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaReferralEntry {
+    pub referral_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_substance: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub associated_medicines: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_referral: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub referral_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub procedure_start_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prac_recommendation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaPsusaEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_medicines: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_substance: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub procedure_number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regulatory_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_published_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_updated_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmaShortageEntry {
+    pub medicine_affected: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub availability_of_alternatives: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_published_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_updated_date: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum DrugSearchPageWithRegion {
+    Us(SearchPage<DrugSearchResult>),
+    Eu(SearchPage<EmaDrugSearchResult>),
+    All {
+        us: SearchPage<DrugSearchResult>,
+        eu: SearchPage<EmaDrugSearchResult>,
+    },
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DrugSearchFilters {
     pub query: Option<String>,
@@ -174,6 +318,8 @@ pub struct DrugSearchFilters {
 }
 
 const DRUG_SECTION_LABEL: &str = "label";
+const DRUG_SECTION_REGULATORY: &str = "regulatory";
+const DRUG_SECTION_SAFETY: &str = "safety";
 const DRUG_SECTION_SHORTAGE: &str = "shortage";
 const DRUG_SECTION_TARGETS: &str = "targets";
 const DRUG_SECTION_INDICATIONS: &str = "indications";
@@ -184,6 +330,8 @@ const DRUG_SECTION_ALL: &str = "all";
 
 pub const DRUG_SECTION_NAMES: &[&str] = &[
     DRUG_SECTION_LABEL,
+    DRUG_SECTION_REGULATORY,
+    DRUG_SECTION_SAFETY,
     DRUG_SECTION_SHORTAGE,
     DRUG_SECTION_TARGETS,
     DRUG_SECTION_INDICATIONS,
@@ -639,6 +787,8 @@ fn hit_mentions_mechanism(hit: &MyChemHit, mechanism: &str) -> bool {
 #[derive(Debug, Clone, Copy, Default)]
 struct DrugSections {
     include_label: bool,
+    include_regulatory: bool,
+    include_safety: bool,
     include_shortage: bool,
     include_targets: bool,
     include_indications: bool,
@@ -663,6 +813,8 @@ fn parse_sections(sections: &[String]) -> Result<DrugSections, BioMcpError> {
             DRUG_SECTION_LABEL => {
                 out.include_label = true;
             }
+            DRUG_SECTION_REGULATORY => out.include_regulatory = true,
+            DRUG_SECTION_SAFETY => out.include_safety = true,
             DRUG_SECTION_SHORTAGE => out.include_shortage = true,
             DRUG_SECTION_TARGETS => out.include_targets = true,
             DRUG_SECTION_INDICATIONS => out.include_indications = true,
@@ -681,15 +833,23 @@ fn parse_sections(sections: &[String]) -> Result<DrugSections, BioMcpError> {
 
     if include_all {
         out.include_label = true;
+        out.include_regulatory = true;
+        out.include_safety = true;
         out.include_shortage = true;
         out.include_targets = true;
         out.include_indications = true;
         out.include_interactions = true;
         out.include_civic = true;
-        out.include_approvals = true;
     }
 
     Ok(out)
+}
+
+fn is_section_only_requested(sections: &[String]) -> bool {
+    !sections
+        .iter()
+        .any(|section| section.trim().eq_ignore_ascii_case(DRUG_SECTION_ALL))
+        && sections.iter().any(|section| !section.trim().is_empty())
 }
 
 fn normalize_date_yyyymmdd(value: Option<&str>) -> Option<String> {
@@ -755,6 +915,14 @@ fn extract_inline_label(label_response: &serde_json::Value) -> Option<DrugLabel>
         warnings,
         dosage,
     })
+}
+
+fn extract_label_warnings_text(label_response: &serde_json::Value) -> Option<String> {
+    label_response
+        .get("results")
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.first())
+        .and_then(|top| label_text(top.get("warnings_and_cautions")))
 }
 
 fn extract_label_set_id(label_response: &serde_json::Value) -> Option<String> {
@@ -1405,7 +1573,16 @@ async fn add_approvals_section(drug: &mut Drug) {
     }
 }
 
-pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
+struct ResolvedDrugBase {
+    drug: Drug,
+    label_response: Option<serde_json::Value>,
+}
+
+async fn resolve_drug_base(
+    name: &str,
+    fetch_label_response: bool,
+    label_required: bool,
+) -> Result<ResolvedDrugBase, BioMcpError> {
     let name = name.trim();
     if name.is_empty() {
         return Err(BioMcpError::InvalidArgument(
@@ -1417,8 +1594,6 @@ pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
             "Drug name is too long.".into(),
         ));
     }
-
-    let section_flags = parse_sections(sections)?;
 
     let client = MyChemClient::new()?;
     let resp = client
@@ -1437,18 +1612,20 @@ pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
     let mut drug = transform::drug::merge_mychem_hits(&selected, name);
 
     let mut label_response_opt: Option<serde_json::Value> = None;
-    match OpenFdaClient::new() {
-        Ok(client) => match client.label_search(&drug.name).await {
-            Ok(v) => label_response_opt = v,
+    if fetch_label_response {
+        match OpenFdaClient::new() {
+            Ok(client) => match client.label_search(&drug.name).await {
+                Ok(v) => label_response_opt = v,
+                Err(err) => {
+                    if label_required {
+                        return Err(err);
+                    }
+                }
+            },
             Err(err) => {
-                if section_flags.include_label {
+                if label_required {
                     return Err(err);
                 }
-            }
-        },
-        Err(err) => {
-            if section_flags.include_label {
-                return Err(err);
             }
         }
     }
@@ -1456,41 +1633,58 @@ pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
     if let Some(label_response) = label_response_opt.as_ref() {
         apply_openfda_metadata(&mut drug, label_response);
         drug.label_set_id = extract_label_set_id(label_response);
-        if section_flags.include_label {
-            drug.label = extract_inline_label(label_response);
+    }
+
+    Ok(ResolvedDrugBase {
+        drug,
+        label_response: label_response_opt,
+    })
+}
+
+async fn try_resolve_drug_identity(name: &str) -> Option<Drug> {
+    match resolve_drug_base(name, false, false).await {
+        Ok(resolved) => Some(resolved.drug),
+        Err(err) => {
+            warn!(query = %name, "Drug identity resolution unavailable for EMA alias expansion: {err}");
+            None
         }
-        if section_flags.include_interactions {
-            drug.interaction_text = extract_interaction_text_from_label(label_response);
-        }
     }
+}
 
-    if section_flags.include_shortage {
-        drug.shortage = Some(fetch_shortage_entries(&drug.name).await?);
-    }
+async fn populate_common_sections(
+    drug: &mut Drug,
+    label_response: Option<&serde_json::Value>,
+    section_flags: &DrugSections,
+) {
+    drug.label = if section_flags.include_label {
+        label_response.and_then(extract_inline_label)
+    } else {
+        None
+    };
 
-    if section_flags.include_targets {
-        enrich_targets(&mut drug).await;
-    }
-
-    if section_flags.include_indications {
-        enrich_indications(&mut drug).await;
-    }
-
-    if !section_flags.include_interactions {
+    if section_flags.include_interactions {
+        drug.interaction_text = label_response.and_then(extract_interaction_text_from_label);
+    } else {
         drug.interactions.clear();
         drug.interaction_text = None;
     }
+
+    if section_flags.include_targets {
+        enrich_targets(drug).await;
+    }
+
+    if section_flags.include_indications {
+        enrich_indications(drug).await;
+    }
+
     if section_flags.include_civic {
-        add_civic_section(&mut drug).await;
+        add_civic_section(drug).await;
     } else {
         drug.civic = None;
     }
-    if section_flags.include_approvals {
-        add_approvals_section(&mut drug).await;
-    } else {
-        drug.approvals = None;
-    }
+}
 
+async fn populate_top_adverse_event_preview(drug: &mut Drug) {
     match tokio::time::timeout(
         OPTIONAL_SAFETY_TIMEOUT,
         fetch_top_adverse_events(&drug.name),
@@ -1515,8 +1709,203 @@ pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
             );
         }
     }
+}
 
-    Ok(drug)
+async fn populate_us_regional_sections(
+    drug: &mut Drug,
+    label_response: Option<&serde_json::Value>,
+    section_flags: &DrugSections,
+) -> Result<(), BioMcpError> {
+    if section_flags.include_shortage {
+        drug.shortage = Some(fetch_shortage_entries(&drug.name).await?);
+    } else {
+        drug.shortage = None;
+    }
+
+    if section_flags.include_regulatory || section_flags.include_approvals {
+        add_approvals_section(drug).await;
+    } else {
+        drug.approvals = None;
+    }
+
+    drug.us_safety_warnings = if section_flags.include_safety {
+        label_response.and_then(extract_label_warnings_text)
+    } else {
+        None
+    };
+
+    Ok(())
+}
+
+fn build_ema_identity(requested_name: &str, drug: &Drug) -> EmaDrugIdentity {
+    EmaDrugIdentity::with_aliases(requested_name, Some(&drug.name), &drug.brand_names)
+}
+
+async fn populate_ema_sections(
+    drug: &mut Drug,
+    requested_name: &str,
+    section_flags: &DrugSections,
+) -> Result<(), BioMcpError> {
+    if !section_flags.include_regulatory
+        && !section_flags.include_safety
+        && !section_flags.include_shortage
+    {
+        drug.ema_regulatory = None;
+        drug.ema_safety = None;
+        drug.ema_shortage = None;
+        return Ok(());
+    }
+
+    let client = EmaClient::new();
+    let identity = build_ema_identity(requested_name, drug);
+    let anchor = client.resolve_anchor(&identity)?;
+
+    drug.ema_regulatory = if section_flags.include_regulatory {
+        Some(client.regulatory(&anchor)?)
+    } else {
+        None
+    };
+    drug.ema_safety = if section_flags.include_safety {
+        Some(client.safety(&anchor)?)
+    } else {
+        None
+    };
+    drug.ema_shortage = if section_flags.include_shortage {
+        Some(client.shortages(&anchor)?)
+    } else {
+        None
+    };
+
+    Ok(())
+}
+
+fn validate_region_usage(
+    section_flags: &DrugSections,
+    region_explicit: bool,
+) -> Result<(), BioMcpError> {
+    if !region_explicit {
+        return Ok(());
+    }
+
+    if section_flags.include_approvals {
+        return Err(BioMcpError::InvalidArgument(
+            "--region is not supported with approvals. Use regulatory for the regional regulatory view.".into(),
+        ));
+    }
+
+    if !(section_flags.include_regulatory
+        || section_flags.include_safety
+        || section_flags.include_shortage)
+    {
+        return Err(BioMcpError::InvalidArgument(
+            "--region can only be used with regulatory, safety, shortage, or all.".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+pub async fn get_with_region(
+    name: &str,
+    sections: &[String],
+    region: DrugRegion,
+    region_explicit: bool,
+) -> Result<Drug, BioMcpError> {
+    let section_flags = parse_sections(sections)?;
+    validate_region_usage(&section_flags, region_explicit)?;
+
+    let section_only = is_section_only_requested(sections);
+    let fetch_label_response = !section_only
+        || section_flags.include_label
+        || section_flags.include_interactions
+        || (region.includes_us() && section_flags.include_safety);
+
+    let mut resolved =
+        resolve_drug_base(name, fetch_label_response, section_flags.include_label).await?;
+    populate_common_sections(
+        &mut resolved.drug,
+        resolved.label_response.as_ref(),
+        &section_flags,
+    )
+    .await;
+
+    if region.includes_us() && (!section_only || section_flags.include_safety) {
+        populate_top_adverse_event_preview(&mut resolved.drug).await;
+    } else {
+        resolved.drug.top_adverse_events.clear();
+        resolved.drug.faers_query = None;
+    }
+
+    if region.includes_us() {
+        populate_us_regional_sections(
+            &mut resolved.drug,
+            resolved.label_response.as_ref(),
+            &section_flags,
+        )
+        .await?;
+    } else {
+        resolved.drug.shortage = None;
+        resolved.drug.approvals = None;
+        resolved.drug.us_safety_warnings = None;
+    }
+
+    if region.includes_eu() {
+        populate_ema_sections(&mut resolved.drug, name, &section_flags).await?;
+    } else {
+        resolved.drug.ema_regulatory = None;
+        resolved.drug.ema_safety = None;
+        resolved.drug.ema_shortage = None;
+    }
+
+    Ok(resolved.drug)
+}
+
+pub async fn search_name_query_with_region(
+    query: &str,
+    limit: usize,
+    offset: usize,
+    region: DrugRegion,
+) -> Result<DrugSearchPageWithRegion, BioMcpError> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(BioMcpError::InvalidArgument(
+            "At least one filter is required. Example: biomcp search drug -q pembrolizumab".into(),
+        ));
+    }
+
+    const MAX_SEARCH_LIMIT: usize = 50;
+    if limit == 0 || limit > MAX_SEARCH_LIMIT {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
+        )));
+    }
+
+    let filters = DrugSearchFilters {
+        query: Some(query.to_string()),
+        ..Default::default()
+    };
+
+    let eu_identity = match try_resolve_drug_identity(query).await {
+        Some(drug) => build_ema_identity(query, &drug),
+        None => EmaDrugIdentity::new(query),
+    };
+
+    match region {
+        DrugRegion::Us => Ok(DrugSearchPageWithRegion::Us(
+            search_page(&filters, limit, offset).await?,
+        )),
+        DrugRegion::Eu => Ok(DrugSearchPageWithRegion::Eu(
+            EmaClient::new().search_medicines(&eu_identity, limit, offset)?,
+        )),
+        DrugRegion::All => Ok(DrugSearchPageWithRegion::All {
+            us: search_page(&filters, limit, offset).await?,
+            eu: EmaClient::new().search_medicines(&eu_identity, limit, offset)?,
+        }),
+    }
+}
+
+pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
+    get_with_region(name, sections, DrugRegion::Us, false).await
 }
 
 pub fn search_query_summary(filters: &DrugSearchFilters) -> String {
@@ -1654,12 +2043,14 @@ mod tests {
     fn parse_sections_supports_all_and_rejects_unknown() {
         let flags = parse_sections(&["all".to_string()]).unwrap();
         assert!(flags.include_label);
+        assert!(flags.include_regulatory);
+        assert!(flags.include_safety);
         assert!(flags.include_shortage);
         assert!(flags.include_targets);
         assert!(flags.include_indications);
         assert!(flags.include_interactions);
         assert!(flags.include_civic);
-        assert!(flags.include_approvals);
+        assert!(!flags.include_approvals);
 
         let err = parse_sections(&["bad".to_string()]).unwrap_err();
         assert!(matches!(err, BioMcpError::InvalidArgument(_)));
@@ -1669,6 +2060,22 @@ mod tests {
     fn parse_sections_all_with_explicit_label_keeps_label() {
         let flags = parse_sections(&["all".to_string(), "label".to_string()]).unwrap();
         assert!(flags.include_label);
+    }
+
+    #[test]
+    fn validate_region_usage_rejects_approvals_with_explicit_region() {
+        let flags = parse_sections(&["approvals".to_string()]).unwrap();
+        let err = validate_region_usage(&flags, true).unwrap_err();
+        assert!(matches!(err, BioMcpError::InvalidArgument(_)));
+        assert!(err.to_string().contains("approvals"));
+    }
+
+    #[test]
+    fn validate_region_usage_rejects_explicit_region_without_regional_sections() {
+        let flags = parse_sections(&["targets".to_string()]).unwrap();
+        let err = validate_region_usage(&flags, true).unwrap_err();
+        assert!(matches!(err, BioMcpError::InvalidArgument(_)));
+        assert!(err.to_string().contains("--region can only be used"));
     }
 
     #[test]

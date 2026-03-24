@@ -319,6 +319,37 @@ pub(crate) fn drug_section_sources(drug: &Drug) -> Vec<SectionSource> {
         "Safety",
         ["OpenFDA FAERS"],
     );
+    let mut regulatory_sources = Vec::new();
+    if drug.approvals.is_some() {
+        regulatory_sources.push("OpenFDA Drugs@FDA".to_string());
+    }
+    if drug.ema_regulatory.is_some() {
+        regulatory_sources.push("EMA".to_string());
+    }
+    push_section(
+        &mut out,
+        !regulatory_sources.is_empty(),
+        "regulatory",
+        "Regulatory",
+        regulatory_sources.iter().map(String::as_str),
+    );
+    let mut safety_sources = Vec::new();
+    if !drug.top_adverse_events.is_empty() {
+        safety_sources.push("OpenFDA FAERS".to_string());
+    }
+    if has_opt_text(&drug.us_safety_warnings) {
+        safety_sources.push("OpenFDA label".to_string());
+    }
+    if drug.ema_safety.is_some() {
+        safety_sources.push("EMA".to_string());
+    }
+    push_section(
+        &mut out,
+        !safety_sources.is_empty(),
+        "regional_safety",
+        "Regional Safety",
+        safety_sources.iter().map(String::as_str),
+    );
     push_section(
         &mut out,
         has_opt_text(&drug.mechanism) || !drug.mechanisms.is_empty(),
@@ -361,6 +392,13 @@ pub(crate) fn drug_section_sources(drug: &Drug) -> Vec<SectionSource> {
         "shortage",
         "Shortage",
         ["OpenFDA Drug Shortages"],
+    );
+    push_section(
+        &mut out,
+        drug.ema_shortage.is_some(),
+        "ema_shortage",
+        "EMA Shortage",
+        ["EMA"],
     );
     push_section(
         &mut out,

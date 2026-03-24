@@ -1,6 +1,6 @@
 # Drug
 
-Use drug commands for medication lookup, target-oriented search, and safety context.
+Use drug commands for medication lookup, target-oriented search, and U.S./EU regulatory context.
 
 ## Search drugs
 
@@ -8,6 +8,13 @@ Text query:
 
 ```bash
 biomcp search drug -q "kinase inhibitor" --limit 5
+```
+
+EU or comparison search:
+
+```bash
+biomcp search drug Keytruda --region eu --limit 5
+biomcp search drug Keytruda --region all --limit 5
 ```
 
 Target-oriented search:
@@ -24,6 +31,8 @@ biomcp search drug --indication melanoma --limit 5
 
 `search drug --interactions <drug>` is currently unavailable because the public data sources BioMCP uses do not expose partner-indexed interaction rows.
 
+`--region us` is the default. `--region eu` and `--region all` are supported only for plain name/alias searches; structured filters such as `--target` and `--indication` remain U.S.-only.
+
 ## Get a drug record
 
 ```bash
@@ -37,8 +46,8 @@ date in the base card.
 
 ## Request drug sections
 
-Supported sections: `label`, `shortage`, `targets`, `indications`,
-`interactions`, `civic`, `approvals`, `all`.
+Supported sections: `label`, `regulatory`, `safety`, `shortage`, `targets`,
+`indications`, `interactions`, `civic`, `approvals`, `all`.
 
 FDA label section:
 
@@ -50,6 +59,15 @@ Shortage section:
 
 ```bash
 biomcp get drug carboplatin shortage
+```
+
+Regional regulatory and safety sections:
+
+```bash
+biomcp get drug Keytruda regulatory --region eu
+biomcp get drug Keytruda regulatory --region all
+biomcp get drug Ozempic safety --region eu
+biomcp get drug Ozempic shortage --region eu
 ```
 
 Targets and indications sections:
@@ -71,6 +89,25 @@ CIViC evidence and Drugs@FDA approvals:
 biomcp get drug vemurafenib civic
 biomcp get drug dabrafenib approvals
 ```
+
+`approvals` remains a legacy U.S.-only section. Use `regulatory` for the region-aware regulatory view.
+
+## EMA local data setup
+
+EU regional commands read the EMA human-medicines JSON batch from `BIOMCP_EMA_DIR` first, then the platform data directory (`~/.local/share/biomcp/ema` on typical Linux systems).
+
+Download the current batch from:
+
+- <https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format>
+
+Expected files:
+
+- `medicines.json`
+- `post_authorisation.json`
+- `referrals.json`
+- `psusas.json`
+- `dhpcs.json`
+- `shortages.json`
 
 ## Cross-entity helpers
 
@@ -96,6 +133,7 @@ biomcp --json get drug pembrolizumab
 
 - Start with base `get` before requesting heavy sections.
 - Use target filters to narrow crowded drug classes.
+- Use `regulatory`, `safety`, or `shortage` with `--region eu|all` when you need EMA context.
 - Pair drug lookups with trial filters for protocol matching workflows.
 
 ## Related guides

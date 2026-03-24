@@ -8,6 +8,7 @@ use futures::{StreamExt, future::try_join_all};
 use tracing::{debug, warn};
 
 use crate::cli::debug_plan::{DebugPlan, DebugPlanLeg};
+use crate::entities::drug::DrugRegion;
 
 pub mod chart;
 pub mod debug_plan;
@@ -68,6 +69,23 @@ impl ChartType {
 impl std::fmt::Display for ChartType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DrugRegionArg {
+    Us,
+    Eu,
+    All,
+}
+
+impl From<DrugRegionArg> for DrugRegion {
+    fn from(value: DrugRegionArg) -> Self {
+        match value {
+            DrugRegionArg::Us => DrugRegion::Us,
+            DrugRegionArg::Eu => DrugRegion::Eu,
+            DrugRegionArg::All => DrugRegion::All,
+        }
     }
 }
 
@@ -833,6 +851,7 @@ See also: biomcp list variant")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp search drug pembrolizumab
+  biomcp search drug Keytruda --region eu --limit 5
   biomcp search drug -q \"kinase inhibitor\" --target EGFR --atc L01 --pharm-class kinase --limit 5
 
 Note: --interactions is currently unavailable from the public data sources BioMCP uses.
@@ -877,6 +896,9 @@ See also: biomcp list drug")]
         /// Skip the first N results
         #[arg(long, default_value = "0")]
         offset: usize,
+        /// Data region for drug regulatory context
+        #[arg(long, value_enum, default_value_t = DrugRegionArg::Us)]
+        region: DrugRegionArg,
     },
     /// Search pathways by name or keyword
     #[command(
@@ -1127,6 +1149,8 @@ See also: biomcp list variant")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp get drug pembrolizumab
+  biomcp get drug Keytruda regulatory --region eu
+  biomcp get drug Ozempic safety --region eu
   biomcp get drug pembrolizumab targets
   biomcp get drug pembrolizumab approvals
 
@@ -1134,7 +1158,7 @@ See also: biomcp list drug")]
     Drug {
         /// Drug name (e.g., pembrolizumab, carboplatin)
         name: String,
-        /// Sections to include (label, shortage, targets, indications, interactions, civic, approvals, all)
+        /// Sections to include (label, regulatory, safety, shortage, targets, indications, interactions, civic, approvals, all)
         #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
     },
@@ -1816,6 +1840,70 @@ fn extract_json_from_sections(sections: &[String]) -> (Vec<String>, bool) {
         })
         .collect();
     (cleaned, json_override)
+}
+
+fn parse_drug_region_token(value: &str) -> Result<DrugRegion, crate::error::BioMcpError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "us" => Ok(DrugRegion::Us),
+        "eu" => Ok(DrugRegion::Eu),
+        "all" => Ok(DrugRegion::All),
+        other => Err(crate::error::BioMcpError::InvalidArgument(format!(
+            "Invalid value '{other}' for --region. Expected us, eu, or all."
+        ))),
+    }
+}
+
+fn extract_region_from_sections(
+    sections: &[String],
+) -> Result<(Vec<String>, Option<DrugRegion>), crate::error::BioMcpError> {
+    let mut cleaned = Vec::new();
+    let mut region = None;
+    let mut i = 0usize;
+
+    while i < sections.len() {
+        let token = sections[i].trim();
+        if token.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        if let Some(value) = token.strip_prefix("--region=") {
+            if region.is_some() {
+                return Err(crate::error::BioMcpError::InvalidArgument(
+                    "--region may only be specified once.".into(),
+                ));
+            }
+            region = Some(parse_drug_region_token(value)?);
+            i += 1;
+            continue;
+        }
+
+        if token.eq_ignore_ascii_case("--region") {
+            if region.is_some() {
+                return Err(crate::error::BioMcpError::InvalidArgument(
+                    "--region may only be specified once.".into(),
+                ));
+            }
+            let Some(value) = sections.get(i + 1).map(|value| value.trim()) else {
+                return Err(crate::error::BioMcpError::InvalidArgument(
+                    "--region requires a value.".into(),
+                ));
+            };
+            if value.is_empty() || value.starts_with('-') {
+                return Err(crate::error::BioMcpError::InvalidArgument(
+                    "--region requires a value.".into(),
+                ));
+            }
+            region = Some(parse_drug_region_token(value)?);
+            i += 2;
+            continue;
+        }
+
+        cleaned.push(token.to_string());
+        i += 1;
+    }
+
+    Ok((cleaned, region))
 }
 
 fn parse_usize_arg(flag: &str, value: &str) -> Result<usize, crate::error::BioMcpError> {
@@ -2657,10 +2745,14 @@ async fn render_variant_search_outcome(
 async fn render_drug_card_outcome(
     name: &str,
     sections: &[String],
+    region: Option<DrugRegion>,
     json_output: bool,
     alias_suggestions_as_json: bool,
 ) -> anyhow::Result<CommandOutcome> {
-    match crate::entities::drug::get(name, sections).await {
+    let effective_region = region.unwrap_or(DrugRegion::Us);
+    match crate::entities::drug::get_with_region(name, sections, effective_region, region.is_some())
+        .await
+    {
         Ok(drug) => {
             let text = if json_output {
                 crate::render::json::to_entity_json(
@@ -2670,7 +2762,11 @@ async fn render_drug_card_outcome(
                     crate::render::provenance::drug_section_sources(&drug),
                 )?
             } else {
-                crate::render::markdown::drug_markdown(&drug, sections)?
+                crate::render::markdown::drug_markdown_with_region(
+                    &drug,
+                    sections,
+                    effective_region,
+                )?
             };
             Ok(CommandOutcome::stdout(text))
         }
@@ -3461,8 +3557,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 entity: GetEntity::Drug { name, sections },
             } => {
                 let (sections, json_override) = extract_json_from_sections(&sections);
+                let (sections, region) = extract_region_from_sections(&sections)?;
                 let json_output = cli.json || json_override;
-                let drug = crate::entities::drug::get(&name, &sections).await?;
+                let effective_region = region.unwrap_or(DrugRegion::Us);
+                let drug = crate::entities::drug::get_with_region(
+                    &name,
+                    &sections,
+                    effective_region,
+                    region.is_some(),
+                )
+                .await?;
                 if json_output {
                     Ok(crate::render::json::to_entity_json(
                         &drug,
@@ -3471,7 +3575,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         crate::render::provenance::drug_section_sources(&drug),
                     )?)
                 } else {
-                    Ok(crate::render::markdown::drug_markdown(&drug, &sections)?)
+                    Ok(crate::render::markdown::drug_markdown_with_region(
+                        &drug,
+                        &sections,
+                        effective_region,
+                    )?)
                 }
             }
             Commands::Get {
@@ -5506,8 +5614,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     interactions,
                     limit,
                     offset,
+                    region,
                 } => {
                     let query = resolve_query_input(query, positional_query, "--query")?;
+                    let region: DrugRegion = region.into();
                     let filters = crate::entities::drug::DrugSearchFilters {
                         query,
                         target,
@@ -5522,20 +5632,139 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     if offset > 0 {
                         query_summary = format!("{query_summary}, offset={offset}");
                     }
-                    let page = crate::entities::drug::search_page(&filters, limit, offset).await?;
-                    let results = page.results;
-                    let pagination =
-                        PaginationMeta::offset(offset, limit, results.len(), page.total);
-                    if cli.json {
-                        search_json(results, pagination)
+                    if region == DrugRegion::Us {
+                        let page =
+                            crate::entities::drug::search_page(&filters, limit, offset).await?;
+                        let results = page.results;
+                        let pagination =
+                            PaginationMeta::offset(offset, limit, results.len(), page.total);
+                        if cli.json {
+                            search_json(results, pagination)
+                        } else {
+                            let footer = pagination_footer_offset(&pagination);
+                            Ok(crate::render::markdown::drug_search_markdown_with_footer(
+                                &query_summary,
+                                &results,
+                                pagination.total,
+                                &footer,
+                            )?)
+                        }
                     } else {
-                        let footer = pagination_footer_offset(&pagination);
-                        Ok(crate::render::markdown::drug_search_markdown_with_footer(
-                            &query_summary,
-                            &results,
-                            pagination.total,
-                            &footer,
-                        )?)
+                        let has_structured_filters = filters.target.is_some()
+                            || filters.indication.is_some()
+                            || filters.mechanism.is_some()
+                            || filters.drug_type.is_some()
+                            || filters.atc.is_some()
+                            || filters.pharm_class.is_some()
+                            || filters.interactions.is_some();
+                        if has_structured_filters {
+                            return Err(crate::error::BioMcpError::InvalidArgument(
+                                "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters.".into(),
+                            )
+                            .into());
+                        }
+
+                        let query_value = filters.query.as_deref().unwrap_or_default();
+                        match crate::entities::drug::search_name_query_with_region(
+                            query_value,
+                            limit,
+                            offset,
+                            region,
+                        )
+                        .await?
+                        {
+                            crate::entities::drug::DrugSearchPageWithRegion::Us(page) => {
+                                let results = page.results;
+                                let pagination = PaginationMeta::offset(
+                                    offset,
+                                    limit,
+                                    results.len(),
+                                    page.total,
+                                );
+                                if cli.json {
+                                    search_json(results, pagination)
+                                } else {
+                                    let footer = pagination_footer_offset(&pagination);
+                                    Ok(crate::render::markdown::drug_search_markdown_with_footer(
+                                        &query_summary,
+                                        &results,
+                                        pagination.total,
+                                        &footer,
+                                    )?)
+                                }
+                            }
+                            crate::entities::drug::DrugSearchPageWithRegion::Eu(page) => {
+                                let results = page.results;
+                                let pagination = PaginationMeta::offset(
+                                    offset,
+                                    limit,
+                                    results.len(),
+                                    page.total,
+                                );
+                                if cli.json {
+                                    search_json(results, pagination)
+                                } else {
+                                    let footer = pagination_footer_offset(&pagination);
+                                    Ok(
+                                        crate::render::markdown::drug_search_markdown_with_region(
+                                            &query_summary,
+                                            region,
+                                            &[],
+                                            None,
+                                            &results,
+                                            pagination.total,
+                                            &footer,
+                                        )?,
+                                    )
+                                }
+                            }
+                            crate::entities::drug::DrugSearchPageWithRegion::All { us, eu } => {
+                                if cli.json {
+                                    #[derive(serde::Serialize)]
+                                    struct RegionResults<T: serde::Serialize> {
+                                        count: usize,
+                                        total: Option<usize>,
+                                        results: Vec<T>,
+                                    }
+
+                                    #[derive(serde::Serialize)]
+                                    struct SearchResponse<T: serde::Serialize, U: serde::Serialize> {
+                                        region: &'static str,
+                                        query: String,
+                                        us: RegionResults<T>,
+                                        eu: RegionResults<U>,
+                                    }
+
+                                    crate::render::json::to_pretty(&SearchResponse {
+                                        region: region.as_str(),
+                                        query: query_summary.clone(),
+                                        us: RegionResults {
+                                            count: us.results.len(),
+                                            total: us.total,
+                                            results: us.results,
+                                        },
+                                        eu: RegionResults {
+                                            count: eu.results.len(),
+                                            total: eu.total,
+                                            results: eu.results,
+                                        },
+                                    })
+                                    .map_err(Into::into)
+                                } else {
+                                    Ok(
+                                        crate::render::markdown::drug_search_markdown_with_region(
+                                            &query_summary,
+                                            region,
+                                            &us.results,
+                                            us.total,
+                                            &eu.results,
+                                            eu.total,
+                                            "",
+                                        )?,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 SearchEntity::Pathway {
@@ -6054,9 +6283,16 @@ async fn run_outcome_inner(
             let no_cache = cli.no_cache;
             crate::sources::with_no_cache(no_cache, async move {
                 let (sections, json_override) = extract_json_from_sections(&sections);
+                let (sections, region) = extract_region_from_sections(&sections)?;
                 let json_output = json || json_override;
-                render_drug_card_outcome(&name, &sections, json_output, alias_suggestions_as_json)
-                    .await
+                render_drug_card_outcome(
+                    &name,
+                    &sections,
+                    region,
+                    json_output,
+                    alias_suggestions_as_json,
+                )
+                .await
             })
             .await
         }
@@ -6161,8 +6397,14 @@ async fn run_outcome_inner(
             let json = cli.json;
             let no_cache = cli.no_cache;
             crate::sources::with_no_cache(no_cache, async move {
-                render_drug_card_outcome(&name, empty_sections(), json, alias_suggestions_as_json)
-                    .await
+                render_drug_card_outcome(
+                    &name,
+                    empty_sections(),
+                    None,
+                    json,
+                    alias_suggestions_as_json,
+                )
+                .await
             })
             .await
         }
@@ -6227,10 +6469,12 @@ mod tests {
         ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand, GetEntity,
         OutputStream, PaginationMeta, ProteinCommand, StudyCommand, VariantCommand,
         VariantSearchPlan, article_search_json, execute, execute_mcp, extract_json_from_sections,
-        paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
-        resolve_query_input, resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
-        trial_locations_json, trial_search_query_summary, truncate_article_annotations,
+        extract_region_from_sections, paginate_trial_locations, parse_simple_gene_change,
+        parse_trial_location_paging, resolve_query_input, resolve_variant_query, run_outcome,
+        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
+        truncate_article_annotations,
     };
+    use crate::entities::drug::DrugRegion;
     use clap::{CommandFactory, Parser};
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -6388,6 +6632,50 @@ mod tests {
         let (cleaned, json_override) = extract_json_from_sections(&sections);
         assert_eq!(cleaned, sections);
         assert!(!json_override);
+    }
+
+    #[test]
+    fn extract_region_from_sections_detects_split_flag() {
+        let sections = vec![
+            "regulatory".to_string(),
+            "--region".to_string(),
+            "eu".to_string(),
+        ];
+        let (cleaned, region) = extract_region_from_sections(&sections).expect("region");
+        assert_eq!(cleaned, vec!["regulatory".to_string()]);
+        assert_eq!(region, Some(DrugRegion::Eu));
+    }
+
+    #[test]
+    fn extract_region_from_sections_detects_equals_form() {
+        let sections = vec!["safety".to_string(), "--region=all".to_string()];
+        let (cleaned, region) = extract_region_from_sections(&sections).expect("region");
+        assert_eq!(cleaned, vec!["safety".to_string()]);
+        assert_eq!(region, Some(DrugRegion::All));
+    }
+
+    #[test]
+    fn extract_region_from_sections_rejects_missing_value() {
+        let err = extract_region_from_sections(&["regulatory".to_string(), "--region".to_string()])
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BioMcpError::InvalidArgument(_)));
+        assert!(err.to_string().contains("--region requires a value."));
+    }
+
+    #[test]
+    fn extract_region_from_sections_rejects_duplicate_flag() {
+        let err = extract_region_from_sections(&[
+            "safety".to_string(),
+            "--region".to_string(),
+            "eu".to_string(),
+            "--region=us".to_string(),
+        ])
+        .unwrap_err();
+        assert!(matches!(err, crate::error::BioMcpError::InvalidArgument(_)));
+        assert!(
+            err.to_string()
+                .contains("--region may only be specified once.")
+        );
     }
 
     #[test]
@@ -9159,6 +9447,10 @@ mod next_commands_json_property {
             label_set_id: None,
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 
