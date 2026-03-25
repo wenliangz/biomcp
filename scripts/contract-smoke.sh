@@ -251,12 +251,24 @@ else
   probe_get "ComplexPortal no-match" '^200$' '"totalNumberOfResults":0|"elements":\[\]' "https://www.ebi.ac.uk/intact/complex-ws/search/NO_SUCH_PROTEIN_091?number=25&filters=species_f:(%22Homo%20sapiens%22)"
 fi
 
-# Semantic Scholar (optional)
+# Semantic Scholar (optional auth)
 if [[ -z "$S2_API_KEY_VALUE" ]]; then
-  echo "[SKIP] Semantic Scholar (set S2_API_KEY to probe optional article enrichment)"
+  probe_get \
+    "Semantic Scholar detail (shared pool)" \
+    '^(200|429)$' \
+    'paperId|title|Too Many Requests|rate limit' \
+    "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011?fields=paperId,title"
+  if [[ $FAST -ne 1 ]]; then
+    sleep 2
+    probe_get \
+      "Semantic Scholar citations (shared pool)" \
+      '^(200|429)$' \
+      'data|Too Many Requests|rate limit' \
+      "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011/citations?fields=contexts,intents,isInfluential&limit=1"
+  fi
 else
   probe_get_with_header \
-    "Semantic Scholar detail" \
+    "Semantic Scholar detail (authenticated)" \
     '^200$' \
     'paperId|title' \
     "x-api-key: $S2_API_KEY_VALUE" \
@@ -264,7 +276,7 @@ else
   if [[ $FAST -ne 1 ]]; then
     sleep 2
     probe_get_with_header \
-      "Semantic Scholar citations" \
+      "Semantic Scholar citations (authenticated)" \
       '^200$' \
       'data' \
       "x-api-key: $S2_API_KEY_VALUE" \

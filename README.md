@@ -91,7 +91,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 
 ## Feature highlights
 
-- **Federated article search:** `search article` fans out across PubTator3 and Europe PMC, optionally adds a Semantic Scholar search leg when `S2_API_KEY` is set, merges identifiers across PMID/PMCID/DOI, and ranks relevance directness-first.
+- **Federated article search:** `search article` fans out across PubTator3 and Europe PMC, can also add a Semantic Scholar search leg when the filter set is compatible, merges identifiers across PMID/PMCID/DOI, and ranks relevance directness-first.
 - **Cross-entity pivots:** move directly from a gene, variant, drug, disease, pathway, protein, or article into the next built-in view.
 - **Study analytics and charting:** downloaded studies support query, cohort, survival, compare, and co-occurrence workflows with native terminal or SVG charts.
 - **Citation graphs and article helpers:** `article citations`, `article references`, `article recommendations`, and `article entities` support literature navigation from a known paper.
@@ -103,7 +103,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 |--------|-----------------------------------|---------|
 | gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, GTEx, Human Protein Atlas, DGIdb, ClinGen | `biomcp get gene BRAF pathways hpa` |
 | variant | MyVariant.info, ClinVar, gnomAD fields via MyVariant, CIViC, Cancer Genome Interpreter, OncoKB, cBioPortal, GWAS Catalog, AlphaGenome | `biomcp get variant "BRAF V600E" clinvar` |
-| article | PubMed, PubTator3, Europe PMC, PMC OA, NCBI ID Converter, Semantic Scholar (optional with `S2_API_KEY`) | `biomcp search article -g BRAF --limit 5` |
+| article | PubMed, PubTator3, Europe PMC, PMC OA, NCBI ID Converter, Semantic Scholar (optional auth; `S2_API_KEY` recommended) | `biomcp search article -g BRAF --limit 5` |
 | trial | ClinicalTrials.gov API v2, NCI CTS API | `biomcp search trial -c melanoma -s recruiting` |
 | drug | MyChem.info, EMA local batch, ChEMBL, OpenTargets, Drugs@FDA, OpenFDA, CIViC | `biomcp get drug Keytruda regulatory --region eu` |
 | disease | MyDisease.info, Monarch Initiative, MONDO, OpenTargets, Reactome, CIViC | `biomcp get disease "Lynch syndrome" genes` |
@@ -183,17 +183,19 @@ unlock optional enrichments:
 
 ```bash
 export NCBI_API_KEY="..."        # PubTator, PMC OA, NCBI ID converter
-export S2_API_KEY="..."          # Semantic Scholar search leg, TLDR, citations, references, recommendations
+export S2_API_KEY="..."          # Optional Semantic Scholar auth; dedicated quota at 1 req/sec
 export OPENFDA_API_KEY="..."     # OpenFDA rate limits
 export NCI_API_KEY="..."         # NCI CTS trial search (--source nci)
 export ONCOKB_TOKEN="..."        # OncoKB variant helper
 export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction
 ```
 
-`search article` works without `S2_API_KEY`; when the key is present it also
-fans out to Semantic Scholar and exposes ranking/support metadata in the search
-output. `--source` still remains `all|pubtator|europepmc` in v1, so the S2 leg
-is automatic rather than directly selectable.
+`search article`, `get article`, `article batch`, `get article ... tldr`, and
+the explicit Semantic Scholar helpers all work without `S2_API_KEY`. With the
+key, BioMCP sends authenticated requests and uses a dedicated rate limit at
+1 req/sec. Without it, BioMCP uses the shared unauthenticated pool at 1 req/2sec.
+`--source` still remains `all|pubtator|europepmc` in v1, so the S2 leg is
+automatic rather than directly selectable.
 References and recommendations can be empty for paywalled papers because of
 publisher elision in Semantic Scholar upstream coverage.
 

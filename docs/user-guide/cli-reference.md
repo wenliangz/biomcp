@@ -202,12 +202,11 @@ biomcp get article 22663011 tldr
 biomcp article batch 22663011 24200969
 ```
 
-`S2_API_KEY` is optional. It unlocks `get article ... tldr` plus the explicit
-`article citations|references|recommendations` helpers. `search article`
-remains PubTator3 + Europe PMC, and can add an optional Semantic Scholar leg
-when the key is present and the filter set is compatible. `article batch`
-stays available without the key and adds optional TLDR/citation metadata when
-Semantic Scholar is configured.
+`S2_API_KEY` is optional. With it, BioMCP sends authenticated Semantic Scholar
+requests at 1 req/sec for `search article`, `get article`, `get article ... tldr`,
+`article batch`, and the explicit `article citations|references|recommendations`
+helpers. Without it, those same paths use the shared unauthenticated pool at
+1 req/2sec.
 
 ### Trial
 

@@ -78,10 +78,11 @@ biomcp search article -g BRAF --limit 5
 
 ### `S2_API_KEY`
 
-Unlocks the optional Semantic Scholar article search leg plus article
-enrichment and navigation. Use it for directness-first `search article`
-results with merged Semantic Scholar metadata, `get article ... tldr`,
-`article citations`, `article references`, and `article recommendations`.
+Enables authenticated Semantic Scholar article requests. Use it for a dedicated
+provider quota at 1 req/sec across the optional article search leg, `get article`
+enrichment, `get article ... tldr`, `article citations`, `article references`,
+and `article recommendations`. Without the key, those paths still work through
+the shared unauthenticated pool at 1 req/2sec.
 
 Request a key at: <https://www.semanticscholar.org/product/api>
 
@@ -108,7 +109,7 @@ biomcp search adverse-event --drug pembrolizumab --limit 5
 - Do not commit secrets into source control.
 - Set keys in the same environment used by your MCP client.
 - Rotate keys when sharing machines or CI runners.
-- `S2_API_KEY` is optional for `search article` and plain `get article`. Without it, article search still works and stays explicit about Semantic Scholar being disabled. With it, article search can add the Semantic Scholar search leg and supporting citation metadata. The specific helper commands (`tldr`, `citations`, `references`, `recommendations`) still require the key.
+- `S2_API_KEY` is optional. Without it, article search/get/helper paths still work through the shared Semantic Scholar pool at 1 req/2sec. With it, BioMCP sends `x-api-key` and uses the authenticated quota at 1 req/sec for the same article search/get/helper paths.
 - `UMLS_API_KEY` is optional; when absent, `discover` still works with OLS4-only results.
 
 See also: [Source Licensing and Terms](../reference/source-licensing.md)

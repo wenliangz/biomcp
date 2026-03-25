@@ -1399,7 +1399,9 @@ EXAMPLES:
   biomcp article batch 22663011 10.1056/NEJMoa1203421 --json
 
 Returns compact multi-article summary cards for anchor selection.
-S2_API_KEY adds optional TLDR and citation metadata when available.
+Semantic Scholar enrichment is optional. With S2_API_KEY, BioMCP uses
+authenticated requests at 1 req/sec; without it, BioMCP uses the shared pool at
+1 req/2sec.
 See also: biomcp list article")]
     Batch {
         /// PMIDs, PMCIDs, or DOIs
@@ -1412,7 +1414,8 @@ EXAMPLES:
   biomcp article citations 22663011 --limit 5
   biomcp article citations PMC9984800 --limit 5
 
-Requires: S2_API_KEY
+Works without S2_API_KEY; authenticated requests are more reliable when the key
+is set.
 See also: biomcp list article")]
     Citations {
         /// PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID
@@ -1427,7 +1430,8 @@ EXAMPLES:
   biomcp article references 22663011 --limit 5
   biomcp article references 10.1056/NEJMoa1203421 --limit 5
 
-Requires: S2_API_KEY
+Works without S2_API_KEY; authenticated requests are more reliable when the key
+is set.
 See also: biomcp list article")]
     References {
         /// PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID
@@ -1442,7 +1446,8 @@ EXAMPLES:
   biomcp article recommendations 22663011 --limit 5
   biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 5
 
-Requires: S2_API_KEY
+Works without S2_API_KEY; authenticated requests are more reliable when the key
+is set.
 See also: biomcp list article")]
     Recommendations {
         /// One or more positive seeds (PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID)

@@ -16,10 +16,6 @@ OPENFDA_SPEC_NODEIDS = {
 S2_SPEC_NODEIDS = {
     "spec/06-article.md::Article Search JSON With Semantic Scholar Key",
     "spec/06-article.md::Semantic Scholar TLDR Section",
-    "spec/06-article.md::Semantic Scholar Citations",
-    "spec/06-article.md::Semantic Scholar References",
-    "spec/06-article.md::Semantic Scholar Recommendations (Single Seed)",
-    "spec/06-article.md::Semantic Scholar Recommendations (Multi Seed)",
 }
 
 DISGENET_SPEC_NODEIDS = {
@@ -65,7 +61,7 @@ def pytest_collection_modifyitems(
     if not _has_s2_api_key():
         s2_skip = pytest.mark.skip(
             reason=(
-                "requires S2_API_KEY for Semantic Scholar article enrichment/live-spec coverage"
+                "requires S2_API_KEY for authenticated Semantic Scholar live-spec coverage"
             )
         )
 

@@ -38,9 +38,10 @@ biomcp search article -g BRAF --since 2024-01-01 --no-preprints --limit 5
 ### Multi-source federation
 
 Article search fans out to PubTator3 and Europe PMC in parallel by default.
-When `S2_API_KEY` is set, BioMCP also adds a Semantic Scholar search leg for
-the same typed query and merges duplicates across PMID, PMCID, and DOI where
-possible.
+When the filter set is compatible, BioMCP also adds a Semantic Scholar search
+leg for the same typed query and merges duplicates across PMID, PMCID, and DOI
+where possible. `S2_API_KEY` upgrades that leg to authenticated requests at
+1 req/sec; without it, BioMCP uses the shared unauthenticated pool at 1 req/2sec.
 Search results are still deduplicated by PMID when BioMCP can resolve one.
 
 Default `--sort relevance` is directness-first: title coverage ranks ahead of
@@ -72,11 +73,11 @@ indexed by PubMed or Europe PMC and cannot be resolved.
 biomcp get article 22663011
 ```
 
-When `S2_API_KEY` is set, default article output also includes an optional
-Semantic Scholar section with TLDR text, influence counts, and open-access PDF
-metadata when that paper resolves in Semantic Scholar. `search article` also
-uses the key to add the Semantic Scholar search leg when compatible, but
-`--source` still stays `all|pubtator|europepmc` in v1.
+Default article output can include an optional Semantic Scholar section with
+TLDR text, influence counts, and open-access PDF metadata when that paper
+resolves in Semantic Scholar. `S2_API_KEY` makes those requests authenticated;
+without it, BioMCP uses the shared pool. `--source` still stays
+`all|pubtator|europepmc` in v1.
 
 ## Request specific sections
 
@@ -112,16 +113,15 @@ biomcp article recommendations 22663011 --limit 3   # Semantic Scholar related p
 ```
 
 `article batch` works without `S2_API_KEY` and echoes the original
-`requested_id` together with resolved PMID/PMCID/DOI fields. When the key is
-present, the batch helper adds optional TLDR and citation metadata with one
-Semantic Scholar batch request.
+`requested_id` together with resolved PMID/PMCID/DOI fields. When Semantic
+Scholar data is available, the batch helper can add optional TLDR and citation
+metadata. `S2_API_KEY` makes that enrichment authenticated and more reliable.
 
-The Semantic Scholar graph helpers still require `S2_API_KEY`. Without the
-key, ordinary `get article` and `article batch` still work, but the explicit
-graph/recommendation helpers return an API-key-required error. Citations
-usually work broadly; references and recommendations can be sparse or empty
-for paywalled papers because of publisher elision in the Semantic Scholar
-graph.
+The Semantic Scholar graph helpers also work without `S2_API_KEY`, but they use
+the shared pool and can fail fast on HTTP 429 with guidance to set the key for
+a dedicated rate limit. Citations usually work broadly; references and
+recommendations can be sparse or empty for paywalled papers because of
+publisher elision in the Semantic Scholar graph.
 
 ## Caching behavior
 

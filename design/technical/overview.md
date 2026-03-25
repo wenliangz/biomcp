@@ -69,7 +69,7 @@ unlock additional data:
 | Key | Source | Effect |
 |-----|--------|--------|
 | `NCBI_API_KEY` | PubTator3, PMC OA, NCBI ID converter | Higher rate limits |
-| `S2_API_KEY` | Semantic Scholar article enrichment/navigation | Optional TLDR, citation graph, and recommendation helpers at 1 req/sec |
+| `S2_API_KEY` | Semantic Scholar article enrichment/navigation | Optional authenticated Semantic Scholar requests at 1 req/sec; shared-pool requests run at 1 req/2sec without the key |
 | `OPENFDA_API_KEY` | OpenFDA | Higher rate limits |
 | `NCI_API_KEY` | NCI CTS trial search (`--source nci`) | Required for NCI source |
 | `ONCOKB_TOKEN` | OncoKB production API | Full clinical data (demo available without) |

@@ -20,7 +20,7 @@ Use [Source Licensing and Terms](source-licensing.md) for provider terms, reuse 
 | Trial (default) | ClinicalTrials.gov API v2 | `https://clinicaltrials.gov/api/v2` | No | Default trial search/get source |
 | Trial (optional) | NCI CTS API | `https://clinicaltrialsapi.cancer.gov/api/v2` | Yes (`NCI_API_KEY`) | Enabled via `--source nci` |
 | NCI CTS trial search | NCI CTS API | `https://clinicaltrialsapi.cancer.gov/api/v2` | Yes (`NCI_API_KEY`) | `search trial --source nci` |
-| Article search & metadata | PubTator3 + Europe PMC + optional Semantic Scholar | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api`, `https://www.ebi.ac.uk/europepmc/webservices/rest`, `https://api.semanticscholar.org` | Semantic Scholar requires `S2_API_KEY` | Federated search with identifier-aware merge and directness-first relevance ranking |
+| Article search & metadata | PubTator3 + Europe PMC + optional Semantic Scholar | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api`, `https://www.ebi.ac.uk/europepmc/webservices/rest`, `https://api.semanticscholar.org` | Optional (`S2_API_KEY`) | Federated search with identifier-aware merge and directness-first relevance ranking |
 | Article enrichment and graph helpers | Semantic Scholar | `https://api.semanticscholar.org` | Optional (`S2_API_KEY`) | Search-leg metadata, TLDR, influential citations, citation/reference graph, recommendations |
 | Article annotations | PubTator3 | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api` | No | Entity annotations |
 | Article fulltext resolution | PMC OA + NCBI ID Converter | `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi`, `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles` | No | Full-text and PMID/PMCID/DOI bridging |
@@ -64,7 +64,7 @@ BioMCP only requires API keys for a subset of sources.
 | Source | Environment variable | Required when |
 |--------|----------------------|---------------|
 | AlphaGenome | `ALPHAGENOME_API_KEY` | Running `get variant <id> predict` |
-| Semantic Scholar | `S2_API_KEY` | Adding the optional `search article` Semantic Scholar leg; running `article citations|references|recommendations`; enriching `get article` with TLDR and influence data |
+| Semantic Scholar | `S2_API_KEY` | Optional authenticated requests for `search article`, `get article`, `article batch`, TLDR, and citation/reference/recommendation helpers |
 | NCI CTS API | `NCI_API_KEY` | Trial operations with `--source nci` |
 | OncoKB | `ONCOKB_TOKEN` | Running `variant oncokb <id>` |
 | DisGeNET | `DISGENET_API_KEY` | Running `get gene <symbol> disgenet` or `get disease <name_or_id> disgenet` |
@@ -88,7 +88,7 @@ and practical ceilings observed in command behavior.
 | Trial search | `--limit` defaults to 10, supports pagination | Use `--offset` to page and keep filters stable |
 | Article search | `--limit` defaults to 10 | Use `--since` and typed entity filters to constrain results; `sort=relevance` is local directness-first reranking |
 | KEGG pathway search/detail | Rate-limited to 1 request / 334ms | Matches KEGG's published 3 requests / second guidance |
-| Semantic Scholar article helpers | 1 request / second, process-local | Use explicit helper commands and batch normalization for multi-paper recommendation inputs |
+| Semantic Scholar article helpers | 1 request / second with `S2_API_KEY`; 1 request / 2 seconds on the shared pool without it | Explicit helper commands fail fast on shared-pool `429` responses; set `S2_API_KEY` for dedicated quota and retry behavior |
 | DisGeNET `disgenet` sections | Server-enforced; trial accounts may return first-page-only results and `429` with `X-Rate-Limit-Retry-After-Seconds` | Keep requests explicit, avoid fan-out loops, and retry after the server-provided cooldown |
 
 ## Trial source behavior
@@ -104,7 +104,7 @@ BioMCP supports two trial backends with similar command syntax but different ret
 
 Article workflows compose multiple APIs for different tasks:
 
-1. PubTator3 + Europe PMC for federated search, with optional Semantic Scholar search when `S2_API_KEY` is set (parallel fan-out, identifier-aware merge across PMID/PMCID/DOI, local directness-first relevance ranking)
+1. PubTator3 + Europe PMC for federated search, with an optional Semantic Scholar leg when the filter set is compatible (parallel fan-out, identifier-aware merge across PMID/PMCID/DOI, local directness-first relevance ranking)
 2. Europe PMC for bibliographic metadata
 3. PubTator3 for entity annotations
 4. Semantic Scholar for the optional search leg, TLDR, citation graph, influential citation counts, and recommendations

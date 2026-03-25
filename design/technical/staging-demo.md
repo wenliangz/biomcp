@@ -75,7 +75,7 @@ in `tests/test_mcp_http_surface.py` and `tests/test_mcp_http_transport.py`.
 3. Run `BIOMCP_BIN=./target/release/biomcp ./scripts/genegpt-demo.sh`
 4. Run `BIOMCP_BIN=./target/release/biomcp ./scripts/geneagent-demo.sh`
 5. Run `./scripts/contract-smoke.sh --fast`
-6. If `S2_API_KEY` is present, run `./target/release/biomcp article citations 22663011 --limit 3`
+6. Run `./target/release/biomcp article citations 22663011 --limit 3` (with `S2_API_KEY` for authenticated quota, or without it to exercise the shared-pool path)
 7. Run `uv run pytest tests/test_mcp_contract.py -v --mcp-cmd "./target/release/biomcp serve"` when work touches MCP-facing behavior, docs, or startup expectations
 
 ## Credentials and Environment Variables

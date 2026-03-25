@@ -69,6 +69,19 @@ struct SourceDescriptor {
     probe: ProbeKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeClass {
+    Healthy,
+    Error,
+    Excluded,
+}
+
+#[derive(Debug, Clone)]
+struct ProbeOutcome {
+    row: HealthRow,
+    class: ProbeClass,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ProbeKind {
     Get {
@@ -83,6 +96,14 @@ enum ProbeKind {
         env_var: &'static str,
         header_name: &'static str,
         header_value_prefix: &'static str,
+    },
+    OptionalAuthGet {
+        url: &'static str,
+        env_var: &'static str,
+        header_name: &'static str,
+        header_value_prefix: &'static str,
+        unauthenticated_ok_status: &'static str,
+        authenticated_ok_status: &'static str,
     },
     AuthQueryParam {
         url: &'static str,
@@ -215,11 +236,13 @@ const HEALTH_SOURCES: &[SourceDescriptor] = &[
         affects: Some(
             "article search fan-out, enrichment, citations, references, and recommendations",
         ),
-        probe: ProbeKind::AuthGet {
+        probe: ProbeKind::OptionalAuthGet {
             url: "https://api.semanticscholar.org/graph/v1/paper/search?query=BRAF&fields=paperId,title&limit=1",
             env_var: "S2_API_KEY",
             header_name: "x-api-key",
             header_value_prefix: "",
+            unauthenticated_ok_status: "available (unauthenticated, shared rate limit)",
+            authenticated_ok_status: "configured (authenticated)",
         },
     },
     SourceDescriptor {
@@ -446,6 +469,10 @@ fn health_row(
     }
 }
 
+fn outcome(row: HealthRow, class: ProbeClass) -> ProbeOutcome {
+    ProbeOutcome { row, class }
+}
+
 fn masked_key_hint(value: &str) -> String {
     let prefix: String = value.trim().chars().take(3).collect();
     format!("{prefix}***")
@@ -465,12 +492,15 @@ fn decorated_status(base: &str, key_hint: Option<&str>) -> String {
     }
 }
 
-fn excluded_row(api: &str, env_var: &str, affects: Option<&'static str>) -> HealthRow {
-    health_row(
-        api,
-        format!("excluded (set {env_var})"),
-        "n/a".into(),
-        affects,
+fn excluded_outcome(api: &str, env_var: &str, affects: Option<&'static str>) -> ProbeOutcome {
+    outcome(
+        health_row(
+            api,
+            format!("excluded (set {env_var})"),
+            "n/a".into(),
+            affects,
+        ),
+        ProbeClass::Excluded,
     )
 }
 
@@ -500,7 +530,7 @@ async fn send_request(
     affects: Option<&'static str>,
     request: reqwest::RequestBuilder,
     key_hint: Option<String>,
-) -> HealthRow {
+) -> ProbeOutcome {
     let start = Instant::now();
     let response = request.send().await;
 
@@ -509,26 +539,35 @@ async fn send_request(
             let status = response.status();
             let elapsed = start.elapsed().as_millis();
             if status.is_success() {
-                health_row(
-                    api,
-                    decorated_status("ok", key_hint.as_deref()),
-                    format!("{elapsed}ms"),
-                    None,
+                outcome(
+                    health_row(
+                        api,
+                        decorated_status("ok", key_hint.as_deref()),
+                        format!("{elapsed}ms"),
+                        None,
+                    ),
+                    ProbeClass::Healthy,
                 )
             } else {
-                health_row(
-                    api,
-                    decorated_status("error", key_hint.as_deref()),
-                    format!("{elapsed}ms (HTTP {})", status.as_u16()),
-                    affects,
+                outcome(
+                    health_row(
+                        api,
+                        decorated_status("error", key_hint.as_deref()),
+                        format!("{elapsed}ms (HTTP {})", status.as_u16()),
+                        affects,
+                    ),
+                    ProbeClass::Error,
                 )
             }
         }
-        Err(err) => health_row(
-            api,
-            decorated_status("error", key_hint.as_deref()),
-            transport_error_latency(start, &err),
-            affects,
+        Err(err) => outcome(
+            health_row(
+                api,
+                decorated_status("error", key_hint.as_deref()),
+                transport_error_latency(start, &err),
+                affects,
+            ),
+            ProbeClass::Error,
         ),
     }
 }
@@ -538,7 +577,7 @@ async fn check_get(
     api: &str,
     url: &str,
     affects: Option<&'static str>,
-) -> HealthRow {
+) -> ProbeOutcome {
     send_request(api, affects, client.get(url), None).await
 }
 
@@ -548,7 +587,7 @@ async fn check_post_json(
     url: &str,
     payload: &str,
     affects: Option<&'static str>,
-) -> HealthRow {
+) -> ProbeOutcome {
     send_request(
         api,
         affects,
@@ -569,9 +608,9 @@ async fn check_auth_get(
     header_name: &str,
     header_value_prefix: &str,
     affects: Option<&'static str>,
-) -> HealthRow {
+) -> ProbeOutcome {
     let Some(key) = configured_key(env_var) else {
-        return excluded_row(api, env_var, affects);
+        return excluded_outcome(api, env_var, affects);
     };
 
     let key_hint = masked_key_hint(&key);
@@ -586,6 +625,71 @@ async fn check_auth_get(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn check_optional_auth_get(
+    client: reqwest::Client,
+    api: &str,
+    url: &str,
+    env_var: &str,
+    header_name: &str,
+    header_value_prefix: &str,
+    unauthenticated_ok_status: &str,
+    authenticated_ok_status: &str,
+    affects: Option<&'static str>,
+) -> ProbeOutcome {
+    let key = configured_key(env_var);
+    let key_hint = key.as_deref().map(masked_key_hint);
+    let request = match key {
+        Some(key) => client
+            .get(url)
+            .header(header_name, format!("{header_value_prefix}{key}")),
+        None => client.get(url),
+    };
+    let success_status = if key_hint.is_some() {
+        authenticated_ok_status
+    } else {
+        unauthenticated_ok_status
+    };
+    let start = Instant::now();
+
+    match request.send().await {
+        Ok(response) => {
+            let status = response.status();
+            let elapsed = start.elapsed().as_millis();
+            if status.is_success() {
+                outcome(
+                    health_row(
+                        api,
+                        success_status.to_string(),
+                        format!("{elapsed}ms"),
+                        None,
+                    ),
+                    ProbeClass::Healthy,
+                )
+            } else {
+                outcome(
+                    health_row(
+                        api,
+                        decorated_status("error", key_hint.as_deref()),
+                        format!("{elapsed}ms (HTTP {})", status.as_u16()),
+                        affects,
+                    ),
+                    ProbeClass::Error,
+                )
+            }
+        }
+        Err(err) => outcome(
+            health_row(
+                api,
+                decorated_status("error", key_hint.as_deref()),
+                transport_error_latency(start, &err),
+                affects,
+            ),
+            ProbeClass::Error,
+        ),
+    }
+}
+
 async fn check_auth_query_param(
     client: reqwest::Client,
     api: &str,
@@ -593,9 +697,9 @@ async fn check_auth_query_param(
     env_var: &str,
     param_name: &str,
     affects: Option<&'static str>,
-) -> HealthRow {
+) -> ProbeOutcome {
     let Some(key) = configured_key(env_var) else {
-        return excluded_row(api, env_var, affects);
+        return excluded_outcome(api, env_var, affects);
     };
 
     let key_hint = masked_key_hint(&key);
@@ -605,11 +709,14 @@ async fn check_auth_query_param(
             client.get(parsed)
         }
         Err(err) => {
-            return health_row(
-                api,
-                decorated_status("error", Some(&key_hint)),
-                format!("invalid url: {err}"),
-                affects,
+            return outcome(
+                health_row(
+                    api,
+                    decorated_status("error", Some(&key_hint)),
+                    format!("invalid url: {err}"),
+                    affects,
+                ),
+                ProbeClass::Error,
             );
         }
     };
@@ -627,9 +734,9 @@ async fn check_auth_post_json(
     header_name: &str,
     header_value_prefix: &str,
     affects: Option<&'static str>,
-) -> HealthRow {
+) -> ProbeOutcome {
     let Some(key) = configured_key(env_var) else {
-        return excluded_row(api, env_var, affects);
+        return excluded_outcome(api, env_var, affects);
     };
 
     let key_hint = masked_key_hint(&key);
@@ -652,31 +759,37 @@ async fn check_alphagenome_connect(
     api: &str,
     env_var: &str,
     affects: Option<&'static str>,
-) -> HealthRow {
+) -> ProbeOutcome {
     let Some(key) = configured_key(env_var) else {
-        return excluded_row(api, env_var, affects);
+        return excluded_outcome(api, env_var, affects);
     };
 
     let key_hint = masked_key_hint(&key);
     let start = Instant::now();
 
     match crate::sources::alphagenome::AlphaGenomeClient::new().await {
-        Ok(_) => health_row(
-            api,
-            decorated_status("ok", Some(&key_hint)),
-            format!("{}ms", start.elapsed().as_millis()),
-            None,
+        Ok(_) => outcome(
+            health_row(
+                api,
+                decorated_status("ok", Some(&key_hint)),
+                format!("{}ms", start.elapsed().as_millis()),
+                None,
+            ),
+            ProbeClass::Healthy,
         ),
-        Err(err) => health_row(
-            api,
-            decorated_status("error", Some(&key_hint)),
-            api_error_latency(start, &err),
-            affects,
+        Err(err) => outcome(
+            health_row(
+                api,
+                decorated_status("error", Some(&key_hint)),
+                api_error_latency(start, &err),
+                affects,
+            ),
+            ProbeClass::Error,
         ),
     }
 }
 
-async fn probe_source(client: reqwest::Client, source: &SourceDescriptor) -> HealthRow {
+async fn probe_source(client: reqwest::Client, source: &SourceDescriptor) -> ProbeOutcome {
     match source.probe {
         ProbeKind::Get { url } => check_get(client, source.api, url, source.affects).await,
         ProbeKind::PostJson { url, payload } => {
@@ -695,6 +808,27 @@ async fn probe_source(client: reqwest::Client, source: &SourceDescriptor) -> Hea
                 env_var,
                 header_name,
                 header_value_prefix,
+                source.affects,
+            )
+            .await
+        }
+        ProbeKind::OptionalAuthGet {
+            url,
+            env_var,
+            header_name,
+            header_value_prefix,
+            unauthenticated_ok_status,
+            authenticated_ok_status,
+        } => {
+            check_optional_auth_get(
+                client,
+                source.api,
+                url,
+                env_var,
+                header_name,
+                header_value_prefix,
+                unauthenticated_ok_status,
+                authenticated_ok_status,
                 source.affects,
             )
             .await
@@ -758,7 +892,7 @@ fn health_http_client() -> Result<reqwest::Client, BioMcpError> {
     }
 }
 
-async fn check_cache_dir() -> HealthRow {
+async fn check_cache_dir() -> ProbeOutcome {
     let start = Instant::now();
     let dir = crate::utils::download::biomcp_cache_dir();
     let suffix = std::time::SystemTime::now()
@@ -779,18 +913,46 @@ async fn check_cache_dir() -> HealthRow {
     .await;
 
     match result {
-        Ok(()) => HealthRow {
-            api: format!("Cache dir ({})", dir.display()),
-            status: "ok".into(),
-            latency: format!("{}ms", start.elapsed().as_millis()),
-            affects: None,
-        },
-        Err(err) => HealthRow {
-            api: format!("Cache dir ({})", dir.display()),
-            status: "error".into(),
-            latency: format!("{:?}", err.kind()),
-            affects: Some("local cache-backed lookups and downloads".into()),
-        },
+        Ok(()) => outcome(
+            HealthRow {
+                api: format!("Cache dir ({})", dir.display()),
+                status: "ok".into(),
+                latency: format!("{}ms", start.elapsed().as_millis()),
+                affects: None,
+            },
+            ProbeClass::Healthy,
+        ),
+        Err(err) => outcome(
+            HealthRow {
+                api: format!("Cache dir ({})", dir.display()),
+                status: "error".into(),
+                latency: format!("{:?}", err.kind()),
+                affects: Some("local cache-backed lookups and downloads".into()),
+            },
+            ProbeClass::Error,
+        ),
+    }
+}
+
+fn report_from_outcomes(outcomes: Vec<ProbeOutcome>) -> HealthReport {
+    let healthy = outcomes
+        .iter()
+        .filter(|outcome| outcome.class == ProbeClass::Healthy)
+        .count();
+    let excluded = outcomes
+        .iter()
+        .filter(|outcome| outcome.class == ProbeClass::Excluded)
+        .count();
+    let rows = outcomes
+        .into_iter()
+        .map(|outcome| outcome.row)
+        .collect::<Vec<_>>();
+
+    HealthReport {
+        healthy,
+        excluded,
+        total: rows.len(),
+        rows,
     }
 }
 
@@ -801,7 +963,7 @@ async fn check_cache_dir() -> HealthRow {
 /// Returns an error when the shared HTTP client cannot be created.
 pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
     let client = health_http_client()?;
-    let mut rows = join_all(
+    let mut outcomes = join_all(
         health_sources()
             .iter()
             .map(|source| probe_source(client.clone(), source)),
@@ -809,34 +971,22 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
     .await;
 
     if !apis_only {
-        rows.push(check_cache_dir().await);
+        outcomes.push(check_cache_dir().await);
     }
 
-    let healthy = rows
-        .iter()
-        .filter(|row| row.status.starts_with("ok"))
-        .count();
-    let excluded = rows
-        .iter()
-        .filter(|row| row.status.starts_with("excluded"))
-        .count();
-
-    Ok(HealthReport {
-        healthy,
-        excluded,
-        total: rows.len(),
-        rows,
-    })
+    Ok(report_from_outcomes(outcomes))
 }
 
 #[cfg(test)]
 mod tests {
     use std::future::Future;
     use tokio::sync::MutexGuard;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::{
-        HealthReport, HealthRow, ProbeKind, affects_for_api, health_sources, masked_key_hint,
-        probe_source,
+        HealthReport, HealthRow, ProbeClass, ProbeKind, ProbeOutcome, SourceDescriptor,
+        affects_for_api, health_sources, masked_key_hint, probe_source, report_from_outcomes,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -994,12 +1144,13 @@ mod tests {
             .find(|source| source.api == "OncoKB")
             .expect("oncokb health source");
 
-        let row = block_on(probe_source(reqwest::Client::new(), source));
+        let outcome = block_on(probe_source(reqwest::Client::new(), source));
 
-        assert_eq!(row.status, "excluded (set ONCOKB_TOKEN)");
-        assert_eq!(row.latency, "n/a");
+        assert_eq!(outcome.class, ProbeClass::Excluded);
+        assert_eq!(outcome.row.status, "excluded (set ONCOKB_TOKEN)");
+        assert_eq!(outcome.row.latency, "n/a");
         assert_eq!(
-            row.affects.as_deref(),
+            outcome.row.affects.as_deref(),
             Some("variant oncokb command and variant evidence section")
         );
     }
@@ -1020,10 +1171,11 @@ mod tests {
             .find(|source| source.api == "NCI CTS")
             .expect("nci health source");
 
-        let row = block_on(probe_source(reqwest::Client::new(), source));
+        let outcome = block_on(probe_source(reqwest::Client::new(), source));
 
-        assert_eq!(row.status, "excluded (set NCI_API_KEY)");
-        assert_eq!(row.latency, "n/a");
+        assert_eq!(outcome.class, ProbeClass::Excluded);
+        assert_eq!(outcome.row.status, "excluded (set NCI_API_KEY)");
+        assert_eq!(outcome.row.latency, "n/a");
     }
 
     #[test]
@@ -1091,6 +1243,109 @@ mod tests {
 
         let md = report.to_markdown();
         assert!(md.contains("Status: 1 ok, 1 error, 1 excluded"));
+    }
+
+    #[test]
+    fn report_counts_use_probe_class_not_status_prefixes() {
+        let report = report_from_outcomes(vec![
+            ProbeOutcome {
+                row: HealthRow {
+                    api: "Semantic Scholar".into(),
+                    status: "available (unauthenticated, shared rate limit)".into(),
+                    latency: "15ms".into(),
+                    affects: None,
+                },
+                class: ProbeClass::Healthy,
+            },
+            ProbeOutcome {
+                row: HealthRow {
+                    api: "OncoKB".into(),
+                    status: "excluded (set ONCOKB_TOKEN)".into(),
+                    latency: "n/a".into(),
+                    affects: Some("variant oncokb command and variant evidence section".into()),
+                },
+                class: ProbeClass::Excluded,
+            },
+        ]);
+
+        assert_eq!(report.healthy, 1);
+        assert_eq!(report.excluded, 1);
+        assert_eq!(report.total, 2);
+    }
+
+    #[test]
+    fn optional_auth_get_reports_unauthed_semantic_scholar_as_healthy() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", None);
+        let server = block_on(MockServer::start());
+        let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
+        let source = SourceDescriptor {
+            api: "Semantic Scholar",
+            affects: Some(
+                "article search fan-out, enrichment, citations, references, and recommendations",
+            ),
+            probe: ProbeKind::OptionalAuthGet {
+                url,
+                env_var: "S2_API_KEY",
+                header_name: "x-api-key",
+                header_value_prefix: "",
+                unauthenticated_ok_status: "available (unauthenticated, shared rate limit)",
+                authenticated_ok_status: "configured (authenticated)",
+            },
+        };
+
+        block_on(async {
+            Mock::given(method("GET"))
+                .and(path("/health"))
+                .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+        });
+
+        let outcome = block_on(probe_source(reqwest::Client::new(), &source));
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(
+            outcome.row.status,
+            "available (unauthenticated, shared rate limit)"
+        );
+    }
+
+    #[test]
+    fn optional_auth_get_reports_authed_semantic_scholar_as_configured() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", Some("test-key-abc"));
+        let server = block_on(MockServer::start());
+        let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
+        let source = SourceDescriptor {
+            api: "Semantic Scholar",
+            affects: Some(
+                "article search fan-out, enrichment, citations, references, and recommendations",
+            ),
+            probe: ProbeKind::OptionalAuthGet {
+                url,
+                env_var: "S2_API_KEY",
+                header_name: "x-api-key",
+                header_value_prefix: "",
+                unauthenticated_ok_status: "available (unauthenticated, shared rate limit)",
+                authenticated_ok_status: "configured (authenticated)",
+            },
+        };
+
+        block_on(async {
+            Mock::given(method("GET"))
+                .and(path("/health"))
+                .and(header("x-api-key", "test-key-abc"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+        });
+
+        let outcome = block_on(probe_source(reqwest::Client::new(), &source));
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(outcome.row.status, "configured (authenticated)");
     }
 
     #[test]

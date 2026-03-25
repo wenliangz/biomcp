@@ -639,12 +639,7 @@ pub fn semantic_scholar_search_enabled(
     filters: &ArticleSearchFilters,
     source: ArticleSourceFilter,
 ) -> bool {
-    if source != ArticleSourceFilter::All || has_strict_europepmc_filters(filters) {
-        return false;
-    }
-    SemanticScholarClient::new()
-        .map(|client| client.is_configured())
-        .unwrap_or(false)
+    source == ArticleSourceFilter::All && !has_strict_europepmc_filters(filters)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1714,9 +1709,6 @@ async fn enrich_article_batch_with_semantic_scholar(
     items: &mut [ArticleBatchItem],
 ) -> Result<(), BioMcpError> {
     let client = SemanticScholarClient::new()?;
-    if !client.is_configured() {
-        return Ok(());
-    }
 
     let mut lookup_ids = Vec::new();
     let mut item_positions = Vec::new();
@@ -1764,9 +1756,6 @@ pub async fn get_batch_compact(ids: &[String]) -> Result<Vec<ArticleBatchItem>, 
 
 async fn enrich_article_with_semantic_scholar(article: &mut Article) -> Result<(), BioMcpError> {
     let client = SemanticScholarClient::new()?;
-    if !client.is_configured() {
-        return Ok(());
-    }
 
     let lookup_id = article
         .pmid
@@ -1784,15 +1773,6 @@ async fn enrich_article_with_semantic_scholar(article: &mut Article) -> Result<(
 
     Ok(())
 }
-
-fn semantic_scholar_api_key_required(client: &SemanticScholarClient) -> Result<(), BioMcpError> {
-    if client.is_configured() {
-        Ok(())
-    } else {
-        Err(SemanticScholarClient::api_key_required())
-    }
-}
-
 fn graph_edge_from_citation(edge: SemanticScholarCitationEdge) -> ArticleGraphEdge {
     ArticleGraphEdge {
         paper: related_paper_from_semantic_scholar(&edge.citing_paper),
@@ -2013,9 +1993,6 @@ async fn search_semantic_scholar_candidates(
     limit: usize,
 ) -> Result<Vec<ArticleSearchResult>, BioMcpError> {
     let client = SemanticScholarClient::new()?;
-    if !client.is_configured() {
-        return Ok(Vec::new());
-    }
 
     let query = build_semantic_scholar_query(filters);
     if query.trim().is_empty() {
@@ -2362,7 +2339,6 @@ pub async fn get(id: &str, sections: &[String]) -> Result<Article, BioMcpError> 
 
 pub async fn citations(id: &str, limit: usize) -> Result<ArticleGraphResult, BioMcpError> {
     let client = SemanticScholarClient::new()?;
-    semantic_scholar_api_key_required(&client)?;
     let europe = EuropePmcClient::new()?;
     let article = resolve_semantic_scholar_seed(id, &client, &europe).await?;
     let graph_id = article
@@ -2384,7 +2360,6 @@ pub async fn citations(id: &str, limit: usize) -> Result<ArticleGraphResult, Bio
 
 pub async fn references(id: &str, limit: usize) -> Result<ArticleGraphResult, BioMcpError> {
     let client = SemanticScholarClient::new()?;
-    semantic_scholar_api_key_required(&client)?;
     let europe = EuropePmcClient::new()?;
     let article = resolve_semantic_scholar_seed(id, &client, &europe).await?;
     let graph_id = article
@@ -2410,7 +2385,6 @@ pub async fn recommendations(
     limit: usize,
 ) -> Result<ArticleRecommendationsResult, BioMcpError> {
     let client = SemanticScholarClient::new()?;
-    semantic_scholar_api_key_required(&client)?;
     let europe = EuropePmcClient::new()?;
     let positive_seeds = resolve_semantic_scholar_seeds(ids, &client, &europe).await?;
     let negative_seeds = resolve_semantic_scholar_seeds(negative, &client, &europe).await?;
@@ -2463,7 +2437,7 @@ pub async fn recommendations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::matchers::{body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     async fn lock_env() -> tokio::sync::MutexGuard<'static, ()> {
@@ -2792,6 +2766,201 @@ mod tests {
         let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
             .expect_err("planner should reject strict-only filter on pubtator");
         assert!(err.to_string().contains("--type"));
+    }
+
+    #[tokio::test]
+    async fn semantic_scholar_search_is_enabled_without_api_key_for_federated_queries() {
+        let _guard = lock_env().await;
+        let _s2_key = set_env_var("S2_API_KEY", None);
+
+        assert!(semantic_scholar_search_enabled(
+            &empty_filters(),
+            ArticleSourceFilter::All
+        ));
+    }
+
+    #[tokio::test]
+    async fn citations_work_without_api_key() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _s2_base = set_env_var("BIOMCP_S2_BASE", Some(&server.uri()));
+        let _s2_key = set_env_var("S2_API_KEY", None);
+
+        Mock::given(method("POST"))
+            .and(path("/graph/v1/paper/batch"))
+            .and(query_param(
+                "fields",
+                "paperId,externalIds,title,venue,year",
+            ))
+            .and(body_string_contains("\"PMID:22663011\""))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "paperId": "paper-1",
+                    "externalIds": {"PubMed": "22663011"},
+                    "title": "Seed paper",
+                    "venue": "Science",
+                    "year": 2012
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/paper-1/citations"))
+            .and(query_param(
+                "fields",
+                "contexts,intents,isInfluential,citingPaper.paperId,citingPaper.externalIds,citingPaper.title,citingPaper.venue,citingPaper.year",
+            ))
+            .and(query_param("limit", "1"))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [{
+                    "contexts": ["Example context"],
+                    "intents": ["Background"],
+                    "isInfluential": false,
+                    "citingPaper": {
+                        "paperId": "paper-2",
+                        "externalIds": {"PubMed": "24200969"},
+                        "title": "Related paper",
+                        "venue": "Nature",
+                        "year": 2024
+                    }
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = citations("22663011", 1)
+            .await
+            .expect("no-key citations should succeed");
+
+        assert_eq!(result.article.paper_id.as_deref(), Some("paper-1"));
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(result.edges[0].paper.pmid.as_deref(), Some("24200969"));
+    }
+
+    #[tokio::test]
+    async fn references_work_without_api_key() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _s2_base = set_env_var("BIOMCP_S2_BASE", Some(&server.uri()));
+        let _s2_key = set_env_var("S2_API_KEY", None);
+
+        Mock::given(method("POST"))
+            .and(path("/graph/v1/paper/batch"))
+            .and(query_param(
+                "fields",
+                "paperId,externalIds,title,venue,year",
+            ))
+            .and(body_string_contains("\"PMID:22663011\""))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "paperId": "paper-1",
+                    "externalIds": {"PubMed": "22663011"},
+                    "title": "Seed paper",
+                    "venue": "Science",
+                    "year": 2012
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/paper-1/references"))
+            .and(query_param(
+                "fields",
+                "contexts,intents,isInfluential,citedPaper.paperId,citedPaper.externalIds,citedPaper.title,citedPaper.venue,citedPaper.year",
+            ))
+            .and(query_param("limit", "1"))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [{
+                    "contexts": ["Example context"],
+                    "intents": ["Background"],
+                    "isInfluential": false,
+                    "citedPaper": {
+                        "paperId": "paper-2",
+                        "externalIds": {"PubMed": "19424861"},
+                        "title": "Referenced paper",
+                        "venue": "Cell",
+                        "year": 2009
+                    }
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = references("22663011", 1)
+            .await
+            .expect("no-key references should succeed");
+
+        assert_eq!(result.article.paper_id.as_deref(), Some("paper-1"));
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(result.edges[0].paper.pmid.as_deref(), Some("19424861"));
+    }
+
+    #[tokio::test]
+    async fn recommendations_work_without_api_key() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _s2_base = set_env_var("BIOMCP_S2_BASE", Some(&server.uri()));
+        let _s2_key = set_env_var("S2_API_KEY", None);
+
+        Mock::given(method("POST"))
+            .and(path("/graph/v1/paper/batch"))
+            .and(query_param(
+                "fields",
+                "paperId,externalIds,title,venue,year",
+            ))
+            .and(body_string_contains("\"PMID:22663011\""))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "paperId": "paper-1",
+                    "externalIds": {"PubMed": "22663011"},
+                    "title": "Seed paper",
+                    "venue": "Science",
+                    "year": 2012
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/recommendations/v1/papers/forpaper/paper-1"))
+            .and(query_param(
+                "fields",
+                "paperId,externalIds,title,venue,year",
+            ))
+            .and(query_param("limit", "1"))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "recommendedPapers": [{
+                    "paperId": "paper-3",
+                    "externalIds": {"PubMed": "28052061"},
+                    "title": "Recommended paper",
+                    "venue": "Nature Medicine",
+                    "year": 2017
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = recommendations(&["22663011".to_string()], &[], 1)
+            .await
+            .expect("no-key recommendations should succeed");
+
+        assert_eq!(result.positive_seeds.len(), 1);
+        assert_eq!(result.recommendations.len(), 1);
+        assert_eq!(result.recommendations[0].pmid.as_deref(), Some("28052061"));
     }
 
     #[test]
@@ -3618,10 +3787,22 @@ mod tests {
         let _guard = lock_env().await;
         let pubtator = MockServer::start().await;
         let europepmc = MockServer::start().await;
+        let s2 = MockServer::start().await;
         let _pubtator_base = set_env_var("BIOMCP_PUBTATOR_BASE", Some(&pubtator.uri()));
         let _europepmc_base = set_env_var("BIOMCP_EUROPEPMC_BASE", Some(&europepmc.uri()));
-        let _s2_base = set_env_var("BIOMCP_S2_BASE", None);
+        let _s2_base = set_env_var("BIOMCP_S2_BASE", Some(&s2.uri()));
         let _s2_key = set_env_var("S2_API_KEY", None);
+
+        // S2 is now enabled without a key; return empty results so S2 doesn't
+        // interfere with the PubTator/EuropePMC assertion below.
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total": 0,
+                "data": []
+            })))
+            .mount(&s2)
+            .await;
 
         Mock::given(method("GET"))
             .and(query_param("page", "1"))

@@ -39,7 +39,7 @@ execution failures:
 | Variable | Used by |
 |----------|---------|
 | `ALPHAGENOME_API_KEY` | Variant `predict` section |
-| `S2_API_KEY` | Semantic Scholar article TLDR/citation/reference/recommendation helpers |
+| `S2_API_KEY` | Optional authenticated Semantic Scholar requests for article search/get/helpers |
 | `NCI_API_KEY` | Trial source `--source nci` |
 | `ONCOKB_TOKEN` | Production OncoKB enrichment |
 | `OPENFDA_API_KEY` | Optional OpenFDA quota stability |

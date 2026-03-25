@@ -69,7 +69,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 | PubTator3 | 1 | direct_api | optional_env | NCBI/NLM public-domain annotation service | results are broadly reusable, but preserve PMID/source provenance and article-level rights separately | <https://www.ncbi.nlm.nih.gov/research/pubtator3/api> |
 | QuickGO | 1 | direct_api | none | GO/EMBL-EBI open data service | query results are generally reusable; preserve GO/EMBL-EBI attribution where expected | <https://www.ebi.ac.uk/QuickGO/> |
 | Reactome | 1 | direct_api | none | Reactome pathway content is CC BY 4.0, with some data exports additionally placed under CC0 | reuse is allowed with attribution; preserve pathway/source provenance in downstream materials | <https://reactome.org/license> |
-| Semantic Scholar | 2 | direct_api | required_env | custom API license agreement | the API license restricts repackaging, resale, and broad commercial redistribution without expanded licensing | <https://www.semanticscholar.org/product/api/license> |
+| Semantic Scholar | 2 | direct_api | optional_env | custom API license agreement | the API license restricts repackaging, resale, and broad commercial redistribution without expanded licensing | <https://www.semanticscholar.org/product/api/license> |
 | STRING | 1 | direct_api | none | CC BY 4.0 | reuse is allowed with attribution to STRING and the original publication/resource | <https://string-db.org/cgi/access?footer_active_subpage=licensing> |
 | UMLS | 2 | direct_api | required_env | custom UMLS Metathesaurus license and terminology-specific appendices | do not assume unrestricted redistribution; some embedded vocabularies add their own restrictions or affiliate licenses | <https://www.nlm.nih.gov/databases/umls.html> |
 | UniProt | 1 | direct_api | none | CC BY 4.0 | reuse is allowed with attribution; linked cross-references can have their own terms | <https://www.uniprot.org/help/license> |
@@ -532,14 +532,14 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 
 - BioMCP surfaces: `search article; get article <id> tldr; article citations <id>; article references <id>; article recommendations <id>`
 - Integration mode: `direct_api`
-- BioMCP auth: `required_env` via `S2_API_KEY`
-- Provider access / registration: API key required for BioMCP's Semantic Scholar search/helper path and governed by the API license agreement
+- BioMCP auth: `optional_env` via `S2_API_KEY`
+- Provider access / registration: unauthenticated access is available on the shared pool; authenticated access uses the provider-issued API key and remains governed by the API license agreement
 - License / terms summary: custom API license agreement
 - Redistribution / reuse summary: the API license restricts repackaging, resale, and broad commercial redistribution without expanded licensing
 - Official terms URL: <https://www.semanticscholar.org/product/api/license>
 - API key / account URL: <https://www.semanticscholar.org/product/api>
 - Reviewed on: `2026-03-20`
-- Notes: The overview page says many endpoints are publicly reachable without auth, but BioMCP's article search leg and helper commands deliberately require `S2_API_KEY` to stay within the supported quota path.
+- Notes: BioMCP can call Semantic Scholar without `S2_API_KEY`, but uses a more conservative shared-pool rate limit and recommends the key for dedicated quota and reliability.
 
 ### UMLS
 
