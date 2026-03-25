@@ -565,6 +565,37 @@ fn normalize_article_type(value: &str) -> Result<&'static str, BioMcpError> {
     }
 }
 
+fn relabel_date_argument_error(err: BioMcpError, flag_name: &str) -> BioMcpError {
+    if let BioMcpError::InvalidArgument(message) = err {
+        BioMcpError::InvalidArgument(message.replace("--since", flag_name))
+    } else {
+        err
+    }
+}
+
+fn normalized_date_bound(
+    value: Option<&str>,
+    flag_name: &str,
+) -> Result<Option<String>, BioMcpError> {
+    value
+        .map(|value| {
+            validate_since(value).map_err(|err| relabel_date_argument_error(err, flag_name))
+        })
+        .transpose()
+}
+
+fn validate_search_filter_values(filters: &ArticleSearchFilters) -> Result<(), BioMcpError> {
+    if let Some(article_type) = filters
+        .article_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        normalize_article_type(article_type)?;
+    }
+    Ok(())
+}
+
 fn validate_required_search_filters(filters: &ArticleSearchFilters) -> Result<(), BioMcpError> {
     if filters.gene.is_none()
         && filters.disease.is_none()
@@ -584,12 +615,8 @@ fn validate_required_search_filters(filters: &ArticleSearchFilters) -> Result<()
 fn normalized_date_bounds(
     filters: &ArticleSearchFilters,
 ) -> Result<(Option<String>, Option<String>), BioMcpError> {
-    let normalized_date_from = filters
-        .date_from
-        .as_deref()
-        .map(validate_since)
-        .transpose()?;
-    let normalized_date_to = filters.date_to.as_deref().map(validate_since).transpose()?;
+    let normalized_date_from = normalized_date_bound(filters.date_from.as_deref(), "--date-from")?;
+    let normalized_date_to = normalized_date_bound(filters.date_to.as_deref(), "--date-to")?;
     if let (Some(from), Some(to)) = (
         normalized_date_from.as_deref(),
         normalized_date_to.as_deref(),
@@ -2229,6 +2256,9 @@ pub async fn search_page(
             "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
         )));
     }
+    validate_required_search_filters(filters)?;
+    normalized_date_bounds(filters)?;
+    validate_search_filter_values(filters)?;
     let plan = plan_backends(filters, source)?;
     if filters.sort == ArticleSort::Relevance {
         return search_relevance_page(filters, limit, offset, plan).await;
@@ -2678,6 +2708,59 @@ mod tests {
     }
 
     #[test]
+    fn normalized_date_bounds_normalizes_partial_dates() {
+        let mut filters = empty_filters();
+        filters.date_from = Some("2020".into());
+        filters.date_to = Some("2024-12".into());
+
+        let (date_from, date_to) =
+            normalized_date_bounds(&filters).expect("partial dates should normalize");
+
+        assert_eq!(date_from.as_deref(), Some("2020-01-01"));
+        assert_eq!(date_to.as_deref(), Some("2024-12-01"));
+    }
+
+    #[test]
+    fn normalized_date_bounds_rejects_bad_month() {
+        let mut filters = empty_filters();
+        filters.date_from = Some("2024-13-01".into());
+
+        let err = normalized_date_bounds(&filters).expect_err("invalid month should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "Invalid argument: Invalid month 13 in --date-from (must be 01-12)"
+        );
+    }
+
+    #[test]
+    fn normalized_date_bounds_rejects_bad_date_to_with_flag_name() {
+        let mut filters = empty_filters();
+        filters.date_to = Some("2024-99".into());
+
+        let err = normalized_date_bounds(&filters).expect_err("invalid date-to should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "Invalid argument: Invalid month 99 in --date-to (must be 01-12)"
+        );
+    }
+
+    #[test]
+    fn normalized_date_bounds_rejects_inverted_range() {
+        let mut filters = empty_filters();
+        filters.date_from = Some("2024-06-01".into());
+        filters.date_to = Some("2020-01-01".into());
+
+        let err = normalized_date_bounds(&filters).expect_err("inverted range should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "Invalid argument: --date-from must be <= --date-to"
+        );
+    }
+
+    #[test]
     fn normalize_article_type_accepts_aliases() {
         assert_eq!(
             normalize_article_type("review").expect("review should normalize"),
@@ -2711,6 +2794,22 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("Invalid argument"));
         assert!(msg.contains("case-reports"));
+    }
+
+    #[tokio::test]
+    async fn search_page_rejects_unknown_article_type_before_backend_planning() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.article_type = Some("invalid".into());
+
+        let err = search_page(&filters, 1, 0, ArticleSourceFilter::PubTator)
+            .await
+            .expect_err("invalid article type should fail before planner-specific errors");
+
+        assert_eq!(
+            err.to_string(),
+            "Invalid argument: --type must be one of: review, research, research-article, case-reports, meta-analysis"
+        );
     }
 
     #[test]

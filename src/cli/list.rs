@@ -200,8 +200,8 @@ fn list_article() -> String {
 - `search article <query>` - positional free text keyword
 - `search article -k <keyword>` (or `-q <keyword>`) - free text keyword
 - `search article --type <review|research|case-reports|meta-analysis>`
-- `search article --date-from <YYYY-MM-DD> --date-to <YYYY-MM-DD>`
-- `search article --since <YYYY-MM-DD>` - alias for `--date-from`
+- `search article --date-from <YYYY|YYYY-MM|YYYY-MM-DD> --date-to <YYYY|YYYY-MM|YYYY-MM-DD>`
+- `search article --since <YYYY|YYYY-MM|YYYY-MM-DD>` - alias for `--date-from`
 - `search article --journal <name>`
 - `search article --open-access`
 - `search article --exclude-retracted`
@@ -780,7 +780,9 @@ mod tests {
         assert!(trial.contains("--biomarker <text>"));
 
         let article = render(Some("article")).expect("list article should render");
-        assert!(article.contains("--since <YYYY-MM-DD>"));
+        assert!(article.contains("--date-from <YYYY|YYYY-MM|YYYY-MM-DD>"));
+        assert!(article.contains("--date-to <YYYY|YYYY-MM|YYYY-MM-DD>"));
+        assert!(article.contains("--since <YYYY|YYYY-MM|YYYY-MM-DD>"));
         assert!(article.contains("article batch <id> [<id>...]"));
     }
 

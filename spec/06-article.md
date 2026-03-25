@@ -36,6 +36,74 @@ echo "$out" | mustmatch like "keyword=immunotherapy"
 echo "$out" | mustmatch like "PMID"
 ```
 
+## Invalid Date Fails Before Backend Warnings
+
+Malformed article dates must fail at the front door, before backend routing,
+autocomplete, or warning paths run.
+
+```bash
+unset status
+out="$(biomcp search article -g BRAF --date-from 2025-99-01 --limit 1 2>&1)" || status=$?
+test "${status:-0}" -eq 1
+echo "$out" | mustmatch like "Error: Invalid argument:"
+echo "$out" | mustmatch like "Invalid month 99 in --date-from"
+echo "$out" | mustmatch not like "--since"
+echo "$out" | mustmatch not like "WARN"
+echo "$out" | mustmatch not like "PubTator"
+echo "$out" | mustmatch not like "Europe PMC"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Missing Filters Fail Before Planner Warnings
+
+Queryless article searches should fail with the existing invalid-argument
+guidance and should not leak backend-leg warning noise.
+
+```bash
+unset status
+out="$(biomcp search article --limit 1 2>&1)" || status=$?
+test "${status:-0}" -eq 1
+echo "$out" | mustmatch like "Error: Invalid argument:"
+echo "$out" | mustmatch like "At least one filter is required."
+echo "$out" | mustmatch like "biomcp search article -g BRAF"
+echo "$out" | mustmatch not like "WARN"
+echo "$out" | mustmatch not like "PubTator"
+echo "$out" | mustmatch not like "Europe PMC"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Inverted Date Range Is A Clean Invalid Argument
+
+Date ranges with `--date-from` after `--date-to` must fail with the explicit
+ordering error and no backend warning noise.
+
+```bash
+unset status
+out="$(biomcp search article -g BRAF --date-from 2024-01-01 --date-to 2020-01-01 --limit 1 2>&1)" || status=$?
+test "${status:-0}" -eq 1
+echo "$out" | mustmatch like "Error: Invalid argument: --date-from must be <= --date-to"
+echo "$out" | mustmatch not like "WARN"
+echo "$out" | mustmatch not like "PubTator"
+echo "$out" | mustmatch not like "Europe PMC"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Article Date Flag Help Advertises Accepted Formats
+
+The article command help and list output should both advertise the shared date
+parser contract: `YYYY`, `YYYY-MM`, and `YYYY-MM-DD`.
+
+```bash
+help_out="$(biomcp search article --help)"
+echo "$help_out" | mustmatch like "Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)"
+echo "$help_out" | mustmatch like "Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)"
+
+list_out="$(biomcp list article)"
+echo "$list_out" | mustmatch like "--date-from <YYYY|YYYY-MM|YYYY-MM-DD>"
+echo "$list_out" | mustmatch like "--date-to <YYYY|YYYY-MM|YYYY-MM-DD>"
+echo "$list_out" | mustmatch like "--since <YYYY|YYYY-MM|YYYY-MM-DD>"
+```
+
 ## Source-Specific PubTator Search Uses Default Retraction Filter
 
 Default article search still excludes confirmed retractions, but PubTator rows

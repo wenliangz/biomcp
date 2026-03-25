@@ -580,10 +580,10 @@ See also: biomcp list article")]
         #[arg(value_name = "QUERY")]
         positional_query: Option<String>,
 
-        /// Published after date (YYYY-MM-DD)
+        /// Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)
         #[arg(long = "date-from", alias = "since")]
         date_from: Option<String>,
-        /// Published before date (YYYY-MM-DD)
+        /// Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)
         #[arg(long = "date-to", alias = "until")]
         date_to: Option<String>,
 
@@ -6821,6 +6821,21 @@ mod tests {
         String::from_utf8(help).expect("help should be utf-8")
     }
 
+    fn render_article_search_long_help() -> String {
+        let mut command = Cli::command();
+        let search = command
+            .find_subcommand_mut("search")
+            .expect("search subcommand should exist");
+        let article = search
+            .find_subcommand_mut("article")
+            .expect("article subcommand should exist");
+        let mut help = Vec::new();
+        article
+            .write_long_help(&mut help)
+            .expect("article help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
     #[test]
     fn trial_facility_help_names_text_search_and_geo_verify_modes() {
         let help = render_trial_search_long_help();
@@ -6845,6 +6860,14 @@ mod tests {
 
         assert!(help.contains("all"));
         assert!(help.contains("no sex restriction"));
+    }
+
+    #[test]
+    fn article_date_help_advertises_shared_accepted_formats() {
+        let help = render_article_search_long_help();
+
+        assert!(help.contains("Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)"));
+        assert!(help.contains("Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)"));
     }
 
     #[test]
