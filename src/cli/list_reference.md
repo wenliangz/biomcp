@@ -52,7 +52,7 @@ New to BioMCP? Try:
 - `search protein ... --reviewed --disease --existence` (default reviewed mode)
 - `search trial ... --mutation --criteria --study-type --has-results --date-from --date-to`
 - `search article ... --date-from --date-to --journal --source <all|pubtator|europepmc>`
-- `search drug ... --region <us|eu|all>` (EU/all is plain name/alias search only)
+- `search drug ... --region <us|eu|all>` (omitting `--region` checks both U.S. and EU for plain name/alias lookups; omitted structured filters stay U.S.-only; explicit `eu|all` with structured filters errors)
 
 ## Helpers
 

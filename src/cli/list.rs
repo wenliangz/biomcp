@@ -300,8 +300,9 @@ fn list_drug() -> String {
 
 ## Notes
 
-- `--region us` is the default.
-- `search drug --region eu|all` supports plain name/alias lookups only; structured filters remain U.S.-only.
+- Omitting `--region` searches both U.S. and EU data for plain name/alias lookups.
+- Structured filters remain U.S.-only when `--region` is omitted.
+- Explicit `--region eu|all` is still invalid with structured filters.
 - EU regional commands require the EMA human-medicines JSON batch via `BIOMCP_EMA_DIR` or the default data directory.
 "#
     .to_string()
@@ -666,7 +667,7 @@ fn list_adverse_event() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_gene, render};
+    use super::{list_drug, list_gene, render};
 
     #[test]
     fn list_root_includes_quickstart_and_skills_tip() {
@@ -753,6 +754,18 @@ mod tests {
         assert!(out.contains("get gene <symbol> clingen"));
         assert!(out.contains("get gene <symbol> constraint"));
         assert!(out.contains("get gene <symbol> disgenet"));
+    }
+
+    #[test]
+    fn list_drug_describes_omitted_region_behavior() {
+        let out = list_drug();
+        assert!(out.contains(
+            "Omitting `--region` searches both U.S. and EU data for plain name/alias lookups."
+        ));
+        assert!(out.contains("Structured filters remain U.S.-only when `--region` is omitted."));
+        assert!(
+            out.contains("Explicit `--region eu|all` is still invalid with structured filters.")
+        );
     }
 
     #[test]

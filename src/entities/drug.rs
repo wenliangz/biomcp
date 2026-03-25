@@ -317,6 +317,18 @@ pub struct DrugSearchFilters {
     pub interactions: Option<String>,
 }
 
+impl DrugSearchFilters {
+    pub fn has_structured_filters(&self) -> bool {
+        self.target.is_some()
+            || self.indication.is_some()
+            || self.mechanism.is_some()
+            || self.drug_type.is_some()
+            || self.atc.is_some()
+            || self.pharm_class.is_some()
+            || self.interactions.is_some()
+    }
+}
+
 const DRUG_SECTION_LABEL: &str = "label";
 const DRUG_SECTION_REGULATORY: &str = "regulatory";
 const DRUG_SECTION_SAFETY: &str = "safety";
@@ -344,13 +356,7 @@ pub const DRUG_SECTION_NAMES: &[&str] = &[
 const OPTIONAL_SAFETY_TIMEOUT: Duration = Duration::from_secs(8);
 
 fn normalize_query_summary(filters: &DrugSearchFilters) -> String {
-    if filters.target.is_none()
-        && filters.indication.is_none()
-        && filters.mechanism.is_none()
-        && filters.drug_type.is_none()
-        && filters.atc.is_none()
-        && filters.pharm_class.is_none()
-        && filters.interactions.is_none()
+    if !filters.has_structured_filters()
         && let Some(q) = filters
             .query
             .as_deref()
@@ -664,14 +670,7 @@ pub async fn search_page(
         }
     }
 
-    if out.is_empty()
-        && filters.target.is_none()
-        && filters.indication.is_none()
-        && filters.mechanism.is_none()
-        && filters.drug_type.is_none()
-        && filters.atc.is_none()
-        && filters.pharm_class.is_none()
-        && filters.interactions.is_none()
+    if should_attempt_openfda_fallback(&out, offset, filters)
         && let Some(query) = filters
             .query
             .as_deref()
@@ -679,12 +678,23 @@ pub async fn search_page(
             .filter(|v| !v.is_empty())
         && let Ok(client) = OpenFdaClient::new()
         && let Ok(Some(label_response)) = client.label_search(query).await
-        && let Some(row) = search_result_from_openfda_label_response(&label_response)
     {
-        out.push(row);
+        let rows = search_results_from_openfda_label_response(&label_response, query, limit);
+        if !rows.is_empty() {
+            let total = rows.len();
+            return Ok(SearchPage::offset(rows, Some(total)));
+        }
     }
 
     Ok(SearchPage::offset(out, Some(resp.total)))
+}
+
+fn should_attempt_openfda_fallback(
+    out: &[DrugSearchResult],
+    offset: usize,
+    filters: &DrugSearchFilters,
+) -> bool {
+    out.is_empty() && offset == 0 && !filters.has_structured_filters()
 }
 
 fn hit_mentions_target(hit: &MyChemHit, target: &str) -> bool {
@@ -958,6 +968,31 @@ fn extract_interaction_text_from_label(label_response: &serde_json::Value) -> Op
     label_text(top.get("drug_interactions")).map(|v| truncate_with_note(&v, LABEL_MAX_CHARS))
 }
 
+fn extract_openfda_values_from_result(result: &serde_json::Value, key: &str) -> Vec<String> {
+    let Some(top) = result.get("openfda").and_then(|v| v.get(key)) else {
+        return Vec::new();
+    };
+
+    match top {
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                Vec::new()
+            } else {
+                vec![s.to_string()]
+            }
+        }
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn extract_openfda_values(label_response: &serde_json::Value, key: &str) -> Vec<String> {
     let Some(results) = label_response.get("results").and_then(|v| v.as_array()) else {
         return Vec::new();
@@ -966,27 +1001,7 @@ fn extract_openfda_values(label_response: &serde_json::Value, key: &str) -> Vec<
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for result in results {
-        let Some(top) = result.get("openfda").and_then(|v| v.get(key)) else {
-            continue;
-        };
-        let values: Vec<String> = match top {
-            serde_json::Value::String(s) => {
-                let s = s.trim();
-                if s.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![s.to_string()]
-                }
-            }
-            serde_json::Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string)
-                .collect(),
-            _ => Vec::new(),
-        };
+        let values = extract_openfda_values_from_result(result, key);
         for value in values {
             let key = value.to_ascii_lowercase();
             if !seen.insert(key) {
@@ -998,22 +1013,67 @@ fn extract_openfda_values(label_response: &serde_json::Value, key: &str) -> Vec<
     out
 }
 
-fn search_result_from_openfda_label_response(
+fn search_results_from_openfda_label_response(
     label_response: &serde_json::Value,
-) -> Option<DrugSearchResult> {
-    let generic_names = extract_openfda_values(label_response, "generic_name");
-    let brand_names = extract_openfda_values(label_response, "brand_name");
-    let name = generic_names
-        .first()
-        .cloned()
-        .or_else(|| brand_names.first().cloned())?;
-    Some(DrugSearchResult {
-        name: name.trim().to_ascii_lowercase(),
-        drugbank_id: None,
-        drug_type: None,
-        mechanism: None,
-        target: None,
-    })
+    query: &str,
+    max_results: usize,
+) -> Vec<DrugSearchResult> {
+    let query = query.trim();
+    if query.is_empty() || max_results == 0 {
+        return Vec::new();
+    }
+
+    let Some(results) = label_response.get("results").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut exact_matches: Vec<DrugSearchResult> = Vec::new();
+    let mut others: Vec<DrugSearchResult> = Vec::new();
+    for result in results {
+        let brand_names = extract_openfda_values_from_result(result, "brand_name");
+        let generic_names = extract_openfda_values_from_result(result, "generic_name");
+        let Some(name) = generic_names
+            .first()
+            .cloned()
+            .or_else(|| brand_names.first().cloned())
+        else {
+            continue;
+        };
+        let name = name.trim().to_ascii_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+
+        let row = DrugSearchResult {
+            name,
+            drugbank_id: None,
+            drug_type: None,
+            mechanism: None,
+            target: None,
+        };
+        let is_exact_brand_match = brand_names
+            .iter()
+            .map(|value| value.trim())
+            .any(|value| value.eq_ignore_ascii_case(query));
+        if is_exact_brand_match {
+            exact_matches.push(row);
+        } else {
+            others.push(row);
+        }
+    }
+
+    let mut out: Vec<DrugSearchResult> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for row in exact_matches.into_iter().chain(others) {
+        if !seen.insert(row.name.clone()) {
+            continue;
+        }
+        out.push(row);
+        if out.len() >= max_results {
+            break;
+        }
+    }
+    out
 }
 
 fn normalize_route(route: &str) -> String {
@@ -1962,18 +2022,108 @@ mod tests {
     }
 
     #[test]
-    fn search_result_from_openfda_label_response_prefers_generic_name() {
+    fn drug_search_filters_detect_structured_filters() {
+        let plain_name = DrugSearchFilters {
+            query: Some("Keytruda".into()),
+            ..Default::default()
+        };
+        assert!(!plain_name.has_structured_filters());
+
+        let structured = DrugSearchFilters {
+            target: Some("EGFR".into()),
+            ..Default::default()
+        };
+        assert!(structured.has_structured_filters());
+    }
+
+    #[test]
+    fn search_results_from_openfda_label_response_prefers_exact_brand_match() {
         let response = serde_json::json!({
-            "results": [{
-                "openfda": {
-                    "brand_name": ["Keytruda"],
-                    "generic_name": ["Pembrolizumab"]
+            "results": [
+                {
+                    "openfda": {
+                        "brand_name": ["KEYTRUDA QLEX"],
+                        "generic_name": ["Pembrolizumab and berahyaluronidase alfa-pmph"]
+                    }
+                },
+                {
+                    "openfda": {
+                        "brand_name": ["Keytruda"],
+                        "generic_name": ["Pembrolizumab"]
+                    }
                 }
-            }]
+            ]
         });
 
-        let row = search_result_from_openfda_label_response(&response).expect("row");
-        assert_eq!(row.name, "pembrolizumab");
+        let rows = search_results_from_openfda_label_response(&response, " Keytruda ", 5);
+        let names = rows.into_iter().map(|row| row.name).collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "pembrolizumab".to_string(),
+                "pembrolizumab and berahyaluronidase alfa-pmph".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn search_results_from_openfda_label_response_returns_remaining_unique_generics() {
+        let response = serde_json::json!({
+            "results": [
+                {
+                    "openfda": {
+                        "brand_name": ["Keytruda"],
+                        "generic_name": ["Pembrolizumab"]
+                    }
+                },
+                {
+                    "openfda": {
+                        "brand_name": ["KEYTRUDA QLEX"],
+                        "generic_name": ["Pembrolizumab and berahyaluronidase alfa-pmph"]
+                    }
+                },
+                {
+                    "openfda": {
+                        "brand_name": ["Keytruda refill"],
+                        "generic_name": ["Pembrolizumab"]
+                    }
+                }
+            ]
+        });
+
+        let rows = search_results_from_openfda_label_response(&response, "Keytruda", 5);
+        let names = rows.into_iter().map(|row| row.name).collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "pembrolizumab".to_string(),
+                "pembrolizumab and berahyaluronidase alfa-pmph".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn search_results_from_openfda_label_response_respects_limit() {
+        let response = serde_json::json!({
+            "results": [
+                {
+                    "openfda": {
+                        "brand_name": ["Keytruda"],
+                        "generic_name": ["Pembrolizumab"]
+                    }
+                },
+                {
+                    "openfda": {
+                        "brand_name": ["KEYTRUDA QLEX"],
+                        "generic_name": ["Pembrolizumab and berahyaluronidase alfa-pmph"]
+                    }
+                }
+            ]
+        });
+
+        let rows = search_results_from_openfda_label_response(&response, "Keytruda", 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "pembrolizumab");
     }
 
     #[test]
@@ -2203,5 +2353,40 @@ mod tests {
 
         let out = extract_top_adverse_events(&resp);
         assert_eq!(out, vec!["Fatigue", "Rash", "Nausea"]);
+    }
+
+    #[test]
+    fn openfda_label_fallback_is_first_page_only() {
+        let name_filters = DrugSearchFilters {
+            query: Some("Keytruda".into()),
+            ..Default::default()
+        };
+        let structured_filters = DrugSearchFilters {
+            target: Some("EGFR".into()),
+            ..Default::default()
+        };
+        let dummy = DrugSearchResult {
+            name: "pembrolizumab".into(),
+            drugbank_id: None,
+            drug_type: None,
+            mechanism: None,
+            target: None,
+        };
+
+        // Fallback fires only when MyChem returned nothing, on page 1, without structured filters.
+        assert!(should_attempt_openfda_fallback(&[], 0, &name_filters));
+
+        // Page 2+ must not trigger fallback even with an empty MyChem result set.
+        assert!(!should_attempt_openfda_fallback(&[], 10, &name_filters));
+
+        // Structured-filter searches must not fall back to OpenFDA label rescue.
+        assert!(!should_attempt_openfda_fallback(
+            &[],
+            0,
+            &structured_filters
+        ));
+
+        // When MyChem already returned rows, no fallback regardless of offset.
+        assert!(!should_attempt_openfda_fallback(&[dummy], 0, &name_filters));
     }
 }

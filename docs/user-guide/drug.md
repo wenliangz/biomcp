@@ -8,6 +8,7 @@ Text query:
 
 ```bash
 biomcp search drug -q "kinase inhibitor" --limit 5
+biomcp search drug Keytruda --limit 5
 ```
 
 EU or comparison search:
@@ -31,7 +32,10 @@ biomcp search drug --indication melanoma --limit 5
 
 `search drug --interactions <drug>` is currently unavailable because the public data sources BioMCP uses do not expose partner-indexed interaction rows.
 
-`--region us` is the default. `--region eu` and `--region all` are supported only for plain name/alias searches; structured filters such as `--target` and `--indication` remain U.S.-only.
+Omitting `--region` on a plain name/alias search checks both U.S. and EU data.
+If you omit `--region` while using structured filters such as `--target` or
+`--indication`, BioMCP stays on the U.S. MyChem path. Explicit `--region eu`
+or `--region all` with structured filters still errors.
 
 ## Get a drug record
 
