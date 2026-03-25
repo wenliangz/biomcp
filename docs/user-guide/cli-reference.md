@@ -139,6 +139,7 @@ biomcp search variant -g BRAF --hgvsp V600E --limit 5 --offset 0
 
 ```bash
 biomcp search drug -q "kinase inhibitor" --limit 5 --offset 0
+biomcp search drug Keytruda --limit 5
 biomcp search drug Keytruda --region eu --limit 5
 ```
 
@@ -232,7 +233,12 @@ biomcp get drug Ozempic safety --region eu
 biomcp get drug carboplatin shortage
 ```
 
-`search drug --region` defaults to `us`. For `get drug`, use `--region` only with `regulatory`, `safety`, `shortage`, or `all`; `approvals` stays U.S.-only.
+Omitting `--region` on a plain name/alias `search drug` checks both U.S. and EU
+data. If you omit `--region` while using structured filters such as `--target`
+or `--indication`, BioMCP stays on the U.S. MyChem path. Explicit `--region eu`
+or `--region all` with structured filters still errors. For `get drug`, use
+`--region` only with `regulatory`, `safety`, `shortage`, or `all`; `approvals`
+stays U.S.-only.
 
 ### Pathway
 

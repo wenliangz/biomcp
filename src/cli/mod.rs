@@ -79,6 +79,8 @@ pub enum DrugRegionArg {
     All,
 }
 
+const DRUG_SEARCH_EMA_STRUCTURED_FILTER_ERROR: &str = "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters.";
+
 impl From<DrugRegionArg> for DrugRegion {
     fn from(value: DrugRegionArg) -> Self {
         match value {
@@ -851,10 +853,14 @@ See also: biomcp list variant")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp search drug pembrolizumab
+  biomcp search drug Keytruda --limit 5
   biomcp search drug Keytruda --region eu --limit 5
   biomcp search drug -q \"kinase inhibitor\" --target EGFR --atc L01 --pharm-class kinase --limit 5
 
 Note: --interactions is currently unavailable from the public data sources BioMCP uses.
+Omitting --region on a plain name/alias search checks both U.S. and EU data.
+If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path.
+Explicit --region eu|all with structured filters still errors.
 
 See also: biomcp list drug")]
     Drug {
@@ -896,9 +902,9 @@ See also: biomcp list drug")]
         /// Skip the first N results
         #[arg(long, default_value = "0")]
         offset: usize,
-        /// Data region for drug regulatory context
-        #[arg(long, value_enum, default_value_t = DrugRegionArg::Us)]
-        region: DrugRegionArg,
+        /// Data region for drug regulatory context [default: all]
+        #[arg(long, value_enum)]
+        region: Option<DrugRegionArg>,
     },
     /// Search pathways by name or keyword
     #[command(
@@ -2187,6 +2193,23 @@ fn resolve_query_input(
         ))),
         (Some(value), None) | (None, Some(value)) => Ok(Some(value)),
         (None, None) => Ok(None),
+    }
+}
+
+fn resolve_drug_search_region(
+    region_arg: Option<DrugRegionArg>,
+    filters: &crate::entities::drug::DrugSearchFilters,
+) -> Result<DrugRegion, crate::error::BioMcpError> {
+    match (region_arg, filters.has_structured_filters()) {
+        (None, false) => Ok(DrugRegion::All),
+        (None, true) | (Some(DrugRegionArg::Us), _) => Ok(DrugRegion::Us),
+        (Some(DrugRegionArg::Eu), false) => Ok(DrugRegion::Eu),
+        (Some(DrugRegionArg::All), false) => Ok(DrugRegion::All),
+        (Some(DrugRegionArg::Eu | DrugRegionArg::All), true) => {
+            Err(crate::error::BioMcpError::InvalidArgument(
+                DRUG_SEARCH_EMA_STRUCTURED_FILTER_ERROR.into(),
+            ))
+        }
     }
 }
 
@@ -5622,7 +5645,6 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     region,
                 } => {
                     let query = resolve_query_input(query, positional_query, "--query")?;
-                    let region: DrugRegion = region.into();
                     let filters = crate::entities::drug::DrugSearchFilters {
                         query,
                         target,
@@ -5633,6 +5655,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         pharm_class,
                         interactions,
                     };
+                    let region = resolve_drug_search_region(region, &filters)?;
                     let mut query_summary = crate::entities::drug::search_query_summary(&filters);
                     if offset > 0 {
                         query_summary = format!("{query_summary}, offset={offset}");
@@ -5655,20 +5678,6 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             )?)
                         }
                     } else {
-                        let has_structured_filters = filters.target.is_some()
-                            || filters.indication.is_some()
-                            || filters.mechanism.is_some()
-                            || filters.drug_type.is_some()
-                            || filters.atc.is_some()
-                            || filters.pharm_class.is_some()
-                            || filters.interactions.is_some();
-                        if has_structured_filters {
-                            return Err(crate::error::BioMcpError::InvalidArgument(
-                                "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters.".into(),
-                            )
-                            .into());
-                        }
-
                         let query_value = filters.query.as_deref().unwrap_or_default();
                         match crate::entities::drug::search_name_query_with_region(
                             query_value,
@@ -6475,11 +6484,11 @@ mod tests {
         OutputStream, PaginationMeta, ProteinCommand, StudyCommand, VariantCommand,
         VariantSearchPlan, article_search_json, execute, execute_mcp, extract_json_from_sections,
         extract_region_from_sections, paginate_trial_locations, parse_simple_gene_change,
-        parse_trial_location_paging, resolve_query_input, resolve_variant_query, run_outcome,
-        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
-        truncate_article_annotations,
+        parse_trial_location_paging, resolve_drug_search_region, resolve_query_input,
+        resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
+        trial_locations_json, trial_search_query_summary, truncate_article_annotations,
     };
-    use crate::entities::drug::DrugRegion;
+    use crate::entities::drug::{DrugRegion, DrugSearchFilters};
     use clap::{CommandFactory, Parser};
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -7063,6 +7072,70 @@ mod tests {
         let err_gene =
             resolve_query_input(Some("TP53".into()), Some("BRAF".into()), "--gene").unwrap_err();
         assert!(format!("{err_gene}").contains("Use either positional QUERY or --gene, not both"));
+    }
+
+    #[test]
+    fn search_drug_region_defaults_to_all_for_name_only_queries() {
+        let filters = DrugSearchFilters {
+            query: Some("Keytruda".into()),
+            ..Default::default()
+        };
+
+        let region = resolve_drug_search_region(None, &filters).expect("name-only default");
+        assert_eq!(region, DrugRegion::All);
+    }
+
+    #[test]
+    fn search_drug_region_defaults_to_us_for_structured_queries() {
+        let filters = DrugSearchFilters {
+            target: Some("EGFR".into()),
+            ..Default::default()
+        };
+
+        let region = resolve_drug_search_region(None, &filters).expect("structured default");
+        assert_eq!(region, DrugRegion::Us);
+    }
+
+    #[test]
+    fn search_drug_region_rejects_explicit_non_us_for_structured_queries() {
+        let filters = DrugSearchFilters {
+            target: Some("EGFR".into()),
+            ..Default::default()
+        };
+
+        let err = resolve_drug_search_region(Some(super::DrugRegionArg::Eu), &filters)
+            .expect_err("explicit eu should be rejected");
+        assert!(format!("{err}").contains(
+            "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters."
+        ));
+
+        let err = resolve_drug_search_region(Some(super::DrugRegionArg::All), &filters)
+            .expect_err("explicit all should be rejected");
+        assert!(format!("{err}").contains(
+            "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters."
+        ));
+    }
+
+    #[test]
+    fn search_drug_help_mentions_default_all_and_structured_filter_note() {
+        let mut cmd = Cli::command();
+        let search = cmd.find_subcommand_mut("search").expect("search command");
+        let drug = search
+            .find_subcommand_mut("drug")
+            .expect("search drug command");
+
+        let mut long_help = Vec::new();
+        drug.write_long_help(&mut long_help)
+            .expect("search drug help should render");
+        let long_help = String::from_utf8(long_help).expect("utf8 help");
+
+        assert!(long_help.contains("[default: all]"));
+        assert!(long_help.contains(
+            "Omitting --region on a plain name/alias search checks both U.S. and EU data."
+        ));
+        assert!(long_help.contains(
+            "If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path."
+        ));
     }
 
     #[test]

@@ -21,6 +21,18 @@ echo "$out" | mustmatch like "# Drugs: pembrolizumab"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 ```
 
+## Search Help Shows Region Defaults
+
+The inline help should advertise the no-flag cross-region default while keeping
+the structured-filter exception explicit.
+
+```bash
+out="$(biomcp search drug --help)"
+echo "$out" | mustmatch '/\[default: all\]/'
+echo "$out" | mustmatch like "Omitting --region on a plain name/alias search checks both U.S. and EU data."
+echo "$out" | mustmatch like "If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path."
+```
+
 ## Getting Drug Details
 
 `get drug` expands mechanism, targets, indications, and key metadata. We assert on the normalized heading and a stable metadata/section marker.
@@ -143,15 +155,19 @@ echo "$out" | mustmatch like "# Adverse Events: drug=ibuprofen"
 echo "$out" | mustmatch like "Total reports (OpenFDA)"
 ```
 
-## Brand Name Search
+## Brand Name Search Uses Exact Match Ranking
 
-Brand-only MyChem hits should still render search rows with a usable canonical name. This regression protects the Keytruda brand-name bug where totals were non-zero but rows were empty.
+Brand-only MyChem hits should still render search rows with a usable canonical
+name. The OpenFDA rescue path should prefer the exact Keytruda label over the
+newer KEYTRUDA QLEX combo label and respect the requested limit/total text.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search drug Keytruda --limit 5)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search drug Keytruda --region us --limit 1)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
+echo "$out" | mustmatch like "Found 1 drug"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 echo "$out" | mustmatch like "pembrolizumab"
+echo "$out" | mustmatch not like "pembrolizumab and berahyaluronidase alfa-pmph"
 ```
 
 ## EMA Search Region
@@ -169,6 +185,20 @@ echo "$out" | mustmatch like "Keytruda"
 echo "$out" | mustmatch like "pembrolizumab"
 echo "$out" | mustmatch like "EMEA/H/C/003820"
 echo "$out" | mustmatch like "Authorised"
+```
+
+## Default Drug Search Covers US and EU
+
+Omitting `--region` on a plain name query should render the same split U.S./EU
+layout as the explicit all-regions mode.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --limit 5)"
+echo "$out" | mustmatch like "# Drugs: Keytruda"
+echo "$out" | mustmatch like "## US (MyChem.info / OpenFDA)"
+echo "$out" | mustmatch like "## EU (EMA)"
+echo "$out" | mustmatch like "EMEA/H/C/003820"
 ```
 
 ## EMA Search All Regions
