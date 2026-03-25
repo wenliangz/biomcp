@@ -6255,6 +6255,11 @@ mod tests {
         assert!(markdown.contains("PubTator3, Semantic Scholar"));
         assert!(markdown.contains("title 2/2"));
         assert!(markdown.contains("title+abstract 2/2"));
+        assert!(
+            markdown.contains(
+                "--date-from/--date-to <YYYY|YYYY-MM|YYYY-MM-DD> (alias: --since/--until)"
+            )
+        );
         assert!(!markdown.contains("## PubTator3"));
         assert!(!markdown.contains("## Europe PMC"));
         assert!(markdown.find("|1|").unwrap() < markdown.find("|2|").unwrap());
