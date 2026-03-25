@@ -19,15 +19,27 @@ extract_lock_version() {
         | sed -E 's/^[^"]*"([^"]+)".*$/\1/'
 }
 
+extract_manifest_version() {
+    local file="$1"
+    local line
+    line="$(grep -m1 -E '^\s*"version"\s*:\s*"' "$file" || true)"
+    if [[ -z "$line" ]]; then
+        echo "" && return
+    fi
+    sed -E 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/' <<<"$line"
+}
+
 cargo_version="$(extract_version "$repo_root/Cargo.toml")"
 python_version="$(extract_version "$repo_root/pyproject.toml")"
 lock_version="$(extract_lock_version "$repo_root/Cargo.lock")"
+manifest_version="$(extract_manifest_version "$repo_root/manifest.json")"
 
-if [[ -z "$cargo_version" || -z "$python_version" || -z "$lock_version" ]]; then
+if [[ -z "$cargo_version" || -z "$python_version" || -z "$lock_version" || -z "$manifest_version" ]]; then
     echo "Unable to read version from one or more manifests:" >&2
     echo "  Cargo.toml:     '$cargo_version'" >&2
     echo "  pyproject.toml: '$python_version'" >&2
     echo "  Cargo.lock:     '$lock_version'" >&2
+    echo "  manifest.json:  '$manifest_version'" >&2
     exit 1
 fi
 
@@ -40,6 +52,11 @@ fi
 
 if [[ "$cargo_version" != "$lock_version" ]]; then
     echo "Version mismatch: Cargo.toml=$cargo_version, Cargo.lock=$lock_version" >&2
+    ok=false
+fi
+
+if [[ "$cargo_version" != "$manifest_version" ]]; then
+    echo "Version mismatch: Cargo.toml=$cargo_version, manifest.json=$manifest_version" >&2
     ok=false
 fi
 

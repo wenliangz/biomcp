@@ -71,11 +71,15 @@ async def test_biomcp_description_matches_list_contract(
         result = await session.list_tools()
         biomcp = next(tool for tool in result.tools if tool.name == "biomcp")
         description = biomcp.description
+        assert "read-only" in description.lower()
         for marker in required:
             assert marker in description
         assert "SEARCH FILTERS:" in description
         assert "AGENT GUIDANCE:" in description
         assert "biomcp list" in description
+        assert "skill install" not in description
+        assert "update [--check]" not in description
+        assert "uninstall" not in description
 
 
 @pytest.mark.asyncio

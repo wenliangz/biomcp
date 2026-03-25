@@ -71,7 +71,7 @@ nav:
       - "Charts Your Agent Can Actually Read": blog/kuva-charting-guide.md
       - "cBioPortal Study Analytics in BioMCP": blog/cbioportal-study-analytics.md
       - "We Deleted 35 Tools and Our Agent Got Better": blog/we-deleted-35-tools.md
-  - Policies: policies.md
+  - Privacy Policy: policies.md
   - Troubleshooting: troubleshooting.md
 
 plugins:

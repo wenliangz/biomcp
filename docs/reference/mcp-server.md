@@ -44,6 +44,27 @@ assert "enable_tools()" in shell
 assert "enable_resources()" in shell
 ```
 
+## Tool Description Contract
+
+The runtime `biomcp` description is generated from
+`src/cli/list_reference.md`, but the build step emits an MCP-safe read-only
+subset. CLI-only packaging or mutating commands such as `skill install`,
+`update`, and `uninstall` must not appear in the MCP tool description.
+
+```python
+from pathlib import Path
+
+repo_root = Path.cwd()
+build = (repo_root / "build.rs").read_text()
+
+assert "MCP_SHELL_INTRO" in build
+assert "read-only biomedical MCP tool" in build
+assert "BLOCKED_MCP_DESCRIPTION_TERMS" in build
+assert "`skill install`" in build
+assert "`update [--check]`" in build
+assert "`uninstall`" in build
+```
+
 ## Tool Response Content
 
 The `biomcp` tool keeps non-chart calls text-only. In MCP mode, charted `study`
@@ -85,8 +106,12 @@ from pathlib import Path
 
 repo_root = Path.cwd()
 shell = (repo_root / "src/mcp/shell.rs").read_text()
+tests = (repo_root / "tests/test_mcp_contract.py").read_text()
 assert '"discover" => true' in shell or '| "discover" => true' in shell
 assert "discover/skill" in shell or "discover/skill)." in shell
+assert '"skill install" not in description' in tests
+assert '"update [--check]" not in description' in tests
+assert '"uninstall" not in description' in tests
 ```
 
 ## Resource Catalog

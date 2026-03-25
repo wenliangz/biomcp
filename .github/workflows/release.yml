@@ -109,7 +109,7 @@ jobs:
           linker = "aarch64-linux-gnu-gcc"
           TOML
 
-      - name: Sync Cargo.toml version from release tag
+      - name: Sync Cargo.toml and manifest.json version from release tag
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
@@ -117,7 +117,9 @@ jobs:
           if [ -n "$VER" ]; then
             sed "s/^version = \".*\"/version = \"$VER\"/" Cargo.toml > Cargo.toml.tmp
             mv Cargo.toml.tmp Cargo.toml
-            echo "Set Cargo.toml version to $VER"
+            sed -E "0,/\"version\": \".*\"/s//\"version\": \"$VER\"/" manifest.json > manifest.json.tmp
+            mv manifest.json.tmp manifest.json
+            echo "Set Cargo.toml and manifest.json version to $VER"
           fi
 
       - name: Build
@@ -209,7 +211,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Sync Cargo.toml and pyproject.toml version from release tag
+      - name: Sync Cargo.toml, pyproject.toml, and manifest.json version from release tag
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
@@ -217,7 +219,8 @@ jobs:
           if [ -n "$VER" ]; then
             sed "s/^version = \".*\"/version = \"$VER\"/" Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
             sed "s/^version = \".*\"/version = \"$VER\"/" pyproject.toml > pyproject.toml.tmp && mv pyproject.toml.tmp pyproject.toml
-            echo "Set Cargo.toml and pyproject.toml version to $VER"
+            sed -E "0,/\"version\": \".*\"/s//\"version\": \"$VER\"/" manifest.json > manifest.json.tmp && mv manifest.json.tmp manifest.json
+            echo "Set Cargo.toml, pyproject.toml, and manifest.json version to $VER"
           fi
 
       - name: Build wheels

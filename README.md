@@ -1,8 +1,33 @@
 # BioMCP
 
-BioMCP gives researchers, clinicians, and agents one command grammar across biomedical APIs that usually require separate search habits, identifiers, and output formats. It keeps results compact and evidence-oriented so you can move from discovery to detail without rewriting the workflow for each source. One command grammar, compact markdown output, 12 remote entities across 15+ data sources, plus local study analytics.
+## Description
 
-## Install
+BioMCP gives researchers, clinicians, and agents one command grammar across
+biomedical APIs that usually require separate search habits, identifiers, and
+output formats. It keeps results compact and evidence-oriented so you can move
+from discovery to detail without rewriting the workflow for each source. One
+command grammar, compact markdown output, 12 remote entities across 15+
+data sources, plus local study analytics.
+
+## Features
+
+- **Federated article search:** `search article` fans out across PubTator3 and
+  Europe PMC, can also add a Semantic Scholar search leg when the filter set is
+  compatible, merges identifiers across PMID/PMCID/DOI, and ranks relevance
+  directness-first.
+- **Cross-entity pivots:** move directly from a gene, variant, drug, disease,
+  pathway, protein, or article into the next built-in view.
+- **Study analytics and charting:** downloaded studies support query, cohort,
+  survival, compare, and co-occurrence workflows with native terminal or SVG
+  charts.
+- **Citation graphs and article helpers:** `article citations`,
+  `article references`, `article recommendations`, and `article entities`
+  support literature navigation from a known paper.
+- **Gene-set enrichment and batch retrieval:** use `biomcp enrich` for
+  top-level g:Profiler enrichment and `biomcp batch` for up to 10 focused
+  `get` calls in one command.
+
+## Installation
 
 ### PyPI tool install
 
@@ -18,6 +43,13 @@ This installs the `biomcp` binary on your PATH.
 ```bash
 curl -fsSL https://biomcp.org/install.sh | bash
 ```
+
+### Claude Desktop extension (.mcpb)
+
+Before Anthropic directory approval, install the generated `.mcpb` package
+directly in Claude Desktop for reviewer or local verification. After approval,
+install BioMCP from the Anthropic Directory instead of handling the bundle
+manually.
 
 ### Install skills
 
@@ -63,7 +95,8 @@ the newcomer guide.
 ### From source
 
 ```bash
-cargo build --release --locked
+make install
+"$HOME/.local/bin/biomcp" --version
 ```
 
 ## Quick start
@@ -88,14 +121,6 @@ enrich <GENE1,GENE2,...>     → gene-set enrichment
 batch <entity> <id1,id2,...> → parallel gets
 search all [slot filters]    → counts-first cross-entity orientation
 ```
-
-## Feature highlights
-
-- **Federated article search:** `search article` fans out across PubTator3 and Europe PMC, can also add a Semantic Scholar search leg when the filter set is compatible, merges identifiers across PMID/PMCID/DOI, and ranks relevance directness-first.
-- **Cross-entity pivots:** move directly from a gene, variant, drug, disease, pathway, protein, or article into the next built-in view.
-- **Study analytics and charting:** downloaded studies support query, cohort, survival, compare, and co-occurrence workflows with native terminal or SVG charts.
-- **Citation graphs and article helpers:** `article citations`, `article references`, `article recommendations`, and `article entities` support literature navigation from a known paper.
-- **Gene-set enrichment and batch retrieval:** use `biomcp enrich` for top-level g:Profiler enrichment and `biomcp batch` for up to 10 focused `get` calls in one command.
 
 ## Entities and sources
 
@@ -151,7 +176,8 @@ biomcp enrich BRAF,KRAS,NRAS --limit 10
 ```
 
 Top-level `biomcp enrich` uses **g:Profiler**. Gene enrichment sections inside
-other entity views still reference **Enrichr** where that is the backing source.
+other entity views still reference **Enrichr** where that is the backing
+source.
 
 ## Sections and progressive disclosure
 
@@ -195,9 +221,81 @@ the explicit Semantic Scholar helpers all work without `S2_API_KEY`. With the
 key, BioMCP sends authenticated requests and uses a dedicated rate limit at
 1 req/sec. Without it, BioMCP uses the shared unauthenticated pool at 1 req/2sec.
 `--source` still remains `all|pubtator|europepmc` in v1, so the S2 leg is
-automatic rather than directly selectable.
-References and recommendations can be empty for paywalled papers because of
-publisher elision in Semantic Scholar upstream coverage.
+automatic rather than directly selectable. References and recommendations can
+be empty for paywalled papers because of publisher elision in Semantic Scholar
+upstream coverage.
+
+## Configuration
+
+### Claude Desktop extension settings
+
+The directory bundle exposes only the optional settings needed for the first
+reviewer-facing build:
+
+| Claude Desktop field | Runtime env var | Purpose |
+|----------------------|-----------------|---------|
+| OncoKB Token | `ONCOKB_TOKEN` | Enables `biomcp variant oncokb "<gene> <variant>"` therapy and level evidence |
+| DisGeNET API Key | `DISGENET_API_KEY` | Enables scored DisGeNET sections on gene and disease lookups |
+| Semantic Scholar API Key | `S2_API_KEY` | Improves reliability for article TLDR, citation, reference, and recommendation helpers |
+
+The first directory build exposes only those three optional settings. Advanced
+CLI-only env vars remain documented in
+[API Keys](docs/getting-started/api-keys.md) for the general BioMCP CLI path.
+
+## Usage Examples
+
+### Public cross-entity overview
+
+**User prompt:** Give me a low-noise overview of BRAF in melanoma.
+
+**Expected tool call:** `biomcp search all --gene BRAF --disease melanoma --counts-only`
+
+**Expected behavior:** Returns a cross-entity counts summary that orients the
+next command instead of dumping long detail tables.
+
+**Expected output:** Counts-first summary with suggested next commands for the
+highest-yield entity follow-ups.
+
+### Public variant evidence
+
+**User prompt:** Summarize ClinVar significance and population frequency for BRAF V600E.
+
+**Expected tool call:** `biomcp get variant "BRAF V600E" clinvar population`
+
+**Expected behavior:** Retrieves the focused variant card, ClinVar section, and
+population-frequency data in one read-only call.
+
+**Expected output:** Variant summary, ClinVar significance details, and gnomAD
+population frequencies.
+
+### Credentialed OncoKB example
+
+**User prompt:** Show OncoKB therapy evidence for BRAF V600E.
+
+**Expected tool call:** `biomcp variant oncokb "BRAF V600E"`
+
+**Expected behavior:** Uses `ONCOKB_TOKEN` when configured and otherwise
+returns helpful guidance about the missing credential.
+
+**Expected output:** Therapy and level evidence when `ONCOKB_TOKEN` is set, or
+a clear setup hint when it is not.
+
+### Credentialed DisGeNET example
+
+**User prompt:** Show scored DisGeNET associations for TP53.
+
+**Expected tool call:** `biomcp get gene TP53 disgenet`
+
+**Expected behavior:** Uses `DISGENET_API_KEY` to retrieve the scored
+gene-disease association section.
+
+**Expected output:** Ranked disease-association table with evidence counts and
+scores when `DISGENET_API_KEY` is configured.
+
+## Privacy Policy
+
+BioMCP does not add telemetry, analytics, or remote log upload. Review the
+full privacy statement at <https://biomcp.org/policies/>.
 
 ## Multi-worker deployment
 
@@ -256,14 +354,19 @@ biomcp update --check   # check for updates without installing
 biomcp uninstall        # remove biomcp from ~/.local/bin
 ```
 
-## Documentation
+## Support
 
-Full documentation at [biomcp.org](https://biomcp.org/).
+- GitHub issues: <https://github.com/genomoncology/biomcp/issues>
+- Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
+- Full documentation: <https://biomcp.org/>
+
+## Documentation
 
 - [Getting Started](docs/getting-started/installation.md)
 - [Search All Workflow](docs/how-to/search-all-workflow.md)
 - [BioASQ Benchmark](docs/reference/bioasq-benchmark.md)
 - [Cross-Entity Pivot Guide](docs/how-to/cross-entity-pivots.md)
+- [Privacy Policy](docs/policies.md)
 - [Source Licensing and Terms](docs/reference/source-licensing.md)
 - [Data Sources](docs/reference/data-sources.md)
 - [Quick Reference](docs/reference/quick-reference.md)
