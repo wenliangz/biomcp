@@ -2,6 +2,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+const MCP_SHELL_INTRO: &str = "BioMCP is a read-only biomedical MCP tool for \
+search, detail retrieval, discovery, enrichment, and study analytics across \
+15 biomedical sources.\n\n";
+const BLOCKED_MCP_DESCRIPTION_TERMS: &[&str] =
+    &["`skill install`", "`update [--check]`", "`uninstall`"];
+
 fn command_output(command: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(command).args(args).output().ok()?;
     if !output.status.success() {
@@ -16,10 +22,24 @@ fn command_output(command: &str, args: &[&str]) -> Option<String> {
     }
 }
 
+fn is_blocked_mcp_description_line(line: &str) -> bool {
+    BLOCKED_MCP_DESCRIPTION_TERMS
+        .iter()
+        .any(|term| line.contains(term))
+}
+
+fn mcp_safe_list_reference(list_reference: &str) -> String {
+    list_reference
+        .lines()
+        .filter(|line| !is_blocked_mcp_description_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn write_shell_description() -> Result<(), Box<dyn std::error::Error>> {
-    let list_reference = fs::read_to_string("src/cli/list_reference.md")?;
+    let list_reference = mcp_safe_list_reference(&fs::read_to_string("src/cli/list_reference.md")?);
     let mut description = String::new();
-    description.push_str("BioMCP: Search and retrieve genes, variants, clinical trials, articles, drugs, diseases, pathways, proteins, adverse events, and pharmacogenomic data from 15 biomedical sources.\n\n");
+    description.push_str(MCP_SHELL_INTRO);
     description.push_str(list_reference.trim());
     description.push_str(
         "\n\nSEARCH FILTERS:\n  Use `biomcp list <entity>` for entity-specific filters and examples.\n  Trial geo filters include --lat, --lon, and --distance.\n\nAGENT GUIDANCE:\n  Use biomedical synonyms and abbreviations (for example NSCLC -> non-small cell lung cancer).\n  If zero results are returned, retry with nearby terms, aliases, or alternate spellings.\n",

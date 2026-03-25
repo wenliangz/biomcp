@@ -1,20 +1,54 @@
-# Policies
+# Privacy Policy
 
-## License
+BioMCP is a read-only biomedical CLI and MCP server. This page describes
+BioMCP's own privacy posture for the Anthropic directory and links to the
+provider-specific terms that still apply when a query touches an upstream API.
 
-BioMCP is distributed under the MIT license.
+## BioMCP data handling
 
-## Data sources and terms
+- BioMCP does not add telemetry, analytics, or remote log upload.
+- BioMCP does not operate a hosted control plane that collects or stores your
+  prompts, queries, API keys, or results.
+- BioMCP sends tool-request data only to the upstream biomedical providers
+  needed to satisfy the command you run.
+- BioMCP is read-only. It does not modify external systems, write back to
+  source databases, or create side effects in third-party services.
 
-BioMCP queries third-party APIs. Each provider may have its own terms of service, attribution requirements, and rate limits.
+## Anthropic and upstream providers
 
-See [Source licensing reference](reference/source-licensing.md) for provider terms and [Data sources](reference/data-sources.md) for the operational source matrix.
+- When you use BioMCP through Claude or another MCP client, Anthropic or that
+  client platform may process tool inputs and outputs under its own policies.
+  BioMCP does not control that layer.
+- Upstream providers may log requests, apply their own retention windows, and
+  enforce their own privacy policies and terms of service.
+- Use the [Source licensing reference](reference/source-licensing.md) for
+  provider-specific links, auth expectations, and reuse notes.
 
-## Privacy and sensitive data
+## API keys and credentials
 
-- Do not send protected health information (PHI) or other sensitive patient data to third-party APIs unless you have explicit authorization and your compliance team has approved the workflow.
-- Queries may be logged by upstream providers per their policies.
+- API keys are supplied by the user at runtime and are not committed to this
+  repository or bundled into the `.mcpb` package.
+- BioMCP passes configured keys through to upstream APIs only when the relevant
+  command requires them.
+- Keep sensitive keys scoped to the least privilege and rotation policy your
+  organization allows.
+
+## Retention and sensitive data
+
+BioMCP does not define a separate retention period because it does not collect
+or store request payloads. Anthropic/Claude and upstream providers may retain
+request data according to their own privacy policies. Do not send protected
+health information (PHI) or other sensitive patient data to third-party APIs
+unless your organization has approved that workflow.
 
 ## Output and clinical use
 
-BioMCP is a research and workflow aid. Validate clinically relevant information against primary sources (labels, guidelines, original publications) and your institution's policies.
+BioMCP is a research and workflow aid. Validate clinically relevant information
+against primary sources, official labels, and your institution's policies
+before using it for patient care or operational decisions.
+
+## Contact and support
+
+For privacy questions or support, use
+[GitHub issues](https://github.com/genomoncology/biomcp/issues) or the
+[troubleshooting guide](troubleshooting.md).

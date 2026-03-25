@@ -1,0 +1,80 @@
+{
+  "manifest_version": "0.3",
+  "name": "biomcp",
+  "display_name": "BioMCP",
+  "version": "0.8.17",
+  "description": "Read-only biomedical search and evidence retrieval across BioMCP's CLI command grammar.",
+  "long_description": "BioMCP packages the existing Rust CLI and MCP server as a local read-only bundle for biomedical discovery, detail lookups, cross-entity pivots, enrichment, and study analytics.",
+  "author": {
+    "name": "GenomOncology",
+    "url": "https://genomoncology.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/genomoncology/biomcp.git"
+  },
+  "homepage": "https://biomcp.org",
+  "documentation": "https://github.com/genomoncology/biomcp#readme",
+  "support": "https://github.com/genomoncology/biomcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "bioinformatics",
+    "mcp",
+    "genomics",
+    "clinical-trials",
+    "pubmed"
+  ],
+  "privacy_policies": [
+    "https://biomcp.org/policies/"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/biomcp",
+    "mcp_config": {
+      "command": "server/biomcp",
+      "args": [
+        "serve"
+      ],
+      "env": {
+        "ONCOKB_TOKEN": "${user_config.oncokb_token}",
+        "DISGENET_API_KEY": "${user_config.disgenet_api_key}",
+        "S2_API_KEY": "${user_config.s2_api_key}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "biomcp",
+      "description": "Run read-only BioMCP commands for biomedical search, detail retrieval, discovery, enrichment, and study analytics."
+    }
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ]
+  },
+  "user_config": {
+    "oncokb_token": {
+      "type": "string",
+      "title": "OncoKB Token",
+      "description": "Optional. Enables OncoKB therapy and level evidence for variant oncokb <id>.",
+      "sensitive": true,
+      "required": false
+    },
+    "disgenet_api_key": {
+      "type": "string",
+      "title": "DisGeNET API Key",
+      "description": "Optional. Enables DisGeNET scored association sections for genes and diseases.",
+      "sensitive": true,
+      "required": false
+    },
+    "s2_api_key": {
+      "type": "string",
+      "title": "Semantic Scholar API Key",
+      "description": "Optional. Improves reliability for article TLDR, citation, reference, and recommendation calls.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}
