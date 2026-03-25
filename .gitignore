@@ -10,3 +10,5 @@ site/
 .climb-test-vault/
 .march/
 paper/generated/
+benchmarks/bioasq/datasets/raw/
+benchmarks/bioasq/datasets/normalized/

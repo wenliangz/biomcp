@@ -260,6 +260,7 @@ Full documentation at [biomcp.org](https://biomcp.org/).
 
 - [Getting Started](docs/getting-started/installation.md)
 - [Search All Workflow](docs/how-to/search-all-workflow.md)
+- [BioASQ Benchmark](docs/reference/bioasq-benchmark.md)
 - [Cross-Entity Pivot Guide](docs/how-to/cross-entity-pivots.md)
 - [Source Licensing and Terms](docs/reference/source-licensing.md)
 - [Data Sources](docs/reference/data-sources.md)
