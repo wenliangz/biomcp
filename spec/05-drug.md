@@ -67,8 +67,22 @@ echo "$out" | mustmatch like "civic"
 echo "$out" | mustmatch like "label"
 echo "$out" | mustmatch like "regulatory"
 echo "$out" | mustmatch like "safety"
+echo "$out" | mustmatch like "--region <REGION>"
 echo "$out" | mustmatch like "biomcp get drug pembrolizumab approvals"
 echo "$out" | mustmatch like "biomcp get drug Keytruda regulatory --region eu"
+```
+
+## Drug List Documents Region Grammar
+
+`biomcp list drug` is the concise grammar contract for region-aware drug
+sections and the MCP help mirror. The list output should continue to document
+the same regional section grammar that `get drug --help` exposes.
+
+```bash
+out="$(biomcp list drug)"
+echo "$out" | mustmatch like "get drug <name> regulatory [--region <us|eu|all>]"
+echo "$out" | mustmatch like "get drug <name> safety [--region <us|eu|all>]"
+echo "$out" | mustmatch like "get drug <name> shortage [--region <us|eu|all>]"
 ```
 
 ## Compact Approval Fields
