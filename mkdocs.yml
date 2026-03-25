@@ -60,6 +60,7 @@ nav:
       - MCP Server: reference/mcp-server.md
       - Error Codes: reference/error-codes.md
       - Benchmarks: reference/benchmarks.md
+      - BioASQ Benchmark: reference/bioasq-benchmark.md
       - FAQ: reference/faq.md
       - Source Versioning: reference/source-versioning.md
       - Article Keyword Search: reference/article-keyword-search.md

@@ -196,6 +196,7 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart 
 - [Installation](getting-started/installation.md)
 - [First Query](getting-started/first-query.md)
 - [Search All Workflow](how-to/search-all-workflow.md)
+- [BioASQ Benchmark](reference/bioasq-benchmark.md)
 - [Discover](user-guide/discover.md)
 - [Source Licensing and Terms](reference/source-licensing.md)
 - [Data Sources](reference/data-sources.md)
