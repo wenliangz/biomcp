@@ -1164,9 +1164,13 @@ See also: biomcp list drug")]
     Drug {
         /// Drug name (e.g., pembrolizumab, carboplatin)
         name: String,
+        // Keep this as clap's default variadic positional so named flags like
+        // --region still parse as first-class options and appear in help.
         /// Sections to include (label, regulatory, safety, shortage, targets, indications, interactions, civic, approvals, all)
-        #[arg(trailing_var_arg = true)]
         sections: Vec<String>,
+        /// Data region for regional sections (regulatory, safety, shortage, or all)
+        #[arg(long, value_enum)]
+        region: Option<DrugRegionArg>,
     },
     /// Get pathway by ID
     #[command(after_help = "\
@@ -1851,70 +1855,6 @@ fn extract_json_from_sections(sections: &[String]) -> (Vec<String>, bool) {
         })
         .collect();
     (cleaned, json_override)
-}
-
-fn parse_drug_region_token(value: &str) -> Result<DrugRegion, crate::error::BioMcpError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "us" => Ok(DrugRegion::Us),
-        "eu" => Ok(DrugRegion::Eu),
-        "all" => Ok(DrugRegion::All),
-        other => Err(crate::error::BioMcpError::InvalidArgument(format!(
-            "Invalid value '{other}' for --region. Expected us, eu, or all."
-        ))),
-    }
-}
-
-fn extract_region_from_sections(
-    sections: &[String],
-) -> Result<(Vec<String>, Option<DrugRegion>), crate::error::BioMcpError> {
-    let mut cleaned = Vec::new();
-    let mut region = None;
-    let mut i = 0usize;
-
-    while i < sections.len() {
-        let token = sections[i].trim();
-        if token.is_empty() {
-            i += 1;
-            continue;
-        }
-
-        if let Some(value) = token.strip_prefix("--region=") {
-            if region.is_some() {
-                return Err(crate::error::BioMcpError::InvalidArgument(
-                    "--region may only be specified once.".into(),
-                ));
-            }
-            region = Some(parse_drug_region_token(value)?);
-            i += 1;
-            continue;
-        }
-
-        if token.eq_ignore_ascii_case("--region") {
-            if region.is_some() {
-                return Err(crate::error::BioMcpError::InvalidArgument(
-                    "--region may only be specified once.".into(),
-                ));
-            }
-            let Some(value) = sections.get(i + 1).map(|value| value.trim()) else {
-                return Err(crate::error::BioMcpError::InvalidArgument(
-                    "--region requires a value.".into(),
-                ));
-            };
-            if value.is_empty() || value.starts_with('-') {
-                return Err(crate::error::BioMcpError::InvalidArgument(
-                    "--region requires a value.".into(),
-                ));
-            }
-            region = Some(parse_drug_region_token(value)?);
-            i += 2;
-            continue;
-        }
-
-        cleaned.push(token.to_string());
-        i += 1;
-    }
-
-    Ok((cleaned, region))
 }
 
 fn parse_usize_arg(flag: &str, value: &str) -> Result<usize, crate::error::BioMcpError> {
@@ -3582,10 +3522,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 }
             }
             Commands::Get {
-                entity: GetEntity::Drug { name, sections },
+                entity: GetEntity::Drug {
+                    name,
+                    sections,
+                    region,
+                },
             } => {
                 let (sections, json_override) = extract_json_from_sections(&sections);
-                let (sections, region) = extract_region_from_sections(&sections)?;
+                let region = region.map(DrugRegion::from);
                 let json_output = cli.json || json_override;
                 let effective_region = region.unwrap_or(DrugRegion::Us);
                 let drug = crate::entities::drug::get_with_region(
@@ -6291,13 +6235,18 @@ async fn run_outcome_inner(
             .await
         }
         Commands::Get {
-            entity: GetEntity::Drug { name, sections },
+            entity:
+                GetEntity::Drug {
+                    name,
+                    sections,
+                    region,
+                },
         } => {
             let json = cli.json;
             let no_cache = cli.no_cache;
             crate::sources::with_no_cache(no_cache, async move {
                 let (sections, json_override) = extract_json_from_sections(&sections);
-                let (sections, region) = extract_region_from_sections(&sections)?;
+                let region = region.map(DrugRegion::from);
                 let json_output = json || json_override;
                 render_drug_card_outcome(
                     &name,
@@ -6480,10 +6429,10 @@ pub async fn execute_mcp(mut args: Vec<String>) -> anyhow::Result<CliOutput> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand, GetEntity,
-        OutputStream, PaginationMeta, ProteinCommand, StudyCommand, VariantCommand,
-        VariantSearchPlan, article_search_json, execute, execute_mcp, extract_json_from_sections,
-        extract_region_from_sections, paginate_trial_locations, parse_simple_gene_change,
+        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, DrugRegionArg,
+        GeneCommand, GetEntity, OutputStream, PaginationMeta, ProteinCommand, StudyCommand,
+        VariantCommand, VariantSearchPlan, article_search_json, execute, execute_mcp,
+        extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
         parse_trial_location_paging, resolve_drug_search_region, resolve_query_input,
         resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
         trial_locations_json, trial_search_query_summary, truncate_article_annotations,
@@ -6649,47 +6598,143 @@ mod tests {
     }
 
     #[test]
-    fn extract_region_from_sections_detects_split_flag() {
-        let sections = vec![
-            "regulatory".to_string(),
-            "--region".to_string(),
-            "eu".to_string(),
-        ];
-        let (cleaned, region) = extract_region_from_sections(&sections).expect("region");
-        assert_eq!(cleaned, vec!["regulatory".to_string()]);
-        assert_eq!(region, Some(DrugRegion::Eu));
+    fn get_drug_help_lists_region_flag_and_examples() {
+        let mut command = Cli::command();
+        let get = command
+            .find_subcommand_mut("get")
+            .expect("get subcommand should exist");
+        let drug = get
+            .find_subcommand_mut("drug")
+            .expect("drug subcommand should exist");
+        let mut help = Vec::new();
+        drug.write_long_help(&mut help)
+            .expect("drug help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--region <REGION>"));
+        assert!(help.contains("biomcp get drug Keytruda regulatory --region eu"));
+        assert!(help.contains("biomcp get drug Ozempic safety --region eu"));
     }
 
     #[test]
-    fn extract_region_from_sections_detects_equals_form() {
-        let sections = vec!["safety".to_string(), "--region=all".to_string()];
-        let (cleaned, region) = extract_region_from_sections(&sections).expect("region");
-        assert_eq!(cleaned, vec!["safety".to_string()]);
-        assert_eq!(region, Some(DrugRegion::All));
-    }
-
-    #[test]
-    fn extract_region_from_sections_rejects_missing_value() {
-        let err = extract_region_from_sections(&["regulatory".to_string(), "--region".to_string()])
-            .unwrap_err();
-        assert!(matches!(err, crate::error::BioMcpError::InvalidArgument(_)));
-        assert!(err.to_string().contains("--region requires a value."));
-    }
-
-    #[test]
-    fn extract_region_from_sections_rejects_duplicate_flag() {
-        let err = extract_region_from_sections(&[
-            "safety".to_string(),
-            "--region".to_string(),
-            "eu".to_string(),
-            "--region=us".to_string(),
+    fn get_drug_parses_region_split_form() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "get",
+            "drug",
+            "Keytruda",
+            "regulatory",
+            "--region",
+            "eu",
         ])
-        .unwrap_err();
-        assert!(matches!(err, crate::error::BioMcpError::InvalidArgument(_)));
-        assert!(
-            err.to_string()
-                .contains("--region may only be specified once.")
-        );
+        .expect("get drug should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            region,
+                        },
+                },
+            json,
+            no_cache,
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "Keytruda");
+        assert_eq!(sections, vec!["regulatory".to_string()]);
+        assert_eq!(region, Some(DrugRegionArg::Eu));
+        assert!(!json);
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_parses_region_equals_form() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "get", "drug", "Ozempic", "safety", "--region=all"])
+                .expect("get drug should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            region,
+                        },
+                },
+            json,
+            no_cache,
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "Ozempic");
+        assert_eq!(sections, vec!["safety".to_string()]);
+        assert_eq!(region, Some(DrugRegionArg::All));
+        assert!(!json);
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_parses_global_json_after_sections() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "get",
+            "drug",
+            "Keytruda",
+            "regulatory",
+            "--region",
+            "eu",
+            "--json",
+        ])
+        .expect("get drug should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            region,
+                        },
+                },
+            json,
+            no_cache,
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "Keytruda");
+        assert_eq!(sections, vec!["regulatory".to_string()]);
+        assert_eq!(region, Some(DrugRegionArg::Eu));
+        assert!(json);
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_region_parse_error_mentions_region() {
+        let err = Cli::try_parse_from([
+            "biomcp",
+            "get",
+            "drug",
+            "Keytruda",
+            "regulatory",
+            "--region",
+        ])
+        .expect_err("missing region value should fail");
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("--region"));
     }
 
     #[test]
