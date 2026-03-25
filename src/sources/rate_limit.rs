@@ -27,6 +27,7 @@ impl RateLimiter {
     pub(crate) fn from_env() -> Self {
         // NCBI_API_KEY enables the higher PubTator request budget (10 req/sec).
         let has_ncbi_api_key = crate::sources::ncbi_api_key().is_some();
+        let has_s2_api_key = crate::sources::s2_api_key().is_some();
         let policies = vec![
             policy(
                 "pubtator",
@@ -74,7 +75,7 @@ impl RateLimiter {
                 "semantic-scholar",
                 "BIOMCP_S2_BASE",
                 "https://api.semanticscholar.org",
-                Duration::from_secs(1),
+                s2_min_interval(has_s2_api_key),
             ),
             policy(
                 "kegg",
@@ -149,6 +150,14 @@ fn pubtator_min_interval(has_ncbi_api_key: bool) -> Duration {
     }
 }
 
+fn s2_min_interval(has_s2_api_key: bool) -> Duration {
+    if has_s2_api_key {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
 fn policy(
     key: &'static str,
     env_var: &'static str,
@@ -205,6 +214,40 @@ pub(crate) async fn wait_for_url_str(raw: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::MutexGuard;
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        crate::test_support::env_lock().blocking_lock()
+    }
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // Safety: tests serialize environment mutation with `env_lock()`.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.name, value),
+                    None => std::env::remove_var(self.name),
+                }
+            }
+        }
+    }
+
+    fn set_env_var(name: &'static str, value: Option<&str>) -> EnvVarGuard {
+        let previous = std::env::var(name).ok();
+        // Safety: tests serialize environment mutation with `env_lock()`.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        EnvVarGuard { name, previous }
+    }
 
     fn test_policy(key: &'static str, prefix: &str, ms: u64) -> RateLimitPolicy {
         RateLimitPolicy {
@@ -293,7 +336,23 @@ mod tests {
     }
 
     #[test]
-    fn semantic_scholar_policy_uses_one_second_interval() {
+    fn semantic_scholar_policy_uses_two_second_interval_without_api_key() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", None);
+        let limiter = RateLimiter::from_env();
+        let policy = limiter
+            .policies
+            .iter()
+            .find(|policy| policy.key == "semantic-scholar")
+            .expect("semantic-scholar policy should be registered");
+        assert_eq!(policy.min_interval, Duration::from_secs(2));
+        assert_eq!(policy.prefix.as_ref(), "https://api.semanticscholar.org");
+    }
+
+    #[test]
+    fn semantic_scholar_policy_uses_one_second_interval_with_api_key() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", Some("test-key"));
         let limiter = RateLimiter::from_env();
         let policy = limiter
             .policies

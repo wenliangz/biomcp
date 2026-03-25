@@ -182,15 +182,15 @@ fn list_article() -> String {
 ## Commands
 
 - `get article <id>` - get by PMID/PMCID/DOI
-- `get article <id> tldr` - Semantic Scholar TLDR/influence section (`S2_API_KEY`)
+- `get article <id> tldr` - Semantic Scholar TLDR/influence section (optional auth; shared pool without `S2_API_KEY`)
 - `get article <id> annotations` - PubTator entity mentions
 - `get article <id> fulltext` - download/cache full text
 - `get article <id> all` - include all article sections
 - `article entities <pmid> --limit <N>` - annotated entities with next commands
 - `article batch <id> [<id>...]` - compact multi-article summary cards
-- `article citations <id> --limit <N>` - citation graph with contexts/intents (`S2_API_KEY`)
-- `article references <id> --limit <N>` - reference graph with contexts/intents (`S2_API_KEY`)
-- `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` - related papers (`S2_API_KEY`)
+- `article citations <id> --limit <N>` - citation graph with contexts/intents (optional auth; shared pool without `S2_API_KEY`)
+- `article references <id> --limit <N>` - reference graph with contexts/intents (optional auth; shared pool without `S2_API_KEY`)
+- `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` - related papers (optional auth; shared pool without `S2_API_KEY`)
 
 ## Search
 
@@ -214,8 +214,8 @@ fn list_article() -> String {
 ## Notes
 
 - Set `NCBI_API_KEY` to increase throughput for NCBI-backed article enrichment.
-- Set `S2_API_KEY` to unlock optional Semantic Scholar search fan-out plus TLDR, citation graph, and recommendation helpers.
-- `search article` still keeps `--source <all|pubtator|europepmc>` in v1; Semantic Scholar is automatic when the key is present and the filter set is compatible.
+- Set `S2_API_KEY` to send authenticated Semantic Scholar requests at 1 req/sec. Without it, BioMCP uses the shared pool at 1 req/2sec.
+- `search article` still keeps `--source <all|pubtator|europepmc>` in v1; Semantic Scholar is automatic when the filter set is compatible, with or without the key.
 - Default `search article --sort relevance` is directness-first rather than citation-first.
 "#
     .to_string()
