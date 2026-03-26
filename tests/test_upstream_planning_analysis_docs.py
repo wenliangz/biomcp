@@ -294,7 +294,12 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "List: `biomcp skill list`" in ux
     assert "Legacy lookup: `biomcp skill 03` or `biomcp skill variant-to-treatment`" in ux
     assert "biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`" in ux
-    assert "biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`" in ux
+    assert "biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`" not in ux
+    assert (
+        "Compatibility note: `biomcp serve-sse` remains available only as a hidden "
+        "compatibility command that points users to `biomcp serve-http`."
+        in ux
+    )
 
 
 def test_source_integration_architecture_doc_captures_repo_contract() -> None:

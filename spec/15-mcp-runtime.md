@@ -13,6 +13,21 @@ operators at the canonical HTTP path.
 out="$(biomcp serve-http --help)"
 echo "$out" | mustmatch like "Streamable HTTP"
 echo "$out" | mustmatch like "/mcp"
+echo "$out" | mustmatch like "--host"
+echo "$out" | mustmatch like "--port"
+echo "$out" | mustmatch not like "--json"
+echo "$out" | mustmatch not like "--no-cache"
+```
+
+## Top-Level Discovery
+
+`biomcp --help` should list the current Streamable HTTP transport and omit the
+legacy SSE migration shim from first-run discovery.
+
+```bash
+out="$(biomcp --help)"
+echo "$out" | mustmatch like "serve-http"
+echo "$out" | mustmatch not like "serve-sse"
 ```
 
 ## Legacy SSE Help
@@ -24,6 +39,9 @@ echo "$out" | mustmatch like "/mcp"
 out="$(biomcp serve-sse --help)"
 echo "$out" | mustmatch like "removed"
 echo "$out" | mustmatch like "serve-http"
+echo "$out" | mustmatch like "/mcp"
+echo "$out" | mustmatch not like "--json"
+echo "$out" | mustmatch not like "--no-cache"
 ```
 
 ## Stdio Tool Identity

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use futures::{StreamExt, future::try_join_all};
 use tracing::{debug, warn};
 
@@ -80,6 +80,44 @@ pub enum DrugRegionArg {
 }
 
 const DRUG_SEARCH_EMA_STRUCTURED_FILTER_ERROR: &str = "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters.";
+const RUNTIME_HELP_SUBCOMMANDS: [&str; 4] = ["mcp", "serve", "serve-http", "serve-sse"];
+
+fn hide_runtime_help_globals(
+    command: clap::Command,
+    subcommand_name: &'static str,
+    json_arg: &clap::Arg,
+    no_cache_arg: &clap::Arg,
+) -> clap::Command {
+    command.mut_subcommand(subcommand_name, |runtime| {
+        runtime.arg(json_arg.clone()).arg(no_cache_arg.clone())
+    })
+}
+
+pub fn build_cli() -> clap::Command {
+    let mut command = Cli::command();
+    let json_arg = command
+        .get_arguments()
+        .find(|arg| arg.get_id() == "json")
+        .cloned()
+        .expect("json arg should exist")
+        .hide(true);
+    let no_cache_arg = command
+        .get_arguments()
+        .find(|arg| arg.get_id() == "no_cache")
+        .cloned()
+        .expect("no_cache arg should exist")
+        .hide(true);
+
+    for subcommand_name in RUNTIME_HELP_SUBCOMMANDS {
+        command = hide_runtime_help_globals(command, subcommand_name, &json_arg, &no_cache_arg);
+    }
+    command
+}
+
+pub fn parse_cli_from_env() -> Cli {
+    let matches = build_cli().get_matches();
+    Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit())
+}
 
 impl From<DrugRegionArg> for DrugRegion {
     fn from(value: DrugRegionArg) -> Self {
@@ -268,6 +306,7 @@ pub enum Commands {
         port: u16,
     },
     #[command(
+        hide = true,
         about = "removed legacy SSE compatibility command; use `serve-http`",
         long_about = "removed legacy SSE compatibility command.\n\ndeprecated users should run `biomcp serve-http` and connect remote clients to `/mcp` instead."
     )]
@@ -6445,7 +6484,7 @@ mod tests {
         trial_locations_json, trial_search_query_summary, truncate_article_annotations,
     };
     use crate::entities::drug::{DrugRegion, DrugSearchFilters};
-    use clap::{CommandFactory, Parser};
+    use clap::{CommandFactory, FromArgMatches, Parser};
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -6765,8 +6804,62 @@ mod tests {
     }
 
     #[test]
+    fn runtime_help_hides_query_only_global_flags() {
+        for subcommand_name in super::RUNTIME_HELP_SUBCOMMANDS {
+            let mut command = super::build_cli();
+            let runtime = command
+                .find_subcommand_mut(subcommand_name)
+                .expect("runtime subcommand should exist");
+            let mut help = Vec::new();
+            runtime
+                .write_long_help(&mut help)
+                .expect("runtime help should render");
+            let help = String::from_utf8(help).expect("help should be utf-8");
+
+            assert!(
+                !help.contains("--json"),
+                "{subcommand_name} help should not advertise --json"
+            );
+            assert!(
+                !help.contains("--no-cache"),
+                "{subcommand_name} help should not advertise --no-cache"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_commands_still_parse_hidden_global_flags() {
+        let cli = parse_built_cli([
+            "biomcp",
+            "serve-http",
+            "--json",
+            "--no-cache",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8080",
+        ]);
+        assert!(cli.json);
+        assert!(cli.no_cache);
+        assert!(matches!(
+            cli.command,
+            Commands::ServeHttp { host, port } if host == "127.0.0.1" && port == 8080
+        ));
+
+        for args in [
+            ["biomcp", "mcp", "--json", "--no-cache"].as_slice(),
+            ["biomcp", "serve", "--json", "--no-cache"].as_slice(),
+            ["biomcp", "serve-sse", "--json", "--no-cache"].as_slice(),
+        ] {
+            let cli = parse_built_cli(args);
+            assert!(cli.json);
+            assert!(cli.no_cache);
+        }
+    }
+
+    #[test]
     fn serve_http_help_describes_streamable_http() {
-        let mut command = Cli::command();
+        let mut command = super::build_cli();
         let serve_http = command
             .find_subcommand_mut("serve-http")
             .expect("serve-http subcommand should exist");
@@ -6778,12 +6871,16 @@ mod tests {
 
         assert!(help.contains("Streamable HTTP"));
         assert!(help.contains("/mcp"));
+        assert!(help.contains("--host <HOST>"));
+        assert!(help.contains("--port <PORT>"));
         assert!(!help.contains("SSE transport"));
+        assert!(!help.contains("--json"));
+        assert!(!help.contains("--no-cache"));
     }
 
     #[test]
-    fn serve_sse_help_stays_visible_and_deprecated() {
-        let mut command = Cli::command();
+    fn serve_sse_help_stays_callable_and_deprecated() {
+        let mut command = super::build_cli();
         let serve_sse = command
             .find_subcommand_mut("serve-sse")
             .expect("serve-sse subcommand should exist");
@@ -6796,6 +6893,22 @@ mod tests {
         assert!(help.contains("serve-sse"));
         assert!(help.contains("removed"));
         assert!(help.contains("serve-http"));
+        assert!(help.contains("/mcp"));
+        assert!(!help.contains("--json"));
+        assert!(!help.contains("--no-cache"));
+    }
+
+    #[test]
+    fn top_level_help_hides_serve_sse_but_keeps_serve_http() {
+        let mut command = super::build_cli();
+        let mut help = Vec::new();
+        command
+            .write_long_help(&mut help)
+            .expect("top-level help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("serve-http"));
+        assert!(!help.contains("serve-sse"));
     }
 
     fn render_trial_search_long_help() -> String {
@@ -6811,6 +6924,17 @@ mod tests {
             .write_long_help(&mut help)
             .expect("trial help should render");
         String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn parse_built_cli<I, T>(args: I) -> Cli
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let matches = super::build_cli()
+            .try_get_matches_from(args)
+            .expect("args should parse with canonical CLI");
+        Cli::from_arg_matches(&matches).expect("matches should decode into Cli")
     }
 
     fn render_pathway_search_long_help() -> String {

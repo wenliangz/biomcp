@@ -37,6 +37,34 @@ def _load_ingest_module():
     return module
 
 
+def test_parse_args_help_clarifies_examples_and_bundle_lanes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_ingest_module()
+    manifest = module.load_manifest()
+
+    with pytest.raises(SystemExit) as exc_info:
+        module.parse_args(["--help"], manifest)
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "usage: ingest_public.py [-h] --bundle BUNDLE [--force]" in help_text
+    assert "Ingest a manifest-defined public BioASQ bundle." in help_text
+    assert "--bundle BUNDLE" in help_text
+    assert "{hf-public-pre2026,mirage-yesno-2024,official-task-b-participant-download}" not in help_text
+    assert "Examples:" in help_text
+    assert "uv run --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026" in help_text
+    assert "Bundle lanes:" in help_text
+    assert "Public historical lane" in help_text
+    assert "hf-public-pre2026" in help_text
+    assert "mirage-yesno-2024" in help_text
+    assert "Official competition lane" in help_text
+    assert "official-task-b-participant-download" in help_text
+    assert "metadata-only" in help_text
+    assert "registration-required" in help_text
+    assert "Bundle id to ingest (see lane table below)." in help_text
+
+
 def test_normalize_hf_factoid_parses_stringified_exact_answer_and_provenance() -> None:
     module = _load_ingest_module()
     record = {
@@ -242,3 +270,16 @@ def test_normalize_hf_record_rejects_malformed_literal_answers() -> None:
             bundle=HF_BUNDLE,
             reviewed_on="2026-03-25",
         )
+
+
+def test_main_rejects_official_bundle_with_participants_area_guidance() -> None:
+    module = _load_ingest_module()
+
+    with pytest.raises(
+        SystemExit,
+        match=(
+            "metadata-only.*participants-area workflow documented in "
+            "docs/reference/bioasq-benchmark.md"
+        ),
+    ):
+        module.main(["--bundle", "official-task-b-participant-download"])
