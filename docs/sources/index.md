@@ -1,0 +1,37 @@
+---
+title: "Biomedical Data Sources for AI Agents | BioMCP"
+description: "Explore BioMCP source guides for PubMed, ClinicalTrials.gov, ClinVar, OpenFDA, UniProt, gnomAD, Reactome, and Semantic Scholar."
+---
+
+# Biomedical Data Sources for AI Agents
+
+BioMCP's [User Guide](../user-guide/cli-reference.md) is organized around entities such as genes, variants, articles, trials, and drugs. This Sources section flips the lens: it shows what each upstream database is good at, what BioMCP exposes from it, and where the boundary sits when a workflow is mixed-source.
+
+Use these pages when you already know the provider you trust, the keyword you are targeting, or the provenance you need to explain to a reviewer, teammate, or downstream agent.
+
+## Source guides
+
+| Source | Best when you want | Guide |
+|---|---|---|
+| PubMed | Article search, PubTator annotations, and PMC full-text handoff | [PubMed](pubmed.md) |
+| ClinicalTrials.gov | Recruiting-study search, eligibility text, and site details | [ClinicalTrials.gov](clinicaltrials-gov.md) |
+| ClinVar | Clinical significance and review-status context for variants | [ClinVar](clinvar.md) |
+| OpenFDA | FAERS, recalls, device events, labels, and U.S. approval context | [OpenFDA](openfda.md) |
+| UniProt | Canonical protein cards and structure-linked context | [UniProt](uniprot.md) |
+| gnomAD | Population frequency and gene constraint context | [gnomAD](gnomad.md) |
+| Reactome | Pathway records, pathway genes, and contained events | [Reactome](reactome.md) |
+| Semantic Scholar | TLDRs, citation graphs, references, and recommendations | [Semantic Scholar](semantic-scholar.md) |
+
+## Reference and setup
+
+- [Data Sources](../reference/data-sources.md) explains runtime behavior, endpoints, auth mode, and operational caveats.
+- [Source Licensing and Terms](../reference/source-licensing.md) explains direct vs indirect provenance, redistribution limits, and provider terms.
+- [API Keys](../getting-started/api-keys.md) shows the optional or required environment variables that upgrade selected source paths.
+
+## Related docs
+
+- [CLI Reference](../user-guide/cli-reference.md)
+- [Article](../user-guide/article.md)
+- [Trial](../user-guide/trial.md)
+- [Variant](../user-guide/variant.md)
+- [Drug](../user-guide/drug.md)
