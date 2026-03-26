@@ -44,6 +44,16 @@ nav:
       - gnomAD: sources/gnomad.md
       - Reactome: sources/reactome.md
       - Semantic Scholar: sources/semantic-scholar.md
+      - ChEMBL: sources/chembl.md
+      - OpenTargets: sources/opentargets.md
+      - CIViC: sources/civic.md
+      - OncoKB: sources/oncokb.md
+      - cBioPortal: sources/cbioportal.md
+      - EMA: sources/ema.md
+      - KEGG: sources/kegg.md
+      - PharmGKB / CPIC: sources/pharmgkb.md
+      - Human Protein Atlas: sources/human-protein-atlas.md
+      - Monarch Initiative: sources/monarch-initiative.md
   - How-To:
       - Annotate Variants: how-to/annotate-variants.md
       - Cross-Entity Pivots: how-to/cross-entity-pivots.md
