@@ -7,69 +7,60 @@ checkpoint status
 sed -n '1,220p' .march/ticket.md
 sed -n '1,260p' .march/design-draft.md
 sed -n '1,260p' .march/design-final.md
-git status --short
-sed -n '1,260p' tests/test_docs_changelog_refresh.py
-sed -n '1,260p' tests/test_version_sync_script.py
-sed -n '1,260p' tests/test_bioasq_benchmark_contract.py
-sed -n '1,180p' tests/test_citation_contract.py
-sed -n '1,260p' CHANGELOG.md
-sed -n '1,260p' design/technical/overview.md
-sed -n '1,200p' CITATION.cff
-rg -n '0\.8\.17|0\.8\.18' .
-uv run --no-project --with pytest --with mcp python -m pytest tests/test_docs_changelog_refresh.py -k 'changelog_has_backfilled_releases_and_release_header or release_overview_mentions_v0_8_18_current_version_and_release_files' -v
-cargo check
+sed -n '1,260p' tests/test_upstream_planning_analysis_docs.py
+sed -n '1,260p' design/technical/source-integration.md
+sed -n '1,320p' design/technical/overview.md
+rg -n "region|after_help|get drug|search drug" src/cli/mod.rs src/cli/list.rs src/cli/list_reference.md docs/user-guide/cli-reference.md docs/user-guide/drug.md spec/05-drug.md
+rg -n "Semantic Scholar|search article|source all|open-access|--type|InvalidArgument|PMCID|DOI|arXiv|paper IDs|recommendations|citations|references" src/entities/article.rs src/cli/health.rs docs/user-guide/article.md docs/reference/data-sources.md src/cli/search_all.rs tests/article_usage_stderr.rs spec/06-article.md
+rg -n "version-sync|deploy docs|pages|workflow_dispatch|install.sh|releases/latest|tag_name|mkdocs build --strict|pytest tests/" .github/workflows/ci.yml .github/workflows/release.yml scripts/check-version-sync.sh install.sh
+uv run --no-project --with pytest --with mcp python -m pytest tests/test_upstream_planning_analysis_docs.py -k 'technical_and_ux_docs_match_current_cli_and_workflow_contracts or source_integration_architecture_doc_captures_repo_contract' -v
 uv sync --extra dev
-bash scripts/check-version-sync.sh
-uv run pytest tests/test_version_sync_script.py tests/test_docs_changelog_refresh.py tests/test_bioasq_benchmark_contract.py tests/test_citation_contract.py -v
+uv run pytest tests/test_upstream_planning_analysis_docs.py -v
 uv run mkdocs build --strict
-cargo build --release --locked
-./target/release/biomcp version | head -n 1
 git status --short
-git diff --stat
+git diff -- design/technical/overview.md design/technical/source-integration.md tests/test_upstream_planning_analysis_docs.py
 ```
 
 ## What Changed
 
-- Added the `0.8.18 — 2026-03-25` changelog entry, scoped to the shipped
-  release surface: EMA regional drug workflows, the BioASQ benchmark module
-  and docs route, and Semantic Scholar optional authentication.
-- Bumped the tracked release metadata to `0.8.18` in `Cargo.toml`,
-  `Cargo.lock`, `pyproject.toml`, `manifest.json`, and the generated
-  editable-root entry in `uv.lock`.
-- Updated `design/technical/overview.md` to reflect `0.8.18` as current,
-  expanded the release checklist to the repo's actual tracked metadata files,
-  and added explicit post-tag verification commands for release/devops handoff.
-- Updated `tests/test_docs_changelog_refresh.py` in place so the existing
-  docs/version contract proves the new release header, changelog themes, and
-  verify-step command handoff.
-- Refreshed `CITATION.cff` release version/date so the existing citation
-  contract stays aligned with the release metadata surfaces.
+- Updated `design/technical/source-integration.md` with a new
+  `Local Runtime Sources and File-Backed Assets` section that separates EMA
+  local runtime readiness from BioASQ benchmark assets.
+- Added an `Entity-Specific Command Modifiers` section to
+  `design/technical/source-integration.md` so the `get <entity> <id> [section...]`
+  grammar, named modifiers, alignment surfaces, and fast-fail validation rules
+  have one architecture-level source of truth.
+- Updated `design/technical/overview.md` with an
+  `Article Federation and Front-Door Validation` section that matches the
+  shipped article planner, strict-filter routing, identifier validation, and
+  Semantic Scholar helper boundary.
+- Expanded the `Release Pipeline` section in
+  `design/technical/overview.md` so tag authority, version-sync, docs deploy,
+  and `install.sh` behavior are explicit.
+- Tightened the `biomcp health` architecture notes in
+  `design/technical/overview.md` to include EMA local-data behavior under
+  `--apis-only`.
+- Extended `tests/test_upstream_planning_analysis_docs.py` in place so the
+  existing architecture-doc contract proves the new EMA/BioASQ, modifier,
+  article federation, and release-authority text.
 
 ## Tests And Proof
 
-- Proof-first failure before implementation:
-  `uv run --no-project --with pytest --with mcp python -m pytest tests/test_docs_changelog_refresh.py -k 'changelog_has_backfilled_releases_and_release_header or release_overview_mentions_v0_8_18_current_version_and_release_files' -v`
-- Rust metadata refresh:
-  `cargo check`
-- Python/docs environment and lock refresh:
-  `uv sync --extra dev`
-- Version-sync contract:
-  `bash scripts/check-version-sync.sh`
-- Docs/version/BioASQ/citation contracts:
-  `uv run pytest tests/test_version_sync_script.py tests/test_docs_changelog_refresh.py tests/test_bioasq_benchmark_contract.py tests/test_citation_contract.py -v`
-- Repo docs build proof:
+- Proof-first failing check before the docs changes:
+  `uv run --no-project --with pytest --with mcp python -m pytest tests/test_upstream_planning_analysis_docs.py -k 'technical_and_ux_docs_match_current_cli_and_workflow_contracts or source_integration_architecture_doc_captures_repo_contract' -v`
+- Repo-native architecture-doc contract:
+  `uv run pytest tests/test_upstream_planning_analysis_docs.py -v`
+- Strict docs build:
   `uv run mkdocs build --strict`
-- Release build proof:
-  `cargo build --release --locked`
-- Built binary version proof:
-  `./target/release/biomcp version | head -n 1`
 
 ## Deviations
 
-- The approved design file list did not mention `CITATION.cff`, but I updated
-  it because `tests/test_citation_contract.py` already enforces version/date
-  parity between the citation metadata, manifest versions, and latest
-  changelog release header.
-- I repaired `.march/checkpoint.json` after an early parallel checkpoint write
-  corrupted the file; this only affected the workflow artifact, not repo or
-  runtime behavior.
+- I used a lightweight `uv run --no-project ... pytest` command for the initial
+  failing proof because the existing repo-native `uv run pytest ...` path builds
+  the editable Rust package first, which was unnecessary to demonstrate a
+  text-only docs failure. Final verification still used the repo-native
+  `uv sync --extra dev`, `uv run pytest ...`, and `uv run mkdocs build --strict`
+  flow.
+- No runtime code, specs, user-guide pages, workflows, or scripts needed
+  changes after the architecture docs were aligned with the already-shipped
+  behavior.

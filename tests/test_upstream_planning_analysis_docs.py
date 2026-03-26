@@ -22,6 +22,21 @@ def _read_planning(path: str) -> str:
     return (_planning_root() / path).read_text(encoding="utf-8")
 
 
+def _normalize_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _markdown_section(text: str, heading: str, level: int = 2) -> str:
+    marker = "#" * level
+    match = re.search(
+        rf"^{re.escape(marker)} {re.escape(heading)}\n(.*?)(?=^{re.escape(marker)} |\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, f"missing section {marker} {heading}"
+    return match.group(1)
+
+
 def _workflow_job_block(workflow: str, job_name: str) -> str:
     match = re.search(
         rf"^  {re.escape(job_name)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
@@ -126,6 +141,88 @@ def test_functional_overview_preserves_readme_surface_and_study_family() -> None
 def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> None:
     technical = _read_repo("design/technical/overview.md")
     ux = _read_repo("design/ux/cli-reference.md")
+    article_guide = _read_repo("docs/user-guide/article.md")
+    data_sources = _read_repo("docs/reference/data-sources.md")
+    article_impl = _read_repo("src/entities/article.rs")
+    article_usage = _read_repo("tests/article_usage_stderr.rs")
+    release_workflow = _read_repo(".github/workflows/release.yml")
+    install_script = _read_repo("install.sh")
+    technical_ws = _normalize_ws(technical)
+    article_guide_ws = _normalize_ws(article_guide)
+    data_sources_ws = _normalize_ws(data_sources)
+    article_validation_section = _normalize_ws(
+        _markdown_section(technical, "Article Federation and Front-Door Validation")
+    )
+    release_pipeline_section = _normalize_ws(_markdown_section(technical, "Release Pipeline"))
+
+    assert "## Article Federation and Front-Door Validation" in technical
+    assert (
+        "`search article --source all` plans PubTator3 plus Europe PMC"
+        in article_validation_section
+    )
+    assert "Semantic Scholar is an optional third search leg" in article_validation_section
+    assert (
+        "Strict Europe PMC-only filters such as `--open-access` and `--type` "
+        "disable the federated planner"
+    ) in article_validation_section
+    assert (
+        "`--source pubtator` with strict Europe PMC-only filters is rejected at the front door"
+        in article_validation_section
+    )
+    assert "`--source` remains `all|pubtator|europepmc` in v1" in article_validation_section
+    assert (
+        "deduplicate across PMID, PMCID, and DOI where possible, then re-rank locally"
+        in article_validation_section
+    )
+    assert (
+        "`search article` rejects missing filters, invalid date values, inverted date ranges, "
+        "and unsupported `--type` values before backend calls"
+        in article_validation_section
+    )
+    assert (
+        "`get article` accepts PMID, PMCID, and DOI only and rejects unsupported identifiers "
+        "such as publisher PIIs with a clean `InvalidArgument`"
+        in article_validation_section
+    )
+    assert (
+        "Semantic Scholar helper commands accept PMID, PMCID, DOI, arXiv, and Semantic Scholar paper IDs"
+        in article_validation_section
+    )
+    assert (
+        "Semantic Scholar participates in article search fan-out only on the compatible "
+        "`search article --source all` path"
+        in technical_ws
+    )
+    assert (
+        "Semantic Scholar always owns TLDR, citations, references, and recommendations"
+        in technical_ws
+    )
+    assert (
+        "Semantic Scholar article helpers are explicitly limited to 1 request/sec per process and are not part of article search fan-out"
+        not in technical
+    )
+    assert "Article search fans out to PubTator3 and Europe PMC in parallel by default." in article_guide_ws
+    assert "BioMCP also adds a Semantic Scholar search leg" in article_guide_ws
+    assert "PubTator3 + Europe PMC + optional Semantic Scholar" in data_sources_ws
+    assert (
+        "PubTator3 + Europe PMC for federated search, with an optional Semantic Scholar leg "
+        "when the filter set is compatible"
+        in data_sources_ws
+    )
+    assert "fn has_strict_europepmc_filters(filters: &ArticleSearchFilters) -> bool {" in article_impl
+    assert "fn plan_backends(" in article_impl
+    assert "pub fn semantic_scholar_search_enabled(" in article_impl
+    assert (
+        "--source pubtator does not support strict filters --open-access or --type."
+        in article_impl
+    )
+    assert "Unsupported identifier format for Semantic Scholar article helpers:" in article_impl
+    assert (
+        "Unsupported identifier format. BioMCP resolves PMID (digits only"
+        in article_impl
+    )
+    assert "invalid_article_type_is_clean_usage_error_before_pubtator_route" in article_usage
+    assert "missing_article_filters_is_clean_usage_error" in article_usage
 
     assert "CI (`.github/workflows/ci.yml`) runs five parallel jobs" in technical
     assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)" in technical
@@ -135,13 +232,47 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
         '`contracts` (`cargo build --release --locked`, `uv sync --extra dev`, '
         '`uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, '
         '`uv run mkdocs build --strict`)'
-        in technical
+        in technical_ws
     )
-    assert "`spec-stable` (`cargo build --release --locked`, then `make spec-pr`)" in technical
-    assert "PR CI now runs `make spec-pr` via the `spec-stable` job in `.github/workflows/ci.yml`." in technical
-    assert "Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`" in technical
-    assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical
-    assert "release validation runs `pytest tests/` and `mkdocs build --strict`" in technical
+    assert "`spec-stable` (`cargo build --release --locked`, then `make spec-pr`)" in technical_ws
+    assert (
+        "PR CI runs `make spec-pr` via the `spec-stable` job in `.github/workflows/ci.yml`"
+        in technical_ws
+    )
+    assert (
+        "Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`"
+        in technical_ws
+    )
+    assert "Contract smoke checks run in `.github/workflows/contracts.yml`" in technical_ws
+    assert "The semver tag is the canonical release/version authority." in release_pipeline_section
+    assert (
+        "PR CI enforces version parity before release via the `version-sync` job and "
+        "`scripts/check-version-sync.sh`"
+        in release_pipeline_section
+    )
+    assert (
+        "The release workflow builds binaries, publishes PyPI wheels, and deploys docs "
+        "from the tagged source"
+        in release_pipeline_section
+    )
+    assert (
+        "`install.sh` resolves the latest release with platform assets, not the latest merge to `main`"
+        in release_pipeline_section
+    )
+    assert (
+        "The existing `### Post-tag public proof` block is the live verification step for "
+        "tag-to-binary and tag-to-docs parity"
+        in release_pipeline_section
+    )
+    assert "`workflow_dispatch` can replay a specified tag" in release_pipeline_section
+    assert "Release validation runs the Rust checks again" in technical
+    assert "workflow_dispatch:" in release_workflow
+    assert "inputs:" in release_workflow
+    assert "tag:" in release_workflow
+    assert "deploy-docs:" in release_workflow
+    assert "uv run mkdocs gh-deploy --force" in release_workflow
+    assert 'DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"' in install_script
+    assert "Resolved latest release with assets" in install_script
     assert "Streamable HTTP" in technical
     assert "`/mcp`" in technical
     assert "`/health`" in technical
@@ -169,6 +300,24 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
 def test_source_integration_architecture_doc_captures_repo_contract() -> None:
     technical = _read_repo("design/technical/overview.md")
     source_integration = _read_repo("design/technical/source-integration.md")
+    drug_guide = _read_repo("docs/user-guide/drug.md")
+    bioasq_reference = _read_repo("docs/reference/bioasq-benchmark.md")
+    cli_mod = _read_repo("src/cli/mod.rs")
+    cli_list = _read_repo("src/cli/list.rs")
+    cli_list_reference = _read_repo("src/cli/list_reference.md")
+    cli_reference_guide = _read_repo("docs/user-guide/cli-reference.md")
+    drug_entity = _read_repo("src/entities/drug.rs")
+    ema_source = _read_repo("src/sources/ema.rs")
+    health = _read_repo("src/cli/health.rs")
+    drug_spec = _read_repo("spec/05-drug.md")
+    bioasq_reference_ws = _normalize_ws(bioasq_reference)
+    cli_reference_guide_ws = _normalize_ws(cli_reference_guide)
+    local_runtime_section = _normalize_ws(
+        _markdown_section(source_integration, "Local Runtime Sources and File-Backed Assets")
+    )
+    modifier_section = _normalize_ws(
+        _markdown_section(source_integration, "Entity-Specific Command Modifiers")
+    )
 
     assert "source-integration.md" in technical
     assert "# BioMCP Source Integration Architecture" in source_integration
@@ -186,6 +335,70 @@ def test_source_integration_architecture_doc_captures_repo_contract() -> None:
     assert "`src/cli/list.rs`" in source_integration
     assert "`docs/user-guide/cli-reference.md`" in source_integration
     assert "default `get` output stays concise" in source_integration
+    assert "## Local Runtime Sources and File-Backed Assets" in source_integration
+    assert "EMA is the canonical local runtime source" in local_runtime_section
+    assert "`BIOMCP_EMA_DIR` first, then the platform data directory" in local_runtime_section
+    assert "`biomcp health` includes the EMA local-data readiness row" in local_runtime_section
+    assert "`biomcp health --apis-only` excludes that row" in local_runtime_section
+    assert (
+        "`configured`, `available (default path)`, `not configured`, and `error (missing: ...)`"
+        in local_runtime_section
+    )
+    assert "`docs/user-guide/drug.md`" in local_runtime_section
+    assert "BioASQ is the canonical file-backed non-runtime asset" in local_runtime_section
+    assert (
+        "do not join the runtime source inventory, `biomcp health`, or the source-readiness checklist"
+        in local_runtime_section
+    )
+    assert "`docs/reference/bioasq-benchmark.md`" in local_runtime_section
+    assert "`benchmarks/bioasq/`" in local_runtime_section
+    assert "## EMA local data setup" in drug_guide
+    assert "`configured`:" in drug_guide
+    assert "`available (default path)`:" in drug_guide
+    assert "`not configured`:" in drug_guide
+    assert "`error (missing: ...)`:" in drug_guide
+    assert "pub(crate) fn resolve_ema_root() -> PathBuf {" in ema_source
+    assert 'std::env::var("BIOMCP_EMA_DIR")' in ema_source
+    assert "EMA local data" in health
+    assert "available (default path)" in health
+    assert "not configured" in health
+    assert "error (missing:" in health
+    assert "BioASQ" not in health
+    assert "# BioASQ Benchmark" in bioasq_reference
+    assert "offline benchmark input, not as a live runtime source" in bioasq_reference_ws
+    assert (REPO_ROOT / "benchmarks" / "bioasq").is_dir()
+    assert "## Entity-Specific Command Modifiers" in source_integration
+    assert "The base grammar remains `get <entity> <id> [section...]`." in modifier_section
+    assert "Entity-specific modifiers are named options" in modifier_section
+    assert "The canonical example is `get drug <name> ... --region <us|eu|all>`." in modifier_section
+    assert "`src/cli/mod.rs`" in modifier_section
+    assert "`src/cli/list.rs`" in modifier_section
+    assert "`src/cli/list_reference.md`" in modifier_section
+    assert "`docs/user-guide/cli-reference.md`" in modifier_section
+    assert "`docs/user-guide/drug.md`" in modifier_section
+    assert "`spec/05-drug.md`" in modifier_section
+    assert "Runtime validation belongs in the owning entity or CLI path" in modifier_section
+    assert (
+        "`--region` only changes the data plane for `regulatory`, `safety`, `shortage`, or `all`"
+        in modifier_section
+    )
+    assert "`approvals` remains U.S.-only" in modifier_section
+    assert "invalid flag/section combinations fail fast before data fetches" in modifier_section
+    assert "biomcp get drug Keytruda regulatory --region eu" in cli_mod
+    assert "Data region for regional sections (regulatory, safety, shortage, or all)" in cli_mod
+    assert "get drug <name> regulatory [--region <us|eu|all>]" in cli_list
+    assert "get drug <name> safety [--region <us|eu|all>]" in cli_list
+    assert "get drug <name> shortage [--region <us|eu|all>]" in cli_list
+    assert "get drug <name> approvals" in cli_list
+    assert "get drug <name> regulatory|safety|shortage [--region <us|eu|all>]" in cli_list_reference
+    assert "biomcp get drug Keytruda regulatory --region eu" in cli_reference_guide
+    assert (
+        "For `get drug`, use `--region` only with `regulatory`, `safety`, `shortage`, or `all`"
+        in cli_reference_guide_ws
+    )
+    assert "get drug <name> regulatory [--region <us|eu|all>]" in drug_spec
+    assert "--region is not supported with approvals." in drug_entity
+    assert "--region can only be used with regulatory, safety, shortage, or all." in drug_entity
     assert "## Provenance and Rendering" in source_integration
     assert "`source_label`" in source_integration
     assert "source-specific notes" in source_integration
