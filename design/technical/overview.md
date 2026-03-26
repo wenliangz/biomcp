@@ -62,6 +62,29 @@ See also: [Source integration architecture](source-integration.md) for the
 detailed contract for adding a new upstream source or deepening an existing
 integration.
 
+## Article Federation and Front-Door Validation
+
+`search article --source all` plans PubTator3 plus Europe PMC. Semantic
+Scholar is an optional third search leg on that path when the filter set is
+compatible. Strict Europe PMC-only filters such as `--open-access` and
+`--type` disable the federated planner and route to Europe PMC only.
+`--source pubtator` with strict Europe PMC-only filters is rejected at the
+front door. `--source` remains `all|pubtator|europepmc` in v1; the CLI does
+not expose a user-facing `--source semanticscholar` mode.
+
+After fetch, article results deduplicate across PMID, PMCID, and DOI where
+possible, then re-rank locally.
+
+The validation boundary is also part of the architecture contract:
+
+- `search article` rejects missing filters, invalid date values, inverted date
+  ranges, and unsupported `--type` values before backend calls.
+- `get article` accepts PMID, PMCID, and DOI only and rejects unsupported
+  identifiers such as publisher PIIs with a clean `InvalidArgument`.
+- Semantic Scholar helper commands accept PMID, PMCID, DOI, arXiv, and
+  Semantic Scholar paper IDs and reject other identifiers before calling the
+  backend.
+
 ## API Keys
 
 Most commands work without credentials. Optional keys improve rate limits or
@@ -87,6 +110,16 @@ agent workers, run a single shared `biomcp serve-http` endpoint so all workers
 share one limiter budget and one Streamable HTTP `/mcp` surface.
 
 ## Release Pipeline
+
+The semver tag is the canonical release/version authority. PR CI enforces
+version parity before release via the `version-sync` job and
+`scripts/check-version-sync.sh`. The release workflow builds binaries,
+publishes PyPI wheels, and deploys docs from the tagged source, while
+`install.sh` resolves the latest release with platform assets, not the latest
+merge to `main`. The existing `### Post-tag public proof` block is the live
+verification step for tag-to-binary and tag-to-docs parity.
+`workflow_dispatch` can replay a specified tag, but only as an explicit-tag
+rebuild path, not a second source of release truth.
 
 1. Update version in `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
    `manifest.json`, `CITATION.cff`, and `CHANGELOG.md`
@@ -175,7 +208,8 @@ inventory ledger.
 - It shows per-source connectivity for readiness-significant sources.
 - Key-gated sources appear as `excluded` rows when the required environment
   variable is absent.
-- `--apis-only` omits the cache-writability row.
+- `--apis-only` omits the cache-writability row and the EMA local-data row
+  because neither is an upstream API.
 - Partial upstream failures remain visible in the rendered report.
 - Current CLI behavior is report-first: the command exits `0` when the report
   renders, even if some upstream rows are failing.
@@ -232,7 +266,10 @@ replacing the real BioMCP markdown output.
 ## Known Constraints
 
 - Rate limiting is process-local (see above)
-- Semantic Scholar article helpers are explicitly limited to 1 request/sec per process and are not part of article search fan-out
+- Semantic Scholar participates in article search fan-out only on the
+  compatible `search article --source all` path
+- Semantic Scholar always owns TLDR, citations, references, and
+  recommendations
 - Federated totals are approximate
 - Some sources (OncoKB production, NCI CTS, AlphaGenome) require API keys
 - OncoKB demo endpoint has a known no-hit response for some variants — this
