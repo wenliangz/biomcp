@@ -70,6 +70,7 @@ EOF
 
 cat >"$study_root/brca_tcga_pan_can_atlas_2018/data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt" <<'EOF'
 Hugo_Symbol	Entrez_Gene_Id	S1	S2	S3
+TP53	7157	3.0	1.0	2.0
 ERBB2	2064	2.0	1.0	4.0
 EOF
 
