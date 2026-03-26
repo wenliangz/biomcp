@@ -113,6 +113,19 @@ Expected files:
 - `dhpcs.json`
 - `shortages.json`
 
+Confirm local EMA readiness with full health output:
+
+```bash
+biomcp health
+```
+
+EMA row meanings:
+
+- `configured`: `BIOMCP_EMA_DIR` is set and complete
+- `available (default path)`: the default platform data directory contains a complete EMA batch
+- `not configured`: no EMA batch is installed at the default path yet
+- `error (missing: ...)`: the EMA directory exists but is missing one or more required files
+
 ## Cross-entity helpers
 
 Trial pivot:

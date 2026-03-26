@@ -58,6 +58,10 @@ Numeric and slug skill lookups remain compatibility behavior, but they are not
 part of the recommended command synopsis because current builds do not ship a
 browsable embedded catalog.
 
+`biomcp health --apis-only` is the upstream inventory smoke test. Full
+`biomcp health` also reports local readiness rows such as EMA local data and
+cache dir status.
+
 ## Search command families
 
 ## Discover

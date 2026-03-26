@@ -155,3 +155,34 @@ Capture one failing command with full stderr and include:
 - Command and flags
 - Whether `--no-cache` changes behavior
 - Source-specific API key state (set or unset)
+
+## 13) EU drug data not available
+
+EU drug regulatory, safety, and shortage sections depend on the local EMA human-medicines JSON batch. Check local readiness with full health output, not the API-only inventory view:
+
+```bash
+biomcp health
+```
+
+Interpret the EMA row like this:
+
+- `configured`: `BIOMCP_EMA_DIR` is set and all required EMA JSON files are present
+- `available (default path)`: BioMCP found a complete EMA batch in the default platform data directory
+- `not configured`: no EMA batch was found at the default path, so EU drug features are currently unavailable but the install is not considered broken
+- `error (missing: ...)`: BioMCP found a partial EMA batch; install the missing files or point `BIOMCP_EMA_DIR` at a complete batch
+
+Expected EMA files:
+
+- `medicines.json`
+- `post_authorisation.json`
+- `referrals.json`
+- `psusas.json`
+- `dhpcs.json`
+- `shortages.json`
+
+If you need to override the default path:
+
+```bash
+export BIOMCP_EMA_DIR="/path/to/ema-human"
+biomcp health
+```

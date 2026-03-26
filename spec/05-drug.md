@@ -4,12 +4,24 @@ Drug commands connect mechanism and target context with trial and adverse-event 
 
 | Section | Command focus | Why it matters |
 |---|---|---|
+| EMA health readiness | `biomcp health` | Confirms the local EMA batch is surfaced as an operator-readable readiness row |
 | Drug search | `search drug pembrolizumab` | Confirms name-based lookup |
 | Drug detail | `get drug pembrolizumab` | Confirms mechanism/target card |
 | Targets section | `get drug ... targets` | Confirms progressive disclosure |
 | Trial helper | `drug trials pembrolizumab` | Confirms intervention-based trial pivot |
 | Adverse-event helper | `drug adverse-events pembrolizumab` | Confirms safety signal pivot |
 | Adverse-event search | `search adverse-event -d ibuprofen` | Confirms direct safety search |
+
+## EMA Health Readiness
+
+Full `biomcp health` should expose local EMA readiness separately from the API-only inventory so operators can confirm EU drug prerequisites before debugging query output.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp health)"
+echo "$out" | mustmatch like "EMA local data ($fixture_root)"
+echo "$out" | mustmatch like "| EMA local data ($fixture_root) | configured |"
+```
 
 ## Searching by Name
 
