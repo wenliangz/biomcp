@@ -9,9 +9,14 @@ BioMCP provides native chart output for study commands via the `--chart` flag. C
 biomcp study query --study msk_impact_2017 --gene TP53 --type mutations \
   --chart bar --terminal
 
-# SVG pie chart of co-occurrence proportions
-biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS \
-  --chart pie -o tp53-kras.svg
+# SVG heatmap of a co-occurrence matrix
+biomcp study co-occurrence --study msk_impact_2017 \
+  --genes TP53,KRAS,PIK3CA,EGFR --chart heatmap -o cooccurrence-heatmap.svg
+
+# Terminal stacked bar chart of mutation status by group
+biomcp study compare --study brca_tcga_pan_can_atlas_2018 \
+  --gene TP53 --type mutations --target PIK3CA \
+  --chart stacked-bar --terminal
 
 # SVG Kaplan-Meier curve by TP53 mutation status
 biomcp study survival --study brca_tcga_pan_can_atlas_2018 --gene TP53 \
@@ -30,9 +35,9 @@ biomcp study compare --study brca_tcga_pan_can_atlas_2018 \
 | `study query --type mutations` | `bar`, `pie` |
 | `study query --type cna` | `bar`, `pie` |
 | `study query --type expression` | `histogram`, `density` |
-| `study co-occurrence` | `pie`, `bar` |
+| `study co-occurrence` | `bar`, `pie`, `heatmap` |
 | `study compare --type expression` | `box`, `violin`, `ridgeline` |
-| `study compare --type mutations` | `bar` |
+| `study compare --type mutations` | `bar`, `stacked-bar` |
 | `study survival` | `bar`, `survival` |
 
 Invalid combinations return an error listing the valid options.
@@ -57,6 +62,8 @@ When `--chart` is specified without `--terminal` or `-o`, BioMCP defaults to `--
 
 Use `--palette wong` for colorblind-safe output.
 
+Heatmaps use a fixed continuous colormap. `study co-occurrence --chart heatmap` supports `--title` and `--theme`, but rejects `--palette`.
+
 ## Why SVG?
 
 SVG is the recommended format for AI-assisted workflows. An AI agent can parse SVG XML attributes to recover exact numeric values (100% accuracy), compared to ~97% for PNG and ~90% for terminal. SVG is also 46x smaller than equivalent PNG.
@@ -69,7 +76,9 @@ SVG is the recommended format for AI-assisted workflows. An AI agent can parse S
 ## Chart Reference Pages
 
 - [`biomcp chart bar`](bar.md) — Bar chart
+- [`biomcp chart stacked-bar`](stacked-bar.md) — Stacked bar chart
 - [`biomcp chart pie`](pie.md) — Pie chart
+- [`biomcp chart heatmap`](heatmap.md) — Heatmap
 - [`biomcp chart histogram`](histogram.md) — Histogram
 - [`biomcp chart density`](density.md) — Density (KDE)
 - [`biomcp chart box`](box.md) — Box plot

@@ -12,7 +12,9 @@ struct EmbeddedCharts;
 #[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartCommand {
     Bar,
+    StackedBar,
     Pie,
+    Heatmap,
     Histogram,
     Density,
     Box,
@@ -38,7 +40,9 @@ pub fn show(command: Option<&ChartCommand>) -> Result<String, BioMcpError> {
     let path = match command {
         None => "index.md",
         Some(ChartCommand::Bar) => "bar.md",
+        Some(ChartCommand::StackedBar) => "stacked-bar.md",
         Some(ChartCommand::Pie) => "pie.md",
+        Some(ChartCommand::Heatmap) => "heatmap.md",
         Some(ChartCommand::Histogram) => "histogram.md",
         Some(ChartCommand::Density) => "density.md",
         Some(ChartCommand::Box) => "box.md",
@@ -47,4 +51,23 @@ pub fn show(command: Option<&ChartCommand>) -> Result<String, BioMcpError> {
         Some(ChartCommand::Survival) => "survival.md",
     };
     embedded_text(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChartCommand, show};
+
+    #[test]
+    fn show_returns_heatmap_doc() {
+        let doc = show(Some(&ChartCommand::Heatmap)).expect("heatmap doc should exist");
+        assert!(doc.contains("# Heatmap"));
+        assert!(doc.contains("study co-occurrence --chart heatmap"));
+    }
+
+    #[test]
+    fn show_returns_stacked_bar_doc() {
+        let doc = show(Some(&ChartCommand::StackedBar)).expect("stacked-bar doc should exist");
+        assert!(doc.contains("# Stacked Bar Chart"));
+        assert!(doc.contains("study compare --type mutations --chart stacked-bar"));
+    }
 }
