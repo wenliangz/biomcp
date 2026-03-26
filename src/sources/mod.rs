@@ -5,11 +5,13 @@ use std::future::Future;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use http::Extensions;
 use http_cache_reqwest::{
     CACacheManager, Cache, CacheMode, CacheOptions, HttpCache, HttpCacheOptions,
 };
+use reqwest::StatusCode;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderValue, RETRY_AFTER};
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, RequestBuilder};
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Middleware, Next, RequestBuilder};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use tracing::warn;
 
@@ -27,6 +29,7 @@ pub(crate) mod complexportal;
 pub(crate) mod cpic;
 pub(crate) mod dgidb;
 pub(crate) mod disgenet;
+pub(crate) mod ema;
 pub(crate) mod enrichr;
 pub(crate) mod europepmc;
 pub(crate) mod gnomad;
@@ -66,6 +69,7 @@ pub(crate) const DEFAULT_MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const BIOTHINGS_MAX_RESULT_WINDOW: usize = 10_000;
 
 static HTTP_CLIENT: OnceLock<ClientWithMiddleware> = OnceLock::new();
+static SEMANTIC_SCHOLAR_SHARED_POOL_HTTP_CLIENT: OnceLock<ClientWithMiddleware> = OnceLock::new();
 static STREAMING_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 tokio::task_local! {
@@ -154,6 +158,13 @@ pub(crate) fn ncbi_api_key() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+pub(crate) fn s2_api_key() -> Option<String> {
+    std::env::var("S2_API_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 pub(crate) fn append_ncbi_api_key(req: RequestBuilder, api_key: Option<&str>) -> RequestBuilder {
     if let Some(key) = api_key {
         return req.query(&[("api_key", key)]);
@@ -189,10 +200,40 @@ fn retry_sleep_duration(attempt: u32, retry_after_floor: Option<Duration>) -> Du
 ///   visible with `RUST_LOG=debug`
 /// - Cache: Disk-based HTTP cache in XDG cache directory
 /// - Cache TTL: `Cache-Control: max-stale=86400` makes “no caching headers” responses usable for 24h
-pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
-    if let Some(client) = HTTP_CLIENT.get() {
-        return Ok(client.clone());
+#[derive(Clone, Copy)]
+enum SharedHttpClientKind {
+    Default,
+    SemanticScholarSharedPool,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("semantic scholar shared-pool rate limit exceeded")]
+struct SemanticScholarSharedPoolRateLimitError;
+
+#[derive(Clone, Copy, Debug)]
+struct SemanticScholarSharedPoolRateLimitMiddleware;
+
+#[async_trait::async_trait]
+impl Middleware for SemanticScholarSharedPoolRateLimitMiddleware {
+    async fn handle(
+        &self,
+        req: reqwest::Request,
+        extensions: &mut Extensions,
+        next: Next<'_>,
+    ) -> reqwest_middleware::Result<reqwest::Response> {
+        let response = next.run(req, extensions).await?;
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(reqwest_middleware::Error::middleware(
+                SemanticScholarSharedPoolRateLimitError,
+            ));
+        }
+        Ok(response)
     }
+}
+
+fn build_http_client(kind: SharedHttpClientKind) -> Result<ClientWithMiddleware, BioMcpError> {
+    let cache_path = crate::utils::download::biomcp_cache_dir().join("http-cacache");
+    std::fs::create_dir_all(&cache_path)?;
 
     let mut default_headers = HeaderMap::new();
     default_headers.insert(CACHE_CONTROL, HeaderValue::from_static("max-stale=86400"));
@@ -207,9 +248,6 @@ pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
 
     let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
 
-    let cache_path = crate::utils::download::biomcp_cache_dir().join("http-cacache");
-    std::fs::create_dir_all(&cache_path)?;
-
     let cache_options = HttpCacheOptions {
         cache_options: Some(CacheOptions {
             // Shared-cache semantics: do not store private/authenticated responses.
@@ -219,18 +257,30 @@ pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
         ..HttpCacheOptions::default()
     };
 
-    let client = ClientBuilder::new(base_client)
-        .with(Cache(HttpCache {
-            mode: CacheMode::Default,
-            manager: CACacheManager { path: cache_path },
-            options: cache_options,
-        }))
-        .with(
-            RetryTransientMiddleware::new_with_policy(retry_policy)
-                .with_retry_log_level(tracing::Level::DEBUG),
-        )
-        .with(rate_limit::RateLimitMiddleware::new())
-        .build();
+    let builder = ClientBuilder::new(base_client).with(Cache(HttpCache {
+        mode: CacheMode::Default,
+        manager: CACacheManager { path: cache_path },
+        options: cache_options,
+    }));
+    let builder = builder.with(
+        RetryTransientMiddleware::new_with_policy(retry_policy)
+            .with_retry_log_level(tracing::Level::DEBUG),
+    );
+    let builder = match kind {
+        SharedHttpClientKind::Default => builder,
+        SharedHttpClientKind::SemanticScholarSharedPool => {
+            builder.with(SemanticScholarSharedPoolRateLimitMiddleware)
+        }
+    };
+    Ok(builder.with(rate_limit::RateLimitMiddleware::new()).build())
+}
+
+pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
+    if let Some(client) = HTTP_CLIENT.get() {
+        return Ok(client.clone());
+    }
+
+    let client = build_http_client(SharedHttpClientKind::Default)?;
 
     match HTTP_CLIENT.set(client.clone()) {
         Ok(()) => Ok(client),
@@ -238,6 +288,41 @@ pub(crate) fn shared_client() -> Result<ClientWithMiddleware, BioMcpError> {
             api: "http-client".into(),
             message: "Shared HTTP client initialization race".into(),
         }),
+    }
+}
+
+pub(crate) fn semantic_scholar_shared_pool_client() -> Result<ClientWithMiddleware, BioMcpError> {
+    if let Some(client) = SEMANTIC_SCHOLAR_SHARED_POOL_HTTP_CLIENT.get() {
+        return Ok(client.clone());
+    }
+
+    let client = build_http_client(SharedHttpClientKind::SemanticScholarSharedPool)?;
+
+    match SEMANTIC_SCHOLAR_SHARED_POOL_HTTP_CLIENT.set(client.clone()) {
+        Ok(()) => Ok(client),
+        Err(_) => SEMANTIC_SCHOLAR_SHARED_POOL_HTTP_CLIENT
+            .get()
+            .cloned()
+            .ok_or_else(|| BioMcpError::Api {
+                api: "http-client".into(),
+                message: "Semantic Scholar shared-pool HTTP client initialization race".into(),
+            }),
+    }
+}
+
+pub(crate) fn is_semantic_scholar_shared_pool_rate_limit_error(
+    err: &reqwest_middleware::Error,
+) -> bool {
+    match err {
+        reqwest_middleware::Error::Middleware(source) => {
+            source
+                .chain()
+                .any(|cause| cause.is::<SemanticScholarSharedPoolRateLimitError>())
+                || source
+                    .to_string()
+                    .contains("semantic scholar shared-pool rate limit exceeded")
+        }
+        reqwest_middleware::Error::Reqwest(_) => false,
     }
 }
 

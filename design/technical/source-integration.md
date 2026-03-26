@@ -47,6 +47,39 @@ These are conventions, not a fake one-size-fits-all constructor contract. The
 current repo does not require every client to share one name, one constructor
 shape, or one exact error-variant mix.
 
+## Local Runtime Sources and File-Backed Assets
+
+Not every file-backed dependency participates in the same runtime lifecycle.
+
+### Local runtime sources
+
+EMA is the canonical local runtime source.
+
+- Runtime resolution is owned by the source module, not hard-coded in docs.
+- EMA resolves `BIOMCP_EMA_DIR` first, then the platform data directory.
+- Full `biomcp health` includes the EMA local-data readiness row.
+- `biomcp health --apis-only` excludes that row because local EMA data is not
+  an upstream API.
+- The row status contract is `configured`, `available (default path)`,
+  `not configured`, and `error (missing: ...)`.
+- Operator-facing setup details live in `docs/user-guide/drug.md`, including
+  the `EMA local data setup` section and required batch files.
+
+This keeps local runtime readiness grounded in `src/cli/health.rs` and
+`src/sources/ema.rs` while leaving operator setup details in the user guide.
+
+### File-backed non-runtime assets
+
+BioASQ is the canonical file-backed non-runtime asset.
+
+- File-backed benchmark and evaluation assets are repo-local artifacts, not
+  runtime query providers.
+- They do not join the runtime source inventory, `biomcp health`, or the
+  source-readiness checklist unless a future ticket makes them runtime-visible.
+- The authoritative operator/reference home remains
+  `docs/reference/bioasq-benchmark.md`.
+- The repo-local grounding surface is `benchmarks/bioasq/`.
+
 ## Section-First Entity Integration
 
 BioMCP prefers entity-section integration over ad hoc command sprawl.
@@ -73,6 +106,36 @@ Entity integration shapes differ by entity, but common patterns include:
   entity card;
 - keeping helper commands for true cross-entity pivots rather than routine
   upstream enrichment.
+
+## Entity-Specific Command Modifiers
+
+Some entities need named modifiers in addition to section names. The durable
+contract is:
+
+- The base grammar remains `get <entity> <id> [section...]`.
+- Entity-specific modifiers are named options that sit beside the positional
+  `sections` list; they are not new positional arguments.
+- The canonical example is `get drug <name> ... --region <us|eu|all>`.
+- This modifier pattern is distinct from unrelated search filters that happen
+  to reuse the same flag name on other entities.
+
+Implementers must keep every alignment surface in sync:
+
+- clap definitions and `after_help` examples in `src/cli/mod.rs`
+- concise list/help output in `src/cli/list.rs` and `src/cli/list_reference.md`
+- user-facing docs in `docs/user-guide/cli-reference.md` and the owning entity
+  guide such as `docs/user-guide/drug.md`
+- executable CLI contract coverage in `spec/05-drug.md`
+
+Runtime validation belongs in the owning entity or CLI path, not only in
+docs/help text.
+
+The current drug contract is the model:
+
+- `--region` only changes the data plane for `regulatory`, `safety`,
+  `shortage`, or `all`
+- `approvals` remains U.S.-only
+- invalid flag/section combinations fail fast before data fetches
 
 ## Source-Aware Section Capability Contract
 

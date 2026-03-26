@@ -28,12 +28,13 @@ curl ... install.sh | bash       # binary installer (resolves latest release)
 ```
 
 - **Edition:** Rust 2024
-- **Current version:** 0.8.17 (as of 2026-03-23)
+- **Current version:** 0.8.18 (as of 2026-03-25)
 - **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
 - **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
-- **Release checklist:** Bump `Cargo.toml` and `pyproject.toml`, update
-  `CHANGELOG.md`, verify version sync, then cut a GitHub release tag — the
-  release workflow builds and publishes
+- **Release checklist:** Bump `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
+  `manifest.json`, and `CITATION.cff`, update `CHANGELOG.md`, verify version
+  sync, then cut a GitHub release tag — the release workflow builds and
+  publishes
 
 ## Source Integration Patterns
 
@@ -61,6 +62,29 @@ See also: [Source integration architecture](source-integration.md) for the
 detailed contract for adding a new upstream source or deepening an existing
 integration.
 
+## Article Federation and Front-Door Validation
+
+`search article --source all` plans PubTator3 plus Europe PMC. Semantic
+Scholar is an optional third search leg on that path when the filter set is
+compatible. Strict Europe PMC-only filters such as `--open-access` and
+`--type` disable the federated planner and route to Europe PMC only.
+`--source pubtator` with strict Europe PMC-only filters is rejected at the
+front door. `--source` remains `all|pubtator|europepmc` in v1; the CLI does
+not expose a user-facing `--source semanticscholar` mode.
+
+After fetch, article results deduplicate across PMID, PMCID, and DOI where
+possible, then re-rank locally.
+
+The validation boundary is also part of the architecture contract:
+
+- `search article` rejects missing filters, invalid date values, inverted date
+  ranges, and unsupported `--type` values before backend calls.
+- `get article` accepts PMID, PMCID, and DOI only and rejects unsupported
+  identifiers such as publisher PIIs with a clean `InvalidArgument`.
+- Semantic Scholar helper commands accept PMID, PMCID, DOI, arXiv, and
+  Semantic Scholar paper IDs and reject other identifiers before calling the
+  backend.
+
 ## API Keys
 
 Most commands work without credentials. Optional keys improve rate limits or
@@ -69,7 +93,7 @@ unlock additional data:
 | Key | Source | Effect |
 |-----|--------|--------|
 | `NCBI_API_KEY` | PubTator3, PMC OA, NCBI ID converter | Higher rate limits |
-| `S2_API_KEY` | Semantic Scholar article enrichment/navigation | Optional TLDR, citation graph, and recommendation helpers at 1 req/sec |
+| `S2_API_KEY` | Semantic Scholar article enrichment/navigation | Optional authenticated Semantic Scholar requests at 1 req/sec; shared-pool requests run at 1 req/2sec without the key |
 | `OPENFDA_API_KEY` | OpenFDA | Higher rate limits |
 | `NCI_API_KEY` | NCI CTS trial search (`--source nci`) | Required for NCI source |
 | `ONCOKB_TOKEN` | OncoKB production API | Full clinical data (demo available without) |
@@ -87,7 +111,18 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
 
 ## Release Pipeline
 
-1. Update version in `Cargo.toml`, `pyproject.toml`, and `CHANGELOG.md`
+The semver tag is the canonical release/version authority. PR CI enforces
+version parity before release via the `version-sync` job and
+`scripts/check-version-sync.sh`. The release workflow builds binaries,
+publishes PyPI wheels, and deploys docs from the tagged source, while
+`install.sh` resolves the latest release with platform assets, not the latest
+merge to `main`. The existing `### Post-tag public proof` block is the live
+verification step for tag-to-binary and tag-to-docs parity.
+`workflow_dispatch` can replay a specified tag, but only as an explicit-tag
+rebuild path, not a second source of release truth.
+
+1. Update version in `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
+   `manifest.json`, `CITATION.cff`, and `CHANGELOG.md`
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
@@ -97,10 +132,33 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
    - Release validation runs the Rust checks again, then
      `uv run pytest tests/ -v --mcp-cmd "biomcp serve"` and
      `uv run mkdocs build --strict`.
-   - release validation runs `pytest tests/` and `mkdocs build --strict`.
    - Release build jobs package cross-platform binaries, publish PyPI wheels,
      and deploy docs.
 5. `install.sh` resolves the latest tagged release with downloadable assets
+
+### Post-tag public proof
+
+After the `v0.8.18` tag is published, hand these commands to the verify/devops
+pass so release-visible version identity and docs parity are checked against
+the live surfaces:
+
+```bash
+curl -fsSL https://api.github.com/repos/genomoncology/biomcp/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])"
+tmpdir="$(mktemp -d)" && BIOMCP_INSTALL_DIR="$tmpdir" BIOMCP_VERSION=v0.8.18 bash install.sh >/tmp/biomcp-install.log && "$tmpdir/biomcp" version | head -n 1
+bioasq_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/reference/bioasq-benchmark/ >"$bioasq_page" && rg -q 'hf-public-pre2026' "$bioasq_page" && rg -q 'Phase A\+' "$bioasq_page" && rg -q 'Phase B' "$bioasq_page"
+api_keys_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/getting-started/api-keys/ >"$api_keys_page" && rg -q 'shared Semantic Scholar pool at 1 req/2sec' "$api_keys_page" && rg -q 'authenticated quota at 1 req/sec' "$api_keys_page"
+drug_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/user-guide/drug/ >"$drug_page" && rg -q 'Keytruda regulatory --region eu' "$drug_page" && rg -q 'EMA local data setup' "$drug_page" && rg -q 'available \(default path\)' "$drug_page"
+```
+
+Expected markers:
+
+- latest release tag is `v0.8.18`
+- installed binary starts with `biomcp 0.8.18`
+- BioASQ route returns all shipped benchmark page markers
+- live API Keys docs show both shared-pool and authenticated Semantic Scholar
+  guidance
+- live Drug docs show the EMA `--region` workflow and local-data setup copy
+  together with the local-data path marker
 
 Known issue: `uv sync --extra dev` may rewrite the editable root package
 version in `uv.lock` during a release cut. Verify whether the lockfile
@@ -135,9 +193,6 @@ not accidentally execute a stale `.venv/bin/biomcp`. Volatile live-network
 headings run in the separate `Spec smoke (volatile live-network)` workflow
 instead.
 
-PR CI now runs `make spec-pr` via the `spec-stable` job in `.github/workflows/ci.yml`.
-Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`.
-
 Run locally with `make spec`.
 
 Important: `uv run` may execute a stale `.venv/bin/biomcp`. Either refresh
@@ -153,7 +208,8 @@ inventory ledger.
 - It shows per-source connectivity for readiness-significant sources.
 - Key-gated sources appear as `excluded` rows when the required environment
   variable is absent.
-- `--apis-only` omits the cache-writability row.
+- `--apis-only` omits the cache-writability row and the EMA local-data row
+  because neither is an upstream API.
 - Partial upstream failures remain visible in the rendered report.
 - Current CLI behavior is report-first: the command exits `0` when the report
   renders, even if some upstream rows are failing.
@@ -210,7 +266,10 @@ replacing the real BioMCP markdown output.
 ## Known Constraints
 
 - Rate limiting is process-local (see above)
-- Semantic Scholar article helpers are explicitly limited to 1 request/sec per process and are not part of article search fan-out
+- Semantic Scholar participates in article search fan-out only on the
+  compatible `search article --source all` path
+- Semantic Scholar always owns TLDR, citations, references, and
+  recommendations
 - Federated totals are approximate
 - Some sources (OncoKB production, NCI CTS, AlphaGenome) require API keys
 - OncoKB demo endpoint has a known no-hit response for some variants — this

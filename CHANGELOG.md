@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.18 — 2026-03-25
+
+### New sources
+
+- Added EMA regional drug coverage backed by local EMA human-medicine feeds,
+  so `search drug`, `get drug`, and `get drug shortage` support
+  `--region us|eu|all` across EU regulatory status, DHPCs, referrals, PSUSAs,
+  shortages, and the existing US label surface. (043, 044)
+- Added the BioASQ benchmark module with `benchmarks/bioasq/ingest_public.py`,
+  dataset and validity manifests, and the published BioASQ benchmark
+  reference at `docs/reference/bioasq-benchmark.md`. (045, 046)
+
+### Improvements
+
+- `search drug` now defaults to `--region all`, `get drug --region` is
+  surfaced in help, OpenFDA label fallback prefers exact brand-name matches,
+  and OpenTargets drug-indication lookups are corrected for mixed US/EU
+  workflows. (043, 044)
+- `S2_API_KEY` is now optional for Semantic Scholar-backed article
+  enrichment and helpers: unauthenticated calls use the shared Semantic
+  Scholar pool at 1 req/2sec, while authenticated calls keep the 1 req/sec
+  quota with retry backoff. (047)
+
 ## 0.8.17 — 2026-03-23
 
 ### New sources

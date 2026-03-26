@@ -29,41 +29,32 @@ pub struct SemanticScholarClient {
 
 impl SemanticScholarClient {
     pub fn new() -> Result<Self, BioMcpError> {
+        let api_key = crate::sources::s2_api_key();
         Ok(Self {
-            client: crate::sources::shared_client()?,
+            client: if api_key.is_some() {
+                crate::sources::shared_client()?
+            } else {
+                crate::sources::semantic_scholar_shared_pool_client()?
+            },
             base: crate::sources::env_base(SEMANTIC_SCHOLAR_BASE, SEMANTIC_SCHOLAR_BASE_ENV),
-            api_key: std::env::var("S2_API_KEY")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            api_key,
         })
     }
 
     #[cfg(test)]
     fn new_for_test(base: String, api_key: Option<String>) -> Result<Self, BioMcpError> {
+        let api_key = api_key
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         Ok(Self {
-            client: crate::sources::shared_client()?,
+            client: if api_key.is_some() {
+                crate::sources::shared_client()?
+            } else {
+                crate::sources::semantic_scholar_shared_pool_client()?
+            },
             base: Cow::Owned(base),
-            api_key: api_key
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            api_key,
         })
-    }
-
-    pub fn is_configured(&self) -> bool {
-        self.api_key.is_some()
-    }
-
-    pub fn api_key_required() -> BioMcpError {
-        BioMcpError::ApiKeyRequired {
-            api: "Semantic Scholar".to_string(),
-            env_var: "S2_API_KEY".to_string(),
-            docs_url: SEMANTIC_SCHOLAR_DOCS_URL.to_string(),
-        }
-    }
-
-    fn require_api_key(&self) -> Result<&str, BioMcpError> {
-        self.api_key.as_deref().ok_or_else(Self::api_key_required)
     }
 
     fn endpoint_url(&self, path: &str) -> Result<Url, BioMcpError> {
@@ -109,13 +100,32 @@ impl SemanticScholarClient {
         &self,
         req: reqwest_middleware::RequestBuilder,
     ) -> Result<T, BioMcpError> {
-        self.require_api_key()?;
-        let resp = crate::sources::apply_cache_mode_with_auth(req, true)
+        let resp = match crate::sources::apply_cache_mode_with_auth(req, self.api_key.is_some())
             .send()
-            .await?;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(err) if crate::sources::is_semantic_scholar_shared_pool_rate_limit_error(&err) => {
+                return Err(BioMcpError::Api {
+                    api: SEMANTIC_SCHOLAR_API.to_string(),
+                    message: format!(
+                        "Rate limited by Semantic Scholar. Set S2_API_KEY for a dedicated rate limit. See {SEMANTIC_SCHOLAR_DOCS_URL}"
+                    ),
+                });
+            }
+            Err(err) => return Err(err.into()),
+        };
         let status = resp.status();
         let bytes = crate::sources::read_limited_body(resp, SEMANTIC_SCHOLAR_API).await?;
         if !status.is_success() {
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS && self.api_key.is_none() {
+                return Err(BioMcpError::Api {
+                    api: SEMANTIC_SCHOLAR_API.to_string(),
+                    message: format!(
+                        "Rate limited by Semantic Scholar. Set S2_API_KEY for a dedicated rate limit. See {SEMANTIC_SCHOLAR_DOCS_URL}"
+                    ),
+                });
+            }
             let excerpt = crate::sources::body_excerpt(&bytes);
             return Err(BioMcpError::Api {
                 api: SEMANTIC_SCHOLAR_API.to_string(),
@@ -128,21 +138,23 @@ impl SemanticScholarClient {
         })
     }
 
-    fn with_auth(
+    fn maybe_with_auth(
         &self,
         req: reqwest_middleware::RequestBuilder,
-    ) -> Result<reqwest_middleware::RequestBuilder, BioMcpError> {
-        let api_key = self.require_api_key()?;
-        Ok(req.header("x-api-key", api_key))
+    ) -> reqwest_middleware::RequestBuilder {
+        match &self.api_key {
+            Some(api_key) => req.header("x-api-key", api_key),
+            None => req,
+        }
     }
 
     pub async fn paper_detail(&self, id: &str) -> Result<SemanticScholarPaper, BioMcpError> {
         let url = self.paper_url(id)?;
-        let req = self.with_auth(
+        let req = self.maybe_with_auth(
             self.client
                 .get(url)
                 .query(&[("fields", GRAPH_PAPER_FIELDS)]),
-        )?;
+        );
         self.send_json(req).await
     }
 
@@ -172,12 +184,12 @@ impl SemanticScholarClient {
             ));
         }
         let url = self.endpoint_url("graph/v1/paper/batch")?;
-        let req = self.with_auth(
+        let req = self.maybe_with_auth(
             self.client
                 .post(url)
                 .query(&[("fields", fields)])
                 .json(&SemanticScholarBatchRequest { ids }),
-        )?;
+        );
         self.send_json(req).await
     }
 
@@ -194,11 +206,11 @@ impl SemanticScholarClient {
         }
         let limit = validate_limit(limit)?;
         let url = self.endpoint_url("graph/v1/paper/search")?;
-        let req = self.with_auth(self.client.get(url).query(&[
+        let req = self.maybe_with_auth(self.client.get(url).query(&[
             ("query", query),
             ("fields", SEARCH_PAPER_FIELDS),
             ("limit", &limit.to_string()),
-        ]))?;
+        ]));
         self.send_json(req).await
     }
 
@@ -209,10 +221,10 @@ impl SemanticScholarClient {
     ) -> Result<SemanticScholarGraphResponse<SemanticScholarCitationEdge>, BioMcpError> {
         let limit = validate_limit(limit)?;
         let url = self.paper_subresource_url(id, "citations")?;
-        let req = self.with_auth(self.client.get(url).query(&[
+        let req = self.maybe_with_auth(self.client.get(url).query(&[
             ("fields", CITATION_EDGE_FIELDS),
             ("limit", &limit.to_string()),
-        ]))?;
+        ]));
         self.send_json(req).await
     }
 
@@ -223,10 +235,10 @@ impl SemanticScholarClient {
     ) -> Result<SemanticScholarGraphResponse<SemanticScholarReferenceEdge>, BioMcpError> {
         let limit = validate_limit(limit)?;
         let url = self.paper_subresource_url(id, "references")?;
-        let req = self.with_auth(self.client.get(url).query(&[
+        let req = self.maybe_with_auth(self.client.get(url).query(&[
             ("fields", REFERENCE_EDGE_FIELDS),
             ("limit", &limit.to_string()),
-        ]))?;
+        ]));
         self.send_json(req).await
     }
 
@@ -245,10 +257,10 @@ impl SemanticScholarClient {
             })?;
             segments.push(paper_id);
         }
-        let req = self.with_auth(self.client.get(url).query(&[
+        let req = self.maybe_with_auth(self.client.get(url).query(&[
             ("fields", RECOMMENDATION_FIELDS),
             ("limit", &limit.to_string()),
-        ]))?;
+        ]));
         self.send_json(req).await
     }
 
@@ -265,7 +277,7 @@ impl SemanticScholarClient {
         }
         let limit = validate_limit(limit)?;
         let url = self.endpoint_url("recommendations/v1/papers/")?;
-        let req = self.with_auth(
+        let req = self.maybe_with_auth(
             self.client
                 .post(url)
                 .query(&[
@@ -276,7 +288,7 @@ impl SemanticScholarClient {
                     positive_paper_ids,
                     negative_paper_ids,
                 }),
-        )?;
+        );
         self.send_json(req).await
     }
 }
@@ -547,12 +559,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn paper_detail_requires_api_key() {
+    async fn paper_detail_without_api_key_omits_header_and_succeeds() {
         let server = MockServer::start().await;
-        let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/PMID:22663011"))
+            .and(query_param("fields", GRAPH_PAPER_FIELDS))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "paperId": "paper-1",
+                "title": "Example"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
+        let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
+        let paper = client.paper_detail("PMID:22663011").await.unwrap();
+        assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+    }
+
+    #[tokio::test]
+    async fn paper_detail_without_api_key_returns_rate_limit_guidance_without_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/PMID:22663011"))
+            .and(query_param("fields", GRAPH_PAPER_FIELDS))
+            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("shared rate limit"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
         let err = client.paper_detail("PMID:22663011").await.unwrap_err();
-        assert!(matches!(err, BioMcpError::ApiKeyRequired { .. }));
+        match err {
+            BioMcpError::Api { api, message } => {
+                assert_eq!(api, SEMANTIC_SCHOLAR_API);
+                assert_eq!(
+                    message,
+                    format!(
+                        "Rate limited by Semantic Scholar. Set S2_API_KEY for a dedicated rate limit. See {SEMANTIC_SCHOLAR_DOCS_URL}"
+                    )
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn paper_detail_with_invalid_api_key_returns_http_403_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/PMID:22663011"))
+            .and(query_param("fields", GRAPH_PAPER_FIELDS))
+            .and(header("x-api-key", "bad-key"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = SemanticScholarClient::new_for_test(server.uri(), Some("bad-key".into()))
+            .expect("client should build");
+        let err = client.paper_detail("PMID:22663011").await.unwrap_err();
+        match err {
+            BioMcpError::Api { api, message } => {
+                assert_eq!(api, SEMANTIC_SCHOLAR_API);
+                assert!(message.contains("HTTP 403"));
+                assert!(message.contains("forbidden"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[tokio::test]

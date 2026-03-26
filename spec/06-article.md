@@ -36,6 +36,74 @@ echo "$out" | mustmatch like "keyword=immunotherapy"
 echo "$out" | mustmatch like "PMID"
 ```
 
+## Invalid Date Fails Before Backend Warnings
+
+Malformed article dates must fail at the front door, before backend routing,
+autocomplete, or warning paths run.
+
+```bash
+unset status
+out="$(biomcp search article -g BRAF --date-from 2025-99-01 --limit 1 2>&1)" || status=$?
+test "${status:-0}" -eq 1
+echo "$out" | mustmatch like "Error: Invalid argument:"
+echo "$out" | mustmatch like "Invalid month 99 in --date-from"
+echo "$out" | mustmatch not like "--since"
+echo "$out" | mustmatch not like "WARN"
+echo "$out" | mustmatch not like "PubTator"
+echo "$out" | mustmatch not like "Europe PMC"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Missing Filters Fail Before Planner Warnings
+
+Queryless article searches should fail with the existing invalid-argument
+guidance and should not leak backend-leg warning noise.
+
+```bash
+unset status
+out="$(biomcp search article --limit 1 2>&1)" || status=$?
+test "${status:-0}" -eq 1
+echo "$out" | mustmatch like "Error: Invalid argument:"
+echo "$out" | mustmatch like "At least one filter is required."
+echo "$out" | mustmatch like "biomcp search article -g BRAF"
+echo "$out" | mustmatch not like "WARN"
+echo "$out" | mustmatch not like "PubTator"
+echo "$out" | mustmatch not like "Europe PMC"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Inverted Date Range Is A Clean Invalid Argument
+
+Date ranges with `--date-from` after `--date-to` must fail with the explicit
+ordering error and no backend warning noise.
+
+```bash
+unset status
+out="$(biomcp search article -g BRAF --date-from 2024-01-01 --date-to 2020-01-01 --limit 1 2>&1)" || status=$?
+test "${status:-0}" -eq 1
+echo "$out" | mustmatch like "Error: Invalid argument: --date-from must be <= --date-to"
+echo "$out" | mustmatch not like "WARN"
+echo "$out" | mustmatch not like "PubTator"
+echo "$out" | mustmatch not like "Europe PMC"
+echo "$out" | mustmatch not like "Semantic Scholar"
+```
+
+## Article Date Flag Help Advertises Accepted Formats
+
+The article command help and list output should both advertise the shared date
+parser contract: `YYYY`, `YYYY-MM`, and `YYYY-MM-DD`.
+
+```bash
+help_out="$(biomcp search article --help)"
+echo "$help_out" | mustmatch like "Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)"
+echo "$help_out" | mustmatch like "Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)"
+
+list_out="$(biomcp list article)"
+echo "$list_out" | mustmatch like "--date-from <YYYY|YYYY-MM|YYYY-MM-DD>"
+echo "$list_out" | mustmatch like "--date-to <YYYY|YYYY-MM|YYYY-MM-DD>"
+echo "$list_out" | mustmatch like "--since <YYYY|YYYY-MM|YYYY-MM-DD>"
+```
+
 ## Source-Specific PubTator Search Uses Default Retraction Filter
 
 Default article search still excludes confirmed retractions, but PubTator rows
@@ -140,7 +208,6 @@ echo "$json_out" | mustmatch like "\"year\":"
 no_key_out="$(env -u S2_API_KEY biomcp --json article batch 22663011)"
 echo "$no_key_out" | mustmatch like "\"requested_id\": \"22663011\""
 echo "$no_key_out" | mustmatch like "\"title\":"
-echo "$no_key_out" | mustmatch not like "\"tldr\":"
 ```
 
 ## Article Batch Invalid Identifier
@@ -166,26 +233,25 @@ echo "$out" | mustmatch like "limited to 20"
 
 Ordinary `get article` must still work when Semantic Scholar is unavailable. We
 force the no-key path even on keyed machines and assert that the PubMed card
-still renders without the Semantic Scholar section.
+still renders without an API-key gate.
 
 ```bash
 out="$(env -u S2_API_KEY biomcp get article 22663011)"
 echo "$out" | mustmatch like "PMID: 22663011"
 echo "$out" | mustmatch like "Journal:"
-echo "$out" | mustmatch not like "Semantic Scholar"
+echo "$out" | mustmatch not like "API key required"
 ```
 
 ## Article Search JSON Without Semantic Scholar Key
 
 No-key article search must stay explicit and functional. JSON should report the
-disabled state while still surfacing ranking metadata from the local relevance
-policy.
+eligible Semantic Scholar leg while still surfacing ranking metadata from the
+local relevance policy.
 
 ```bash
 out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --limit 3)"
-echo "$out" | mustmatch like "\"semantic_scholar_enabled\": false"
+echo "$out" | mustmatch like "\"semantic_scholar_enabled\": true"
 echo "$out" | mustmatch like "\"ranking\": {"
-echo "$out" | mustmatch not like "\"source\": \"semanticscholar\""
 ```
 
 ## Article Search JSON With Semantic Scholar Key
@@ -210,12 +276,14 @@ out="$(env -u S2_API_KEY biomcp search article -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like "\"surface\": \"search_article\""
 echo "$out" | mustmatch like "\"planner=federated\""
+echo "$out" | mustmatch like "Semantic Scholar"
 
 json_out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --debug-plan --limit 3)"
 echo "$json_out" | mustmatch like "\"debug_plan\": {"
 echo "$json_out" | mustmatch like "\"surface\": \"search_article\""
 echo "$json_out" | mustmatch like "\"leg\": \"article\""
 echo "$json_out" | mustmatch like "\"sources\": ["
+echo "$json_out" | mustmatch like "\"Semantic Scholar\""
 ```
 
 ## Semantic Scholar TLDR Section
@@ -238,7 +306,7 @@ Citation traversal should expose a graph table with contexts, intents, and the
 influential flag visible to the user.
 
 ```bash
-out="$(biomcp article citations 22663011 --limit 3)"
+out="$(env -u S2_API_KEY biomcp article citations 22663011 --limit 3)"
 echo "$out" | mustmatch like "# Citations for"
 echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |"
 ```
@@ -248,7 +316,7 @@ echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |
 Reference traversal should expose the same visible graph columns.
 
 ```bash
-out="$(biomcp article references 22663011 --limit 3)"
+out="$(env -u S2_API_KEY biomcp article references 22663011 --limit 3)"
 echo "$out" | mustmatch like "# References for"
 echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |"
 ```
@@ -259,7 +327,7 @@ Single-seed recommendations should render related papers with stable table
 columns.
 
 ```bash
-out="$(biomcp article recommendations 22663011 --limit 3)"
+out="$(env -u S2_API_KEY biomcp article recommendations 22663011 --limit 3)"
 echo "$out" | mustmatch like "# Recommendations for"
 echo "$out" | mustmatch like "| PMID | Title | Journal | Year |"
 ```
@@ -270,25 +338,10 @@ Multi-paper recommendation requests should accept repeated positive seeds plus a
 negative set and still render the recommendation table.
 
 ```bash
-out="$(biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 3)"
+out="$(env -u S2_API_KEY biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 3)"
 echo "$out" | mustmatch like "# Recommendations for"
 echo "$out" | mustmatch like "| PMID | Title | Journal | Year |"
 echo "$out" | mustmatch like "Negative seeds:"
-```
-
-## Semantic Scholar Requires API Key For Native Helpers
-
-The new Semantic Scholar-native helper commands are explicit optional-key
-surfaces. Without the key they should fail clearly instead of silently falling
-back.
-
-```bash
-status=0
-out="$(env -u S2_API_KEY biomcp article citations 22663011 --limit 3 2>&1)" || status=$?
-test "$status" -ne 0
-echo "$out" | mustmatch like "API key required"
-echo "$out" | mustmatch like "S2_API_KEY"
-echo "$out" | mustmatch like "Semantic Scholar"
 ```
 
 ## Invalid Identifier Rejection

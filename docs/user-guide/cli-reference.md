@@ -48,7 +48,6 @@ biomcp skill list                 # legacy compatibility alias
 biomcp mcp
 biomcp serve
 biomcp serve-http [--host 127.0.0.1] [--port 8080]
-biomcp serve-sse                  # removed compatibility command; use serve-http
 biomcp update [--check]
 biomcp uninstall
 biomcp version
@@ -57,6 +56,10 @@ biomcp version
 Numeric and slug skill lookups remain compatibility behavior, but they are not
 part of the recommended command synopsis because current builds do not ship a
 browsable embedded catalog.
+
+`biomcp health --apis-only` is the upstream inventory smoke test. Full
+`biomcp health` also reports local readiness rows such as EMA local data and
+cache dir status.
 
 ## Search command families
 
@@ -139,6 +142,8 @@ biomcp search variant -g BRAF --hgvsp V600E --limit 5 --offset 0
 
 ```bash
 biomcp search drug -q "kinase inhibitor" --limit 5 --offset 0
+biomcp search drug Keytruda --limit 5
+biomcp search drug Keytruda --region eu --limit 5
 ```
 
 ### Pathway
@@ -201,12 +206,11 @@ biomcp get article 22663011 tldr
 biomcp article batch 22663011 24200969
 ```
 
-`S2_API_KEY` is optional. It unlocks `get article ... tldr` plus the explicit
-`article citations|references|recommendations` helpers. `search article`
-remains PubTator3 + Europe PMC, and can add an optional Semantic Scholar leg
-when the key is present and the filter set is compatible. `article batch`
-stays available without the key and adds optional TLDR/citation metadata when
-Semantic Scholar is configured.
+`S2_API_KEY` is optional. With it, BioMCP sends authenticated Semantic Scholar
+requests at 1 req/sec for `search article`, `get article`, `get article ... tldr`,
+`article batch`, and the explicit `article citations|references|recommendations`
+helpers. Without it, those same paths use the shared unauthenticated pool at
+1 req/2sec.
 
 ### Trial
 
@@ -227,8 +231,17 @@ biomcp get variant rs7903146 gwas
 
 ```bash
 biomcp get drug pembrolizumab
+biomcp get drug Keytruda regulatory --region eu
+biomcp get drug Ozempic safety --region eu
 biomcp get drug carboplatin shortage
 ```
+
+Omitting `--region` on a plain name/alias `search drug` checks both U.S. and EU
+data. If you omit `--region` while using structured filters such as `--target`
+or `--indication`, BioMCP stays on the U.S. MyChem path. Explicit `--region eu`
+or `--region all` with structured filters still errors. For `get drug`, use
+`--region` only with `regulatory`, `safety`, `shortage`, or `all`; `approvals`
+stays U.S.-only.
 
 ### Pathway
 
@@ -279,7 +292,7 @@ biomcp batch variant "BRAF V600E","KRAS G12D" --json
 - `biomcp serve-http` runs the MCP Streamable HTTP server.
 - Streamable HTTP clients connect to `/mcp`.
 - Probe routes: `/health`, `/readyz`, and `/`.
-- `biomcp serve-sse` remains visible only as a removed compatibility command that points back to `biomcp serve-http`.
+- `biomcp serve-sse` remains available only as a hidden compatibility command that points users back to `biomcp serve-http`.
 
 See also: `docs/reference/mcp-server.md`.
 

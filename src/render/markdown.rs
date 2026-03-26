@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::sync::OnceLock;
 
 use minijinja::{Environment, context};
@@ -18,7 +19,10 @@ use crate::entities::discover::{DiscoverResult, DiscoverType};
 use crate::entities::disease::{
     Disease, DiseaseAssociationScoreSummary, DiseaseSearchResult, PhenotypeSearchResult,
 };
-use crate::entities::drug::{Drug, DrugSearchResult};
+use crate::entities::drug::{
+    Drug, DrugApproval, DrugRegion, DrugSearchResult, EmaDrugSearchResult, EmaRegulatoryRow,
+    EmaSafetyInfo, EmaShortageEntry,
+};
 use crate::entities::gene::{Gene, GeneSearchResult};
 use crate::entities::pathway::{Pathway, PathwaySearchResult};
 use crate::entities::pgx::{Pgx, PgxSearchResult};
@@ -2379,19 +2383,486 @@ pub fn variant_oncokb_markdown(result: &VariantOncoKbResult) -> String {
     out
 }
 
-pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<String, BioMcpError> {
+fn render_us_approvals_block(heading: &str, approvals: Option<&[DrugApproval]>) -> String {
+    let Some(approvals) = approvals else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{heading}\n");
+    if approvals.is_empty() {
+        out.push_str("No approvals found in Drugs@FDA for this query.\n");
+        return out;
+    }
+
+    for app in approvals {
+        let _ = writeln!(out, "### {}\n", markdown_cell(&app.application_number));
+        if let Some(sponsor_name) = app.sponsor_name.as_deref() {
+            let _ = writeln!(out, "- Sponsor: {}", markdown_cell(sponsor_name));
+        }
+        if !app.openfda_brand_names.is_empty() {
+            let brands = app
+                .openfda_brand_names
+                .iter()
+                .map(|value| markdown_cell(value))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(out, "- Brands: {brands}");
+        }
+        if !app.openfda_generic_names.is_empty() {
+            let generics = app
+                .openfda_generic_names
+                .iter()
+                .map(|value| markdown_cell(value))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(out, "- Generic Names: {generics}");
+        }
+        if !app.products.is_empty() {
+            out.push_str("| Product | Dosage Form | Route | Marketing Status |\n");
+            out.push_str("|---|---|---|---|\n");
+            for product in &app.products {
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {} |",
+                    product
+                        .brand_name
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                    product
+                        .dosage_form
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                    product
+                        .route
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                    product
+                        .marketing_status
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+            }
+        }
+        if !app.submissions.is_empty() {
+            out.push_str("| Submission Type | Number | Status | Date |\n");
+            out.push_str("|---|---|---|---|\n");
+            for submission in &app.submissions {
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {} |",
+                    submission
+                        .submission_type
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                    submission
+                        .submission_number
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                    submission
+                        .status
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                    submission
+                        .status_date
+                        .as_deref()
+                        .map(markdown_cell)
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+            }
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+fn render_eu_regulatory_block(heading: &str, rows: Option<&[EmaRegulatoryRow]>) -> String {
+    let Some(rows) = rows else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{heading}\n");
+    if rows.is_empty() {
+        out.push_str("No data found (EMA)\n");
+        return out;
+    }
+
+    out.push_str("| Medicine | Active Substance | EMA Number | Status | Holder |\n");
+    out.push_str("|---|---|---|---|---|\n");
+    for row in rows {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} | {} |",
+            markdown_cell(&row.medicine_name),
+            markdown_cell(&row.active_substance),
+            markdown_cell(&row.ema_product_number),
+            markdown_cell(&row.status),
+            row.holder
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+        );
+    }
+
+    out.push_str("\n### Recent post-authorisation activity\n");
+    let activity_rows = rows
+        .iter()
+        .flat_map(|row| {
+            row.recent_activity.iter().map(move |activity| {
+                (
+                    row.medicine_name.as_str(),
+                    activity.first_published_date.as_str(),
+                    activity.last_updated_date.as_deref(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    if activity_rows.is_empty() {
+        out.push_str("No recent post-authorisation activity found.\n");
+        return out;
+    }
+
+    out.push_str("| Medicine | First Published | Last Updated |\n");
+    out.push_str("|---|---|---|\n");
+    for (medicine_name, first_published_date, last_updated_date) in activity_rows {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} |",
+            markdown_cell(medicine_name),
+            markdown_cell(first_published_date),
+            last_updated_date
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+        );
+    }
+    out
+}
+
+fn render_us_safety_block(drug: &Drug, heading: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{heading}\n");
+
+    out.push_str("### Top adverse events (FAERS)\n");
+    if drug.top_adverse_events.is_empty() {
+        out.push_str("No data found (OpenFDA FAERS)\n");
+    } else {
+        let _ = writeln!(out, "{}", drug.top_adverse_events.join(", "));
+    }
+
+    out.push_str("\n### FDA label warnings\n");
+    if let Some(warnings) = drug.us_safety_warnings.as_deref() {
+        out.push_str(warnings);
+        out.push('\n');
+    } else {
+        out.push_str("No data found (OpenFDA label)\n");
+    }
+
+    out
+}
+
+fn render_eu_safety_block(heading: &str, safety: Option<&EmaSafetyInfo>) -> String {
+    let Some(safety) = safety else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{heading}\n");
+
+    out.push_str("### DHPCs\n");
+    if safety.dhpcs.is_empty() {
+        out.push_str("No data found (EMA)\n");
+    } else {
+        out.push_str("| Medicine | Type | Outcome | First Published | Last Updated |\n");
+        out.push_str("|---|---|---|---|---|\n");
+        for row in &safety.dhpcs {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
+                markdown_cell(&row.medicine_name),
+                row.dhpc_type
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.regulatory_outcome
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.first_published_date
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.last_updated_date
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+        }
+    }
+
+    out.push_str("\n### Referrals\n");
+    if safety.referrals.is_empty() {
+        out.push_str("No data found (EMA)\n");
+    } else {
+        out.push_str("| Referral | Active Substance | Medicines | Status | Type | Start |\n");
+        out.push_str("|---|---|---|---|---|---|\n");
+        for row in &safety.referrals {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} | {} |",
+                markdown_cell(&row.referral_name),
+                row.active_substance
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.associated_medicines
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.current_status
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.referral_type
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.procedure_start_date
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+        }
+    }
+
+    out.push_str("\n### PSUSAs\n");
+    if safety.psusas.is_empty() {
+        out.push_str("No data found (EMA)\n");
+    } else {
+        out.push_str("| Related Medicines | Active Substance | Procedure | Outcome | First Published | Last Updated |\n");
+        out.push_str("|---|---|---|---|---|---|\n");
+        for row in &safety.psusas {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} | {} |",
+                row.related_medicines
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.active_substance
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.procedure_number
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.regulatory_outcome
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.first_published_date
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+                row.last_updated_date
+                    .as_deref()
+                    .map(markdown_cell)
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+        }
+    }
+
+    out
+}
+
+fn render_us_shortage_block(
+    heading: &str,
+    shortage: Option<&[crate::entities::drug::DrugShortageEntry]>,
+) -> String {
+    let Some(shortage) = shortage else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{heading}\n");
+    if shortage.is_empty() {
+        out.push_str("No shortage entries found\n");
+        return out;
+    }
+
+    out.push_str("| Status | Availability | Company | Updated | Info |\n");
+    out.push_str("|---|---|---|---|---|\n");
+    for row in shortage {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} | {} |",
+            row.status
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.availability
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.company_name
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.update_date
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.related_info
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+        );
+    }
+    out
+}
+
+fn render_eu_shortage_block(heading: &str, shortage: Option<&[EmaShortageEntry]>) -> String {
+    let Some(shortage) = shortage else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{heading}\n");
+    if shortage.is_empty() {
+        out.push_str("No data found (EMA)\n");
+        return out;
+    }
+
+    out.push_str("| Medicine | Status | Alternatives | First Published | Last Updated |\n");
+    out.push_str("|---|---|---|---|---|\n");
+    for row in shortage {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} | {} |",
+            markdown_cell(&row.medicine_affected),
+            row.status
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.availability_of_alternatives
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.first_published_date
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+            row.last_updated_date
+                .as_deref()
+                .map(markdown_cell)
+                .unwrap_or_else(|| "-".to_string()),
+        );
+    }
+    out
+}
+
+fn render_regulatory_block(drug: &Drug, region: DrugRegion) -> String {
+    match region {
+        DrugRegion::Us => {
+            render_us_approvals_block("## Regulatory (US - Drugs@FDA)", drug.approvals.as_deref())
+        }
+        DrugRegion::Eu => {
+            render_eu_regulatory_block("## Regulatory (EU - EMA)", drug.ema_regulatory.as_deref())
+        }
+        DrugRegion::All => {
+            let us = render_us_approvals_block(
+                "## Regulatory (US - Drugs@FDA)",
+                drug.approvals.as_deref(),
+            );
+            let eu = render_eu_regulatory_block(
+                "## Regulatory (EU - EMA)",
+                drug.ema_regulatory.as_deref(),
+            );
+            [us, eu]
+                .into_iter()
+                .filter(|block| !block.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+}
+
+fn render_safety_block(drug: &Drug, region: DrugRegion) -> String {
+    match region {
+        DrugRegion::Us => render_us_safety_block(drug, "## Safety (US - OpenFDA)"),
+        DrugRegion::Eu => render_eu_safety_block("## Safety (EU - EMA)", drug.ema_safety.as_ref()),
+        DrugRegion::All => {
+            let us = render_us_safety_block(drug, "## Safety (US - OpenFDA)");
+            let eu = render_eu_safety_block("## Safety (EU - EMA)", drug.ema_safety.as_ref());
+            [us, eu]
+                .into_iter()
+                .filter(|block| !block.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+}
+
+fn render_shortage_block(drug: &Drug, region: DrugRegion) -> String {
+    match region {
+        DrugRegion::Us => render_us_shortage_block(
+            "## Shortage (US - OpenFDA Drug Shortages)",
+            drug.shortage.as_deref(),
+        ),
+        DrugRegion::Eu => {
+            render_eu_shortage_block("## Shortage (EU - EMA)", drug.ema_shortage.as_deref())
+        }
+        DrugRegion::All => {
+            let us = render_us_shortage_block(
+                "## Shortage (US - OpenFDA Drug Shortages)",
+                drug.shortage.as_deref(),
+            );
+            let eu =
+                render_eu_shortage_block("## Shortage (EU - EMA)", drug.ema_shortage.as_deref());
+            [us, eu]
+                .into_iter()
+                .filter(|block| !block.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+}
+
+pub fn drug_markdown_with_region(
+    drug: &Drug,
+    requested_sections: &[String],
+    region: DrugRegion,
+) -> Result<String, BioMcpError> {
     let tmpl = env()?.get_template("drug.md.j2")?;
     let section_only = is_section_only_requested(requested_sections);
     let include_all = has_all_section(requested_sections);
     let requested = requested_section_names(requested_sections);
     let has_requested = |name: &str| requested.iter().any(|s| s.eq_ignore_ascii_case(name));
     let show_label_section = !section_only || include_all || has_requested("label");
-    let show_shortage_section = !section_only || include_all || has_requested("shortage");
     let show_targets_section = !section_only || include_all || has_requested("targets");
     let show_indications_section = !section_only || include_all || has_requested("indications");
     let show_interactions_section = include_all || has_requested("interactions");
     let show_civic_section = include_all || has_requested("civic");
-    let show_approvals_section = include_all || has_requested("approvals");
+    let show_regulatory_section = include_all || has_requested("regulatory");
+    let show_safety_section = include_all || has_requested("safety");
+    let show_shortage_section = !section_only || include_all || has_requested("shortage");
+    let show_approvals_section = has_requested("approvals");
+    // Suppress US-only header facts when rendering a full card (not section_only) for EU region.
+    let show_us_header = section_only || region.includes_us();
+    let approval_date_display: Option<&str> = if show_us_header {
+        drug.approval_date_display.as_deref()
+    } else {
+        None
+    };
     let body = tmpl.render(context! {
         section_only => section_only,
         section_header => section_header(&drug.name, requested_sections),
@@ -2404,9 +2875,10 @@ pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<Strin
         mechanism => &drug.mechanism,
         mechanisms => &drug.mechanisms,
         approval_date => &drug.approval_date,
-        approval_date_display => &drug.approval_date_display,
+        approval_date_display => approval_date_display,
         brand_names => &drug.brand_names,
         route => &drug.route,
+        show_us_header => show_us_header,
         top_adverse_events => &drug.top_adverse_events,
         targets => &drug.targets,
         indications => &drug.indications,
@@ -2414,20 +2886,28 @@ pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<Strin
         interaction_text => &drug.interaction_text,
         pharm_classes => &drug.pharm_classes,
         label => &drug.label,
-        shortage => &drug.shortage,
-        approvals => &drug.approvals,
         civic => &drug.civic,
         show_label_section => show_label_section,
-        show_shortage_section => show_shortage_section,
         show_targets_section => show_targets_section,
         show_indications_section => show_indications_section,
         show_interactions_section => show_interactions_section,
         show_civic_section => show_civic_section,
-        show_approvals_section => show_approvals_section,
+        regulatory_block => if show_regulatory_section { render_regulatory_block(drug, region) } else { String::new() },
+        safety_block => if show_safety_section { render_safety_block(drug, region) } else { String::new() },
+        shortage_block => if show_shortage_section { render_shortage_block(drug, region) } else { String::new() },
+        approvals_block => if show_approvals_section {
+            render_us_approvals_block("## Drugs@FDA Approvals", drug.approvals.as_deref())
+        } else {
+            String::new()
+        },
         sections_block => format_sections_block("drug", &drug.name, sections_drug(drug, requested_sections)),
         related_block => format_related_block(related_drug(drug)),
     })?;
     Ok(append_evidence_urls(body, drug_evidence_urls(drug)))
+}
+
+pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<String, BioMcpError> {
+    drug_markdown_with_region(drug, requested_sections, DrugRegion::Us)
 }
 
 pub fn drug_search_markdown(
@@ -2452,6 +2932,119 @@ pub fn drug_search_markdown_with_footer(
         pagination_footer => pagination_footer,
     })?;
     Ok(with_pagination_footer(body, pagination_footer))
+}
+
+pub fn drug_search_markdown_with_region(
+    query: &str,
+    region: DrugRegion,
+    us_results: &[DrugSearchResult],
+    us_total: Option<usize>,
+    eu_results: &[EmaDrugSearchResult],
+    eu_total: Option<usize>,
+    pagination_footer: &str,
+) -> Result<String, BioMcpError> {
+    match region {
+        DrugRegion::Us => {
+            drug_search_markdown_with_footer(query, us_results, us_total, pagination_footer)
+        }
+        DrugRegion::Eu => {
+            let count = eu_total.unwrap_or(eu_results.len());
+            let mut out = String::new();
+            let _ = writeln!(out, "# Drugs: {query}\n");
+            if count == 0 {
+                out.push_str("No drugs found\n");
+                return Ok(out);
+            }
+
+            let _ = writeln!(
+                out,
+                "Found {count} drug{}\n",
+                if count == 1 { "" } else { "s" }
+            );
+            out.push_str("|Name|Active Substance|EMA Number|Status|\n");
+            out.push_str("|---|---|---|---|\n");
+            for row in eu_results {
+                let _ = writeln!(
+                    out,
+                    "|{}|{}|{}|{}|",
+                    markdown_cell(&row.name),
+                    markdown_cell(&row.active_substance),
+                    markdown_cell(&row.ema_product_number),
+                    markdown_cell(&row.status),
+                );
+            }
+            out.push_str("\nUse `get drug <name>` for full details.\n");
+            if !pagination_footer.trim().is_empty() {
+                let _ = writeln!(out, "\n{pagination_footer}");
+            }
+            Ok(out)
+        }
+        DrugRegion::All => {
+            let mut out = String::new();
+            let _ = writeln!(out, "# Drugs: {query}\n");
+
+            out.push_str("## US (MyChem.info / OpenFDA)\n\n");
+            if us_results.is_empty() {
+                out.push_str("No drugs found\n");
+            } else {
+                let count = us_total.unwrap_or(us_results.len());
+                let _ = writeln!(
+                    out,
+                    "Found {count} drug{}\n",
+                    if count == 1 { "" } else { "s" }
+                );
+                out.push_str("|Name|Mechanism|Target|\n");
+                out.push_str("|---|---|---|\n");
+                for row in us_results {
+                    let mechanism = row
+                        .mechanism
+                        .as_deref()
+                        .or(row.drug_type.as_deref())
+                        .unwrap_or("-");
+                    let _ = writeln!(
+                        out,
+                        "|{}|{}|{}|",
+                        markdown_cell(&row.name),
+                        markdown_cell(mechanism),
+                        row.target
+                            .as_deref()
+                            .map(markdown_cell)
+                            .unwrap_or_else(|| "-".to_string()),
+                    );
+                }
+            }
+
+            out.push_str("\n## EU (EMA)\n\n");
+            if eu_results.is_empty() {
+                out.push_str("No drugs found\n");
+            } else {
+                let count = eu_total.unwrap_or(eu_results.len());
+                let _ = writeln!(
+                    out,
+                    "Found {count} drug{}\n",
+                    if count == 1 { "" } else { "s" }
+                );
+                out.push_str("|Name|Active Substance|EMA Number|Status|\n");
+                out.push_str("|---|---|---|---|\n");
+                for row in eu_results {
+                    let _ = writeln!(
+                        out,
+                        "|{}|{}|{}|{}|",
+                        markdown_cell(&row.name),
+                        markdown_cell(&row.active_substance),
+                        markdown_cell(&row.ema_product_number),
+                        markdown_cell(&row.status),
+                    );
+                }
+            }
+
+            out.push_str("\nUse `get drug <name>` for full details.\n");
+            if !pagination_footer.trim().is_empty() {
+                let _ = writeln!(out, "\n{pagination_footer}");
+            }
+            Ok(out)
+        }
+    }
 }
 
 pub fn pathway_markdown(
@@ -3463,6 +4056,10 @@ mod tests {
             label_set_id: None,
             shortage: Some(Vec::new()),
             approvals: Some(Vec::new()),
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
         let drug_markdown = drug_markdown(&drug, &["all".to_string()]).expect("drug markdown");
@@ -3474,8 +4071,8 @@ mod tests {
         assert!(drug_markdown.contains("## Targets (ChEMBL / Open Targets)"));
         assert!(drug_markdown.contains("## Indications (Open Targets)"));
         assert!(drug_markdown.contains("## Interactions (DrugBank)"));
-        assert!(drug_markdown.contains("## Shortage (OpenFDA Drug Shortages)"));
-        assert!(drug_markdown.contains("## Drugs@FDA Approvals"));
+        assert!(drug_markdown.contains("## Shortage (US - OpenFDA Drug Shortages)"));
+        assert!(drug_markdown.contains("## Regulatory (US - Drugs@FDA)"));
 
         let disease = crate::entities::disease::Disease {
             id: "MONDO:0009061".to_string(),
@@ -5047,6 +5644,10 @@ mod tests {
             label_set_id: None,
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 
@@ -5091,6 +5692,10 @@ mod tests {
             label_set_id: Some("set-123".to_string()),
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 
@@ -5134,6 +5739,10 @@ mod tests {
             label_set_id: None,
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 
@@ -5170,12 +5779,224 @@ mod tests {
             label_set_id: None,
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 
         let markdown = drug_markdown(&drug, &["interactions".to_string()]).expect("markdown");
         assert!(markdown.contains("Interaction details not available from public sources."));
         assert!(!markdown.contains("No known drug-drug interactions found."));
+    }
+
+    #[test]
+    fn drug_markdown_with_region_all_keeps_us_and_eu_blocks_separate() {
+        let drug = Drug {
+            name: "pembrolizumab".to_string(),
+            drugbank_id: Some("DB09037".to_string()),
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: vec!["Keytruda".to_string()],
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: vec!["Rash".to_string()],
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: Some(vec![crate::entities::drug::DrugShortageEntry {
+                status: Some("Current".to_string()),
+                availability: Some("Limited".to_string()),
+                company_name: Some("Example Pharma".to_string()),
+                generic_name: Some("pembrolizumab".to_string()),
+                related_info: Some("https://example.org/us-shortage".to_string()),
+                update_date: Some("2026-01-13".to_string()),
+                initial_posting_date: None,
+            }]),
+            approvals: Some(vec![DrugApproval {
+                application_number: "BLA125514".to_string(),
+                sponsor_name: Some("Merck Sharp & Dohme".to_string()),
+                openfda_brand_names: vec!["Keytruda".to_string()],
+                openfda_generic_names: vec!["pembrolizumab".to_string()],
+                products: Vec::new(),
+                submissions: Vec::new(),
+            }]),
+            us_safety_warnings: Some("Immune-mediated adverse reactions.".to_string()),
+            ema_regulatory: Some(vec![EmaRegulatoryRow {
+                medicine_name: "Keytruda".to_string(),
+                active_substance: "pembrolizumab".to_string(),
+                ema_product_number: "EMEA/H/C/003820".to_string(),
+                status: "Authorised".to_string(),
+                holder: Some("Merck Sharp & Dohme B.V.".to_string()),
+                recent_activity: vec![crate::entities::drug::EmaRegulatoryActivity {
+                    first_published_date: "27/02/2026".to_string(),
+                    last_updated_date: None,
+                }],
+            }]),
+            ema_safety: Some(EmaSafetyInfo {
+                dhpcs: vec![crate::entities::drug::EmaDhpcEntry {
+                    medicine_name: "Keytruda".to_string(),
+                    dhpc_type: Some("DHPC".to_string()),
+                    regulatory_outcome: Some("Updated safety communication".to_string()),
+                    first_published_date: Some("15/01/2026".to_string()),
+                    last_updated_date: None,
+                }],
+                referrals: Vec::new(),
+                psusas: Vec::new(),
+            }),
+            ema_shortage: Some(vec![EmaShortageEntry {
+                medicine_affected: "Keytruda".to_string(),
+                status: Some("Resolved".to_string()),
+                availability_of_alternatives: Some("Yes".to_string()),
+                first_published_date: Some("10/01/2026".to_string()),
+                last_updated_date: Some("13/01/2026".to_string()),
+            }]),
+            civic: None,
+        };
+
+        let markdown = drug_markdown_with_region(&drug, &["all".to_string()], DrugRegion::All)
+            .expect("markdown");
+        assert!(markdown.contains("## Regulatory (US - Drugs@FDA)"));
+        assert!(markdown.contains("## Regulatory (EU - EMA)"));
+        assert!(markdown.contains("## Safety (US - OpenFDA)"));
+        assert!(markdown.contains("## Safety (EU - EMA)"));
+        assert!(markdown.contains("## Shortage (US - OpenFDA Drug Shortages)"));
+        assert!(markdown.contains("## Shortage (EU - EMA)"));
+        assert!(markdown.contains("BLA125514"));
+        assert!(markdown.contains("EMEA/H/C/003820"));
+        assert!(markdown.contains("Immune-mediated adverse reactions."));
+        assert!(markdown.contains("Resolved"));
+    }
+
+    #[test]
+    fn drug_markdown_with_region_eu_all_suppresses_us_header_facts() {
+        // Criterion 9: `get drug <name> all --region eu` must not show US-specific
+        // header lines (FDA Approved, Safety FAERS) even though the full card is rendered.
+        let drug = Drug {
+            name: "pembrolizumab".to_string(),
+            drugbank_id: Some("DB09037".to_string()),
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: Some("2014-09-04".to_string()),
+            approval_date_raw: Some("20140904".to_string()),
+            approval_date_display: Some("September 4, 2014".to_string()),
+            approval_summary: Some("FDA approved September 4, 2014".to_string()),
+            brand_names: vec!["Keytruda".to_string()],
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: vec!["Fatigue".to_string(), "Rash".to_string()],
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: Some(vec![EmaRegulatoryRow {
+                medicine_name: "Keytruda".to_string(),
+                active_substance: "pembrolizumab".to_string(),
+                ema_product_number: "EMEA/H/C/003820".to_string(),
+                status: "Authorised".to_string(),
+                holder: None,
+                recent_activity: Vec::new(),
+            }]),
+            ema_safety: Some(EmaSafetyInfo {
+                dhpcs: Vec::new(),
+                referrals: Vec::new(),
+                psusas: Vec::new(),
+            }),
+            ema_shortage: Some(Vec::new()),
+            civic: None,
+        };
+
+        let markdown = drug_markdown_with_region(&drug, &["all".to_string()], DrugRegion::Eu)
+            .expect("markdown");
+
+        // EU EMA section must be present
+        assert!(markdown.contains("## Regulatory (EU - EMA)"));
+        assert!(markdown.contains("EMEA/H/C/003820"));
+
+        // US-specific header facts must be absent
+        assert!(
+            !markdown.contains("FDA Approved"),
+            "US approval date must not appear in EU-only output"
+        );
+        assert!(
+            !markdown.contains("Safety (OpenFDA FAERS)"),
+            "US FAERS safety line must not appear in EU-only output"
+        );
+    }
+
+    #[test]
+    fn drug_markdown_with_region_eu_safety_shows_truthful_empty_subsections() {
+        let drug = Drug {
+            name: "semaglutide".to_string(),
+            drugbank_id: Some("DB13928".to_string()),
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: vec!["Ozempic".to_string()],
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: Some(EmaSafetyInfo {
+                dhpcs: vec![crate::entities::drug::EmaDhpcEntry {
+                    medicine_name: "Ozempic".to_string(),
+                    dhpc_type: Some("DHPC".to_string()),
+                    regulatory_outcome: Some("Medicine shortage".to_string()),
+                    first_published_date: Some("10/01/2026".to_string()),
+                    last_updated_date: Some("13/01/2026".to_string()),
+                }],
+                referrals: Vec::new(),
+                psusas: Vec::new(),
+            }),
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let markdown = drug_markdown_with_region(&drug, &["safety".to_string()], DrugRegion::Eu)
+            .expect("markdown");
+        assert!(markdown.contains("## Safety (EU - EMA)"));
+        assert!(markdown.contains("### DHPCs"));
+        assert!(markdown.contains("Medicine shortage"));
+        assert!(markdown.contains("### Referrals"));
+        assert!(markdown.contains("### PSUSAs"));
+        assert!(markdown.contains("No data found (EMA)"));
     }
 
     #[test]
@@ -5434,6 +6255,11 @@ mod tests {
         assert!(markdown.contains("PubTator3, Semantic Scholar"));
         assert!(markdown.contains("title 2/2"));
         assert!(markdown.contains("title+abstract 2/2"));
+        assert!(
+            markdown.contains(
+                "--date-from/--date-to <YYYY|YYYY-MM|YYYY-MM-DD> (alias: --since/--until)"
+            )
+        );
         assert!(!markdown.contains("## PubTator3"));
         assert!(!markdown.contains("## Europe PMC"));
         assert!(markdown.find("|1|").unwrap() < markdown.find("|2|").unwrap());

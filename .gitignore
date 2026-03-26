@@ -4,9 +4,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 dist/
+/server/
 *.egg-info/
 site/
 .climb/
 .climb-test-vault/
 .march/
 paper/generated/
+benchmarks/bioasq/datasets/raw/
+benchmarks/bioasq/datasets/normalized/

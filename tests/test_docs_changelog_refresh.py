@@ -20,21 +20,28 @@ def _markdown_section_block(text: str, heading: str) -> str:
 
 def test_changelog_has_backfilled_releases_and_release_header() -> None:
     changelog = _read("CHANGELOG.md")
-    latest_release_block = _markdown_section_block(changelog, "## 0.8.17 — 2026-03-23")
+    latest_release_block = _markdown_section_block(changelog, "## 0.8.18 — 2026-03-25")
 
     assert "## [Unreleased]" not in changelog
-    assert "## 0.8.17 — 2026-03-23" in changelog
+    assert "## 0.8.18 — 2026-03-25" in changelog
     assert "## 0.9.0" not in changelog
-    assert "Added KEGG as a pathway source alongside Reactome and WikiPathways." in (
-        latest_release_block
-    )
-    assert "Added gnomAD constraint metrics for variant-interpretation context." in (
-        latest_release_block
-    )
-    assert "Fixed drug interaction output" in latest_release_block
-    assert "Fixed g:Profiler enrichment timeouts." in latest_release_block
+    assert "--region us|eu|all" in latest_release_block
+    assert "EMA" in latest_release_block
+    assert "BioASQ benchmark" in latest_release_block
+    assert "docs/reference/bioasq-benchmark.md" in latest_release_block
+    assert "S2_API_KEY" in latest_release_block
+    assert "1 req/2sec" in latest_release_block
+    assert "1 req/sec" in latest_release_block
+    assert "049" not in latest_release_block
+    assert "050" not in latest_release_block
+    assert "051" not in latest_release_block
+    assert "pending separate merge" not in latest_release_block
+    assert "run.py" not in latest_release_block
+    assert "evaluate.py" not in latest_release_block
+    assert "score.py" not in latest_release_block
 
     expected_releases = [
+        ("0.8.18", "2026-03-25"),
         ("0.8.17", "2026-03-23"),
         ("0.8.16", "2026-03-17"),
         ("0.8.15", "2026-03-11"),
@@ -199,10 +206,52 @@ def test_changelog_audit_backfills_rust_release_gaps() -> None:
     assert "MCP chart responses can now return SVG inline" in v0_8_17_block
 
 
-def test_release_overview_mentions_v0_8_17_current_version() -> None:
+def test_release_overview_mentions_v0_8_18_current_version_and_release_files() -> None:
     overview = _read("design/technical/overview.md")
 
-    assert "**Current version:** 0.8.17 (as of 2026-03-23)" in overview
+    assert "**Current version:** 0.8.18 (as of 2026-03-25)" in overview
+    assert "Release checklist" in overview
+    for required_file in [
+        "`Cargo.toml`",
+        "`Cargo.lock`",
+        "`pyproject.toml`",
+        "`manifest.json`",
+        "`CITATION.cff`",
+        "`CHANGELOG.md`",
+    ]:
+        assert required_file in overview
+
+    assert "https://api.github.com/repos/genomoncology/biomcp/releases/latest" in overview
+    assert 'BIOMCP_VERSION=v0.8.18 bash install.sh' in overview
+    assert "https://biomcp.org/reference/bioasq-benchmark/" in overview
+    assert "https://biomcp.org/getting-started/api-keys/" in overview
+    assert "https://biomcp.org/user-guide/drug/" in overview
+
+
+def test_release_overview_post_tag_public_proof_requires_all_markers() -> None:
+    overview = _read("design/technical/overview.md")
+    post_tag_block = _markdown_section_block(overview, "### Post-tag public proof")
+
+    assert 'bioasq_page="$(mktemp)"' in post_tag_block
+    assert "rg -q 'hf-public-pre2026'" in post_tag_block
+    assert "rg -q 'Phase A\\+'" in post_tag_block
+    assert "rg -q 'Phase B'" in post_tag_block
+    assert 'api_keys_page="$(mktemp)"' in post_tag_block
+    assert "rg -q 'shared Semantic Scholar pool at 1 req/2sec'" in post_tag_block
+    assert "rg -q 'authenticated quota at 1 req/sec'" in post_tag_block
+    assert 'drug_page="$(mktemp)"' in post_tag_block
+    assert "rg -q 'Keytruda regulatory --region eu'" in post_tag_block
+    assert "rg -q 'EMA local data setup'" in post_tag_block
+    assert "rg -q 'available \\(default path\\)'" in post_tag_block
+    assert "| rg 'hf-public-pre2026|Phase A\\+|Phase B'" not in post_tag_block
+    assert (
+        "| rg 'shared Semantic Scholar pool at 1 req/2sec|authenticated quota at 1 req/sec'"
+        not in post_tag_block
+    )
+    assert (
+        "| rg -- 'Keytruda regulatory --region eu|EMA local data setup|available \\(default path\\)'"
+        not in post_tag_block
+    )
 
 
 def test_gene_guide_includes_new_sections_and_positional_search() -> None:

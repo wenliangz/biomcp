@@ -17,6 +17,7 @@ DIRECT_SOURCE_MODULES = {
     "cpic": "CPIC",
     "dgidb": "DGIdb",
     "disgenet": "DisGeNET",
+    "ema": "EMA",
     "enrichr": "Enrichr",
     "europepmc": "Europe PMC",
     "gnomad": "gnomAD",

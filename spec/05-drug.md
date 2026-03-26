@@ -4,12 +4,24 @@ Drug commands connect mechanism and target context with trial and adverse-event 
 
 | Section | Command focus | Why it matters |
 |---|---|---|
+| EMA health readiness | `biomcp health` | Confirms the local EMA batch is surfaced as an operator-readable readiness row |
 | Drug search | `search drug pembrolizumab` | Confirms name-based lookup |
 | Drug detail | `get drug pembrolizumab` | Confirms mechanism/target card |
 | Targets section | `get drug ... targets` | Confirms progressive disclosure |
 | Trial helper | `drug trials pembrolizumab` | Confirms intervention-based trial pivot |
 | Adverse-event helper | `drug adverse-events pembrolizumab` | Confirms safety signal pivot |
 | Adverse-event search | `search adverse-event -d ibuprofen` | Confirms direct safety search |
+
+## EMA Health Readiness
+
+Full `biomcp health` should expose local EMA readiness separately from the API-only inventory so operators can confirm EU drug prerequisites before debugging query output.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp health)"
+echo "$out" | mustmatch like "EMA local data ($fixture_root)"
+echo "$out" | mustmatch like "| EMA local data ($fixture_root) | configured |"
+```
 
 ## Searching by Name
 
@@ -19,6 +31,18 @@ Name-first search is the most common route when reviewing a therapy in context. 
 out="$(biomcp search drug pembrolizumab --limit 3)"
 echo "$out" | mustmatch like "# Drugs: pembrolizumab"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
+```
+
+## Search Help Shows Region Defaults
+
+The inline help should advertise the no-flag cross-region default while keeping
+the structured-filter exception explicit.
+
+```bash
+out="$(biomcp search drug --help)"
+echo "$out" | mustmatch '/\[default: all\]/'
+echo "$out" | mustmatch like "Omitting --region on a plain name/alias search checks both U.S. and EU data."
+echo "$out" | mustmatch like "If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path."
 ```
 
 ## Getting Drug Details
@@ -32,18 +56,45 @@ echo "$out" | mustmatch like "DrugBank ID: DB09037"
 echo "$out" | mustmatch like "## Targets"
 ```
 
+## Drug Indications
+
+Indications are sourced from OpenTargets and should render user-facing stage labels instead of leaking GraphQL failures or raw field names. This checks the repaired indication path without binding the spec to a particular disease row.
+
+```bash
+out="$(biomcp get drug pembrolizumab indications)"
+echo "$out" | mustmatch like "## Indications (Open Targets)"
+echo "$out" | mustmatch not like "Cannot query field"
+echo "$out" | mustmatch '/\((Approved|Phase [0-9](\/[0-9])?|Early Phase 1)\)/'
+```
+
 ## Get Drug Help Surfaces Supported Sections
 
 The inline help should agree with `biomcp list drug` and the implementation for
-supported typed sections, including the already-working approval and CIViC
-paths.
+supported typed sections, including the regional EMA additions.
 
 ```bash
 out="$(biomcp get drug --help)"
 echo "$out" | mustmatch like "approvals"
 echo "$out" | mustmatch like "civic"
 echo "$out" | mustmatch like "label"
+echo "$out" | mustmatch like "regulatory"
+echo "$out" | mustmatch like "safety"
+echo "$out" | mustmatch like "--region <REGION>"
 echo "$out" | mustmatch like "biomcp get drug pembrolizumab approvals"
+echo "$out" | mustmatch like "biomcp get drug Keytruda regulatory --region eu"
+```
+
+## Drug List Documents Region Grammar
+
+`biomcp list drug` is the concise grammar contract for region-aware drug
+sections and the MCP help mirror. The list output should continue to document
+the same regional section grammar that `get drug --help` exposes.
+
+```bash
+out="$(biomcp list drug)"
+echo "$out" | mustmatch like "get drug <name> regulatory [--region <us|eu|all>]"
+echo "$out" | mustmatch like "get drug <name> safety [--region <us|eu|all>]"
+echo "$out" | mustmatch like "get drug <name> shortage [--region <us|eu|all>]"
 ```
 
 ## Compact Approval Fields
@@ -130,13 +181,107 @@ echo "$out" | mustmatch like "# Adverse Events: drug=ibuprofen"
 echo "$out" | mustmatch like "Total reports (OpenFDA)"
 ```
 
-## Brand Name Search
+## Brand Name Search Uses Exact Match Ranking
 
-Brand-only MyChem hits should still render search rows with a usable canonical name. This regression protects the Keytruda brand-name bug where totals were non-zero but rows were empty.
+Brand-only MyChem hits should still render search rows with a usable canonical
+name. The OpenFDA rescue path should prefer the exact Keytruda label over the
+newer KEYTRUDA QLEX combo label and respect the requested limit/total text.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search drug Keytruda --limit 5)"
+out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search drug Keytruda --region us --limit 1)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
+echo "$out" | mustmatch like "Found 1 drug"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 echo "$out" | mustmatch like "pembrolizumab"
+echo "$out" | mustmatch not like "pembrolizumab and berahyaluronidase alfa-pmph"
+```
+
+## EMA Search Region
+
+The EMA human-medicine fixture should support EU-only search rows with the EMA
+product number and authorization status while still honoring existing drug
+normalization.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --region eu --limit 5)"
+echo "$out" | mustmatch like "# Drugs: Keytruda"
+echo "$out" | mustmatch like "|Name|Active Substance|EMA Number|Status|"
+echo "$out" | mustmatch like "Keytruda"
+echo "$out" | mustmatch like "pembrolizumab"
+echo "$out" | mustmatch like "EMEA/H/C/003820"
+echo "$out" | mustmatch like "Authorised"
+```
+
+## Default Drug Search Covers US and EU
+
+Omitting `--region` on a plain name query should render the same split U.S./EU
+layout as the explicit all-regions mode.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --limit 5)"
+echo "$out" | mustmatch like "# Drugs: Keytruda"
+echo "$out" | mustmatch like "## US (MyChem.info / OpenFDA)"
+echo "$out" | mustmatch like "## EU (EMA)"
+echo "$out" | mustmatch like "EMEA/H/C/003820"
+```
+
+## EMA Search All Regions
+
+`--region all` should render separate labeled U.S. and EU result blocks instead
+of flattening them into one unlabeled table.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --region all --limit 5)"
+echo "$out" | mustmatch like "# Drugs: Keytruda"
+echo "$out" | mustmatch like "## US (MyChem.info / OpenFDA)"
+echo "$out" | mustmatch like "## EU (EMA)"
+echo "$out" | mustmatch like "EMEA/H/C/003820"
+```
+
+## EMA Regulatory Section
+
+The EU regulatory section should anchor on the EMA medicine row and show recent
+post-authorisation activity.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp get drug Keytruda regulatory --region eu)"
+echo "$out" | mustmatch like "## Regulatory (EU"
+echo "$out" | mustmatch like "EMEA/H/C/003820"
+echo "$out" | mustmatch like "Authorised"
+echo "$out" | mustmatch like "27/02/2026"
+```
+
+## EMA Safety Truthful Empty Sections
+
+The EU safety surface should render DHPC matches and keep referrals/PSUSAs
+truthful when the EMA batch has no matching rows.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp get drug Ozempic safety --region eu)"
+echo "$out" | mustmatch like "## Safety (EU"
+echo "$out" | mustmatch like "### DHPCs"
+echo "$out" | mustmatch like "Medicine shortage"
+echo "$out" | mustmatch like "### Referrals"
+echo "$out" | mustmatch like "No data found (EMA)"
+echo "$out" | mustmatch like "### PSUSAs"
+echo "$out" | mustmatch like "No data found (EMA)"
+```
+
+## EMA Shortage Section
+
+EU shortage output should expose the EMA shortage status, alternatives flag,
+and update date from the local batch.
+
+```bash
+fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
+out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp get drug Ozempic shortage --region eu)"
+echo "$out" | mustmatch like "## Shortage (EU"
+echo "$out" | mustmatch like "Resolved"
+echo "$out" | mustmatch like "Yes"
+echo "$out" | mustmatch like "13/01/2026"
 ```

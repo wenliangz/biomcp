@@ -41,6 +41,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 | CPIC | 1 | direct_api | none | CPIC content is published under CC0 with trademark and attribution guidance | content reuse is broadly allowed, but the CPIC mark/logo has separate restrictions | <https://cpicpgx.org/license/> |
 | DGIdb | 1 | direct_api | none | open interaction service; aggregated claims may still reflect upstream source terms | treat DGIdb as an aggregation layer and preserve source attribution for underlying claim providers | <https://www.dgidb.org/about> |
 | DisGeNET | 2 | direct_api | required_env | custom provider terms for API and downloads | do not assume unrestricted redistribution; use according to the provider account terms | <https://www.disgenet.com/> |
+| EMA | 1 | direct_api | none | EMA website material may be reused with source attribution; third-party content can carry separate rights | EMA-published website data is generally reusable with attribution, but embedded third-party materials may need separate permission | <https://www.ema.europa.eu/en/about-us/about-website/legal-notice> |
 | Enrichr | 1 | direct_api | none | open web/API service with citation expectations for Enrichr and its libraries | reuse of results should preserve attribution to Enrichr and the underlying enrichment libraries | <https://maayanlab.cloud/Enrichr/> |
 | Europe PMC | 1 | direct_api | none | open literature metadata service; article and full-text licenses vary by record | metadata is broadly reusable, but full text and PDFs remain governed by article-level licenses | <https://europepmc.org/RestfulWebService> |
 | gnomAD | 3 | direct_api | none | Broad Institute data policies with attribution and service-specific conditions | querying is open, but users should review the gnomAD policies before bulk reuse or republishing | <https://gnomad.broadinstitute.org/policies> |
@@ -68,7 +69,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 | PubTator3 | 1 | direct_api | optional_env | NCBI/NLM public-domain annotation service | results are broadly reusable, but preserve PMID/source provenance and article-level rights separately | <https://www.ncbi.nlm.nih.gov/research/pubtator3/api> |
 | QuickGO | 1 | direct_api | none | GO/EMBL-EBI open data service | query results are generally reusable; preserve GO/EMBL-EBI attribution where expected | <https://www.ebi.ac.uk/QuickGO/> |
 | Reactome | 1 | direct_api | none | Reactome pathway content is CC BY 4.0, with some data exports additionally placed under CC0 | reuse is allowed with attribution; preserve pathway/source provenance in downstream materials | <https://reactome.org/license> |
-| Semantic Scholar | 2 | direct_api | required_env | custom API license agreement | the API license restricts repackaging, resale, and broad commercial redistribution without expanded licensing | <https://www.semanticscholar.org/product/api/license> |
+| Semantic Scholar | 2 | direct_api | optional_env | custom API license agreement | the API license restricts repackaging, resale, and broad commercial redistribution without expanded licensing | <https://www.semanticscholar.org/product/api/license> |
 | STRING | 1 | direct_api | none | CC BY 4.0 | reuse is allowed with attribution to STRING and the original publication/resource | <https://string-db.org/cgi/access?footer_active_subpage=licensing> |
 | UMLS | 2 | direct_api | required_env | custom UMLS Metathesaurus license and terminology-specific appendices | do not assume unrestricted redistribution; some embedded vocabularies add their own restrictions or affiliate licenses | <https://www.nlm.nih.gov/databases/umls.html> |
 | UniProt | 1 | direct_api | none | CC BY 4.0 | reuse is allowed with attribution; linked cross-references can have their own terms | <https://www.uniprot.org/help/license> |
@@ -168,6 +169,18 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Official terms URL: <https://www.dgidb.org/about>
 - Reviewed on: `2026-03-20`
 - Notes: DGIdb itself is open to query, but it aggregates claims from many external drug-gene sources.
+
+### EMA
+
+- BioMCP surfaces: `search drug --region eu|all; get drug <name> regulatory|safety|shortage --region eu|all`
+- Integration mode: `direct_api`
+- BioMCP auth: `none`
+- Provider access / registration: manual download of the EMA website JSON batch or set `BIOMCP_EMA_DIR`
+- License / terms summary: EMA website material may be reused with source attribution; third-party content can carry separate rights
+- Redistribution / reuse summary: EMA-published website data is generally reusable with attribution, but embedded third-party materials may need separate permission
+- Official terms URL: <https://www.ema.europa.eu/en/about-us/about-website/legal-notice>
+- Reviewed on: `2026-03-24`
+- Notes: BioMCP reads the downloaded human-medicines JSON batch from `BIOMCP_EMA_DIR` or the default data directory and does not query a live EMA API. The download landing page is <https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format>.
 
 ### Enrichr
 
@@ -519,14 +532,14 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 
 - BioMCP surfaces: `search article; get article <id> tldr; article citations <id>; article references <id>; article recommendations <id>`
 - Integration mode: `direct_api`
-- BioMCP auth: `required_env` via `S2_API_KEY`
-- Provider access / registration: API key required for BioMCP's Semantic Scholar search/helper path and governed by the API license agreement
+- BioMCP auth: `optional_env` via `S2_API_KEY`
+- Provider access / registration: unauthenticated access is available on the shared pool; authenticated access uses the provider-issued API key and remains governed by the API license agreement
 - License / terms summary: custom API license agreement
 - Redistribution / reuse summary: the API license restricts repackaging, resale, and broad commercial redistribution without expanded licensing
 - Official terms URL: <https://www.semanticscholar.org/product/api/license>
 - API key / account URL: <https://www.semanticscholar.org/product/api>
 - Reviewed on: `2026-03-20`
-- Notes: The overview page says many endpoints are publicly reachable without auth, but BioMCP's article search leg and helper commands deliberately require `S2_API_KEY` to stay within the supported quota path.
+- Notes: BioMCP can call Semantic Scholar without `S2_API_KEY`, but uses a more conservative shared-pool rate limit and recommends the key for dedicated quota and reliability.
 
 ### UMLS
 

@@ -491,6 +491,10 @@ mod tests {
             label_set_id: None,
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 

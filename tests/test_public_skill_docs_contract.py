@@ -59,7 +59,12 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "biomcp skill [list|install|<name>]" not in cli_reference
     assert "biomcp skill install [dir]" in cli_reference
     assert "biomcp skill list                 # legacy compatibility alias" in cli_reference
-    assert "biomcp serve-sse" in cli_reference
+    assert "biomcp serve-sse                  # removed compatibility command; use serve-http" not in cli_reference
+    assert (
+        "`biomcp serve-sse` remains available only as a hidden compatibility "
+        "command that points users back to `biomcp serve-http`."
+        in cli_reference
+    )
     assert "Streamable HTTP" in cli_reference
     assert "/mcp" in cli_reference
 

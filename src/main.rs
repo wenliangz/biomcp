@@ -1,4 +1,3 @@
-use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 fn init_tracing() {
@@ -14,7 +13,7 @@ fn init_tracing() {
 async fn main() -> std::process::ExitCode {
     init_tracing();
 
-    let cli = biomcp_cli::cli::Cli::parse();
+    let cli = biomcp_cli::cli::parse_cli_from_env();
     match cli.command {
         biomcp_cli::cli::Commands::Mcp | biomcp_cli::cli::Commands::Serve => {
             match biomcp_cli::mcp::run_stdio().await {

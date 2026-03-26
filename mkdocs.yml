@@ -60,6 +60,7 @@ nav:
       - MCP Server: reference/mcp-server.md
       - Error Codes: reference/error-codes.md
       - Benchmarks: reference/benchmarks.md
+      - BioASQ Benchmark: reference/bioasq-benchmark.md
       - FAQ: reference/faq.md
       - Source Versioning: reference/source-versioning.md
       - Article Keyword Search: reference/article-keyword-search.md
@@ -70,7 +71,7 @@ nav:
       - "Charts Your Agent Can Actually Read": blog/kuva-charting-guide.md
       - "cBioPortal Study Analytics in BioMCP": blog/cbioportal-study-analytics.md
       - "We Deleted 35 Tools and Our Agent Got Better": blog/we-deleted-35-tools.md
-  - Policies: policies.md
+  - Privacy Policy: policies.md
   - Troubleshooting: troubleshooting.md
 
 plugins:

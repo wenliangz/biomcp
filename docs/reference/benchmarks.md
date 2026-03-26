@@ -4,6 +4,9 @@ This page defines practical benchmark patterns for BioMCP.
 
 The objective is reproducible command behavior, not synthetic leaderboard numbers.
 
+For BioASQ's public-corpus ingestion and official Task B lane documentation, see
+[BioASQ Benchmark](bioasq-benchmark.md).
+
 ## Benchmark goals
 
 - Compare latency across entities.

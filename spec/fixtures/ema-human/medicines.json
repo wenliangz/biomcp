@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "name_of_medicine": ["Keytruda"],
+      "active_substance": ["pembrolizumab"],
+      "ema_product_number": ["EMEA/H/C/003820"],
+      "medicine_status": ["Authorised"],
+      "category": ["Human"],
+      "marketing_authorisation_holder_company_name": ["Merck Sharp & Dohme B.V."]
+    },
+    {
+      "name_of_medicine": ["Ozempic"],
+      "active_substance": ["semaglutide"],
+      "ema_product_number": ["EMEA/H/C/004174"],
+      "medicine_status": ["Authorised"],
+      "category": ["Human"],
+      "marketing_authorisation_holder_company_name": ["Novo Nordisk A/S"]
+    },
+    {
+      "name_of_medicine": ["Keytrudavet"],
+      "active_substance": ["pembrolizumab"],
+      "ema_product_number": ["EMEA/V/C/000999"],
+      "medicine_status": ["Authorised"],
+      "category": ["Veterinary"],
+      "marketing_authorisation_holder_company_name": ["Example Vet Pharma"]
+    },
+    {
+      "name_of_medicine": ["CalmHerb"],
+      "active_substance": ["lavender"],
+      "ema_product_number": ["EMEA/HM/C/001234"],
+      "medicine_status": ["Authorised"],
+      "category": ["Herbal"],
+      "marketing_authorisation_holder_company_name": ["Example Herbal Co."]
+    }
+  ]
+}

@@ -182,15 +182,15 @@ fn list_article() -> String {
 ## Commands
 
 - `get article <id>` - get by PMID/PMCID/DOI
-- `get article <id> tldr` - Semantic Scholar TLDR/influence section (`S2_API_KEY`)
+- `get article <id> tldr` - Semantic Scholar TLDR/influence section (optional auth; shared pool without `S2_API_KEY`)
 - `get article <id> annotations` - PubTator entity mentions
 - `get article <id> fulltext` - download/cache full text
 - `get article <id> all` - include all article sections
 - `article entities <pmid> --limit <N>` - annotated entities with next commands
 - `article batch <id> [<id>...]` - compact multi-article summary cards
-- `article citations <id> --limit <N>` - citation graph with contexts/intents (`S2_API_KEY`)
-- `article references <id> --limit <N>` - reference graph with contexts/intents (`S2_API_KEY`)
-- `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` - related papers (`S2_API_KEY`)
+- `article citations <id> --limit <N>` - citation graph with contexts/intents (optional auth; shared pool without `S2_API_KEY`)
+- `article references <id> --limit <N>` - reference graph with contexts/intents (optional auth; shared pool without `S2_API_KEY`)
+- `article recommendations <id> [<id>...] [--negative <id>...] --limit <N>` - related papers (optional auth; shared pool without `S2_API_KEY`)
 
 ## Search
 
@@ -200,8 +200,8 @@ fn list_article() -> String {
 - `search article <query>` - positional free text keyword
 - `search article -k <keyword>` (or `-q <keyword>`) - free text keyword
 - `search article --type <review|research|case-reports|meta-analysis>`
-- `search article --date-from <YYYY-MM-DD> --date-to <YYYY-MM-DD>`
-- `search article --since <YYYY-MM-DD>` - alias for `--date-from`
+- `search article --date-from <YYYY|YYYY-MM|YYYY-MM-DD> --date-to <YYYY|YYYY-MM|YYYY-MM-DD>`
+- `search article --since <YYYY|YYYY-MM|YYYY-MM-DD>` - alias for `--date-from`
 - `search article --journal <name>`
 - `search article --open-access`
 - `search article --exclude-retracted`
@@ -214,8 +214,8 @@ fn list_article() -> String {
 ## Notes
 
 - Set `NCBI_API_KEY` to increase throughput for NCBI-backed article enrichment.
-- Set `S2_API_KEY` to unlock optional Semantic Scholar search fan-out plus TLDR, citation graph, and recommendation helpers.
-- `search article` still keeps `--source <all|pubtator|europepmc>` in v1; Semantic Scholar is automatic when the key is present and the filter set is compatible.
+- Set `S2_API_KEY` to send authenticated Semantic Scholar requests at 1 req/sec. Without it, BioMCP uses the shared pool at 1 req/2sec.
+- `search article` still keeps `--source <all|pubtator|europepmc>` in v1; Semantic Scholar is automatic when the filter set is compatible, with or without the key.
 - Default `search article --sort relevance` is directness-first rather than citation-first.
 "#
     .to_string()
@@ -270,18 +270,21 @@ fn list_drug() -> String {
 
 - `get drug <name>` - get by name (MyChem.info aggregation)
 - `get drug <name> label` - show key FDA label sections inline
-- `get drug <name> shortage` - query current shortage status
+- `get drug <name> regulatory [--region <us|eu|all>]` - regional regulatory summary (Drugs@FDA and/or EMA)
+- `get drug <name> safety [--region <us|eu|all>]` - regional safety context (OpenFDA and/or EMA)
+- `get drug <name> shortage [--region <us|eu|all>]` - query current shortage status
 - `get drug <name> targets` - enrich with ChEMBL/OpenTargets targets
 - `get drug <name> indications` - enrich with OpenTargets indications
 - `get drug <name> interactions` - OpenFDA label interaction text when available; otherwise a truthful public-data fallback
 - `get drug <name> civic` - CIViC therapy evidence/assertion summary
-- `get drug <name> approvals` - Drugs@FDA approval/application details
+- `get drug <name> approvals` - Drugs@FDA approval/application details (US-only legacy section)
 - `get drug <name> all` - include all sections
 
 ## Search
 
 - `search drug <query>`
 - `search drug -q <query>`
+- `search drug <query> --region <us|eu|all>`
 - `search drug --target <gene>`
 - `search drug --indication <disease>`
 - `search drug --mechanism <text>`
@@ -294,6 +297,13 @@ fn list_drug() -> String {
 
 - `drug trials <name>`
 - `drug adverse-events <name>`
+
+## Notes
+
+- Omitting `--region` searches both U.S. and EU data for plain name/alias lookups.
+- Structured filters remain U.S.-only when `--region` is omitted.
+- Explicit `--region eu|all` is still invalid with structured filters.
+- EU regional commands require the EMA human-medicines JSON batch via `BIOMCP_EMA_DIR` or the default data directory.
 "#
     .to_string()
 }
@@ -657,7 +667,7 @@ fn list_adverse_event() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_gene, render};
+    use super::{list_drug, list_gene, render};
 
     #[test]
     fn list_root_includes_quickstart_and_skills_tip() {
@@ -747,6 +757,18 @@ mod tests {
     }
 
     #[test]
+    fn list_drug_describes_omitted_region_behavior() {
+        let out = list_drug();
+        assert!(out.contains(
+            "Omitting `--region` searches both U.S. and EU data for plain name/alias lookups."
+        ));
+        assert!(out.contains("Structured filters remain U.S.-only when `--region` is omitted."));
+        assert!(
+            out.contains("Explicit `--region eu|all` is still invalid with structured filters.")
+        );
+    }
+
+    #[test]
     fn list_disease_mentions_disgenet_section() {
         let out = render(Some("disease")).expect("list disease should render");
         assert!(out.contains("get disease <name_or_id> disgenet"));
@@ -758,7 +780,9 @@ mod tests {
         assert!(trial.contains("--biomarker <text>"));
 
         let article = render(Some("article")).expect("list article should render");
-        assert!(article.contains("--since <YYYY-MM-DD>"));
+        assert!(article.contains("--date-from <YYYY|YYYY-MM|YYYY-MM-DD>"));
+        assert!(article.contains("--date-to <YYYY|YYYY-MM|YYYY-MM-DD>"));
+        assert!(article.contains("--since <YYYY|YYYY-MM|YYYY-MM-DD>"));
         assert!(article.contains("article batch <id> [<id>...]"));
     }
 

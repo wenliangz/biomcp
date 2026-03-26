@@ -93,7 +93,7 @@ search all [slot filters]    → counts-first cross-entity orientation
 - **Free-text discovery:** `biomcp discover` resolves aliases, brands, symptoms, and pathways before you commit to a typed entity command.
 - **Cross-entity pivots:** move directly from a known entity into trials, articles, drugs, pathways, structures, or article graph helpers.
 - **Study analytics + charts:** `study` commands support local cohort analytics plus native terminal, SVG, and PNG chart output.
-- **Citation graph helpers:** `article citations`, `article references`, and `article recommendations` add literature navigation from a known paper when `S2_API_KEY` is configured.
+- **Citation graph helpers:** `article citations`, `article references`, and `article recommendations` add literature navigation from a known paper with optional Semantic Scholar auth.
 - **Gene-set enrichment and batch retrieval:** `biomcp enrich` uses g:Profiler, and `biomcp batch` runs up to 10 focused `get` calls with shared JSON metadata.
 
 ## Entities and sources
@@ -102,9 +102,9 @@ search all [slot filters]    → counts-first cross-entity orientation
 |--------|-----------------------------------|---------|
 | gene | MyGene.info, UniProt, Reactome, QuickGO, STRING, GTEx, Human Protein Atlas, DGIdb, ClinGen | `biomcp get gene BRAF pathways hpa` |
 | variant | MyVariant.info, ClinVar, gnomAD fields via MyVariant, CIViC, Cancer Genome Interpreter, OncoKB, cBioPortal, GWAS Catalog, AlphaGenome | `biomcp get variant "BRAF V600E" clinvar` |
-| article | PubMed, PubTator3, Europe PMC, PMC OA, NCBI ID Converter, Semantic Scholar (optional with `S2_API_KEY`) | `biomcp search article -g BRAF --limit 5` |
+| article | PubMed, PubTator3, Europe PMC, PMC OA, NCBI ID Converter, Semantic Scholar (optional auth; `S2_API_KEY` recommended) | `biomcp search article -g BRAF --limit 5` |
 | trial | ClinicalTrials.gov API v2, NCI CTS API | `biomcp search trial -c melanoma -s recruiting` |
-| drug | MyChem.info, ChEMBL, OpenTargets, Drugs@FDA, OpenFDA, CIViC | `biomcp get drug pembrolizumab targets` |
+| drug | MyChem.info, EMA local batch, ChEMBL, OpenTargets, Drugs@FDA, OpenFDA, CIViC | `biomcp get drug Keytruda regulatory --region eu` |
 | disease | MyDisease.info, Monarch Initiative, MONDO, OpenTargets, Reactome, CIViC | `biomcp get disease "Lynch syndrome" genes` |
 | pathway | Reactome, KEGG, g:Profiler, Enrichr-backed enrichment sections | `biomcp get pathway hsa05200 genes` |
 | protein | UniProt, InterPro, STRING, ComplexPortal, PDB, AlphaFold | `biomcp get protein P15056 complexes` |
@@ -156,7 +156,7 @@ Most commands work without credentials. Optional keys improve rate limits:
 
 ```bash
 export NCBI_API_KEY="..."        # PubTator, PMC OA, NCBI ID converter
-export S2_API_KEY="..."          # Semantic Scholar TLDR, citations, references, recommendations
+export S2_API_KEY="..."          # Optional Semantic Scholar auth; dedicated quota at 1 req/sec
 export OPENFDA_API_KEY="..."     # OpenFDA rate limits
 export NCI_API_KEY="..."         # NCI CTS trial search (--source nci)
 export ONCOKB_TOKEN="..."        # OncoKB variant helper
@@ -196,6 +196,7 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart 
 - [Installation](getting-started/installation.md)
 - [First Query](getting-started/first-query.md)
 - [Search All Workflow](how-to/search-all-workflow.md)
+- [BioASQ Benchmark](reference/bioasq-benchmark.md)
 - [Discover](user-guide/discover.md)
 - [Source Licensing and Terms](reference/source-licensing.md)
 - [Data Sources](reference/data-sources.md)

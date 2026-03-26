@@ -1,0 +1,718 @@
+use std::collections::HashSet;
+use std::fs::File;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+
+use crate::entities::SearchPage;
+use crate::entities::drug::{
+    EmaDhpcEntry, EmaDrugSearchResult, EmaPsusaEntry, EmaReferralEntry, EmaRegulatoryActivity,
+    EmaRegulatoryRow, EmaSafetyInfo, EmaShortageEntry,
+};
+use crate::error::BioMcpError;
+use crate::utils::serde::StringOrVec;
+
+const SOURCE_NAME: &str = "EMA";
+const DOWNLOAD_URL: &str =
+    "https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format";
+const MEDICINES_FILE: &str = "medicines.json";
+const POST_AUTHORISATION_FILE: &str = "post_authorisation.json";
+const REFERRALS_FILE: &str = "referrals.json";
+const PSUSAS_FILE: &str = "psusas.json";
+const DHPCS_FILE: &str = "dhpcs.json";
+const SHORTAGES_FILE: &str = "shortages.json";
+
+pub(crate) const EMA_REQUIRED_FILES: &[&str] = &[
+    MEDICINES_FILE,
+    POST_AUTHORISATION_FILE,
+    REFERRALS_FILE,
+    PSUSAS_FILE,
+    DHPCS_FILE,
+    SHORTAGES_FILE,
+];
+
+#[derive(Debug, Clone)]
+pub(crate) struct EmaDrugIdentity {
+    terms: Vec<String>,
+}
+
+impl EmaDrugIdentity {
+    pub(crate) fn new(primary: &str) -> Self {
+        Self::from_terms(vec![primary.to_string()])
+    }
+
+    pub(crate) fn with_aliases(primary: &str, canonical: Option<&str>, aliases: &[String]) -> Self {
+        let mut terms = vec![primary.to_string()];
+        if let Some(canonical) = canonical {
+            terms.push(canonical.to_string());
+        }
+        terms.extend(aliases.iter().cloned());
+        Self::from_terms(terms)
+    }
+
+    fn from_terms(terms: Vec<String>) -> Self {
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for term in terms {
+            let Some(term) = normalize_term(&term) else {
+                continue;
+            };
+            if seen.insert(term.clone()) {
+                out.push(term);
+            }
+        }
+        Self { terms: out }
+    }
+
+    fn term_set(&self) -> HashSet<String> {
+        self.terms.iter().cloned().collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EmaClient {
+    root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EmaAnchor {
+    medicines: Vec<AnchorMedicine>,
+    terms: HashSet<String>,
+}
+
+#[derive(Debug, Clone)]
+struct AnchorMedicine {
+    medicine_name: String,
+    active_substance: String,
+    ema_product_number: String,
+    status: String,
+    holder: Option<String>,
+    match_rank: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmaWrapper<T> {
+    data: Vec<T>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EmaMedicineRow {
+    #[serde(default)]
+    name_of_medicine: StringOrVec,
+    #[serde(default)]
+    active_substance: StringOrVec,
+    #[serde(default)]
+    ema_product_number: StringOrVec,
+    #[serde(default)]
+    medicine_status: StringOrVec,
+    #[serde(default)]
+    category: StringOrVec,
+    #[serde(default)]
+    marketing_authorisation_holder_company_name: StringOrVec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EmaPostAuthorisationRow {
+    #[serde(default)]
+    ema_product_number: StringOrVec,
+    #[serde(default)]
+    first_published_date: StringOrVec,
+    #[serde(default)]
+    last_updated_date: StringOrVec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EmaDhpcRow {
+    #[serde(default)]
+    name_of_medicine: StringOrVec,
+    #[serde(default)]
+    dhpc_type: StringOrVec,
+    #[serde(default)]
+    regulatory_outcome: StringOrVec,
+    #[serde(default)]
+    first_published_date: StringOrVec,
+    #[serde(default)]
+    last_updated_date: StringOrVec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EmaReferralRow {
+    #[serde(default)]
+    referral_name: StringOrVec,
+    #[serde(default)]
+    international_non_proprietary_name_inn_common_name: StringOrVec,
+    #[serde(default)]
+    associated_names_centrally_authorised_medicines: StringOrVec,
+    #[serde(default)]
+    current_status: StringOrVec,
+    #[serde(default)]
+    safety_referral: StringOrVec,
+    #[serde(default)]
+    referral_type: StringOrVec,
+    #[serde(default)]
+    procedure_start_date: StringOrVec,
+    #[serde(default)]
+    prac_recommendation: StringOrVec,
+    #[serde(default)]
+    category: StringOrVec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EmaPsusaRow {
+    #[serde(default)]
+    related_medicines: StringOrVec,
+    #[serde(default)]
+    active_substance: StringOrVec,
+    #[serde(default)]
+    procedure_number: StringOrVec,
+    #[serde(default)]
+    regulatory_outcome: StringOrVec,
+    #[serde(default)]
+    first_published_date: StringOrVec,
+    #[serde(default)]
+    last_updated_date: StringOrVec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EmaShortageRow {
+    #[serde(default)]
+    medicine_affected: StringOrVec,
+    #[serde(default)]
+    supply_shortage_status: StringOrVec,
+    #[serde(default)]
+    availability_of_alternatives: StringOrVec,
+    #[serde(default)]
+    first_published_date: StringOrVec,
+    #[serde(default)]
+    last_updated_date: StringOrVec,
+}
+
+impl EmaClient {
+    pub(crate) fn new() -> Self {
+        Self {
+            root: resolve_ema_root(),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_root(root: PathBuf) -> Self {
+        Self { root }
+    }
+
+    pub(crate) fn resolve_anchor(
+        &self,
+        identity: &EmaDrugIdentity,
+    ) -> Result<EmaAnchor, BioMcpError> {
+        let medicines = self.read_feed::<EmaMedicineRow>(MEDICINES_FILE)?;
+        let terms = identity.term_set();
+        let mut out = Vec::new();
+        let mut seen_products = HashSet::new();
+
+        for row in medicines {
+            if !is_human_category(&row.category) {
+                continue;
+            }
+
+            let Some(medicine_name) = scalar_value(&row.name_of_medicine) else {
+                continue;
+            };
+            let Some(active_substance) = scalar_value(&row.active_substance) else {
+                continue;
+            };
+            let Some(ema_product_number) = scalar_value(&row.ema_product_number) else {
+                continue;
+            };
+
+            let matches_name = field_matches_terms(&medicine_name, &terms);
+            let matches_active = field_matches_terms(&active_substance, &terms);
+            if !matches_name && !matches_active {
+                continue;
+            }
+
+            let product_key = ema_product_number.to_ascii_lowercase();
+            if !seen_products.insert(product_key) {
+                continue;
+            }
+
+            out.push(AnchorMedicine {
+                medicine_name,
+                active_substance,
+                ema_product_number,
+                status: scalar_value(&row.medicine_status).unwrap_or_else(|| "Unknown".to_string()),
+                holder: scalar_value(&row.marketing_authorisation_holder_company_name),
+                match_rank: if matches_name { 0 } else { 1 },
+            });
+        }
+
+        out.sort_by(|a, b| {
+            a.match_rank
+                .cmp(&b.match_rank)
+                .then_with(|| a.medicine_name.cmp(&b.medicine_name))
+                .then_with(|| a.ema_product_number.cmp(&b.ema_product_number))
+        });
+
+        let mut anchor_terms = terms;
+        for medicine in &out {
+            if let Some(term) = normalize_term(&medicine.medicine_name) {
+                anchor_terms.insert(term);
+            }
+            if let Some(term) = normalize_term(&medicine.active_substance) {
+                anchor_terms.insert(term);
+            }
+        }
+
+        Ok(EmaAnchor {
+            medicines: out,
+            terms: anchor_terms,
+        })
+    }
+
+    pub(crate) fn search_medicines(
+        &self,
+        identity: &EmaDrugIdentity,
+        limit: usize,
+        offset: usize,
+    ) -> Result<SearchPage<EmaDrugSearchResult>, BioMcpError> {
+        let anchor = self.resolve_anchor(identity)?;
+        let total = anchor.medicines.len();
+        let results = anchor
+            .medicines
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|medicine| EmaDrugSearchResult {
+                name: medicine.medicine_name,
+                active_substance: medicine.active_substance,
+                ema_product_number: medicine.ema_product_number,
+                status: medicine.status,
+            })
+            .collect::<Vec<_>>();
+        Ok(SearchPage::offset(results, Some(total)))
+    }
+
+    pub(crate) fn regulatory(
+        &self,
+        anchor: &EmaAnchor,
+    ) -> Result<Vec<EmaRegulatoryRow>, BioMcpError> {
+        self.require_files(&[MEDICINES_FILE, POST_AUTHORISATION_FILE])?;
+        if anchor.medicines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let post_rows = self.read_feed::<EmaPostAuthorisationRow>(POST_AUTHORISATION_FILE)?;
+        let mut out = Vec::new();
+        for medicine in &anchor.medicines {
+            let mut recent_activity = post_rows
+                .iter()
+                .filter(|row| {
+                    scalar_value(&row.ema_product_number).is_some_and(|value| {
+                        value.eq_ignore_ascii_case(&medicine.ema_product_number)
+                    })
+                })
+                .filter_map(|row| {
+                    let first_published_date = scalar_value(&row.first_published_date)?;
+                    Some(EmaRegulatoryActivity {
+                        first_published_date,
+                        last_updated_date: scalar_value(&row.last_updated_date),
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            recent_activity.sort_by(|a, b| {
+                cmp_date_desc(
+                    Some(a.first_published_date.as_str()),
+                    Some(b.first_published_date.as_str()),
+                )
+            });
+            recent_activity.truncate(5);
+
+            out.push(EmaRegulatoryRow {
+                medicine_name: medicine.medicine_name.clone(),
+                active_substance: medicine.active_substance.clone(),
+                ema_product_number: medicine.ema_product_number.clone(),
+                status: medicine.status.clone(),
+                holder: medicine.holder.clone(),
+                recent_activity,
+            });
+        }
+
+        Ok(out)
+    }
+
+    pub(crate) fn safety(&self, anchor: &EmaAnchor) -> Result<EmaSafetyInfo, BioMcpError> {
+        self.require_files(&[DHPCS_FILE, REFERRALS_FILE, PSUSAS_FILE])?;
+        if anchor.medicines.is_empty() {
+            return Ok(EmaSafetyInfo::default());
+        }
+
+        let dhpcs = self
+            .read_feed::<EmaDhpcRow>(DHPCS_FILE)?
+            .into_iter()
+            .filter_map(|row| {
+                let medicine_name = scalar_value(&row.name_of_medicine)?;
+                if !field_matches_terms(&medicine_name, &anchor.terms) {
+                    return None;
+                }
+                Some(EmaDhpcEntry {
+                    medicine_name,
+                    dhpc_type: scalar_value(&row.dhpc_type),
+                    regulatory_outcome: scalar_value(&row.regulatory_outcome),
+                    first_published_date: scalar_value(&row.first_published_date),
+                    last_updated_date: scalar_value(&row.last_updated_date),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut referrals = self
+            .read_feed::<EmaReferralRow>(REFERRALS_FILE)?
+            .into_iter()
+            .filter(|row| is_human_category(&row.category))
+            .filter_map(|row| {
+                let referral_name = scalar_value(&row.referral_name)?;
+                let active_substance =
+                    scalar_value(&row.international_non_proprietary_name_inn_common_name);
+                let associated_medicines =
+                    scalar_value(&row.associated_names_centrally_authorised_medicines);
+                let matched = field_matches_terms(&referral_name, &anchor.terms)
+                    || active_substance
+                        .as_deref()
+                        .is_some_and(|value| field_matches_terms(value, &anchor.terms))
+                    || associated_medicines
+                        .as_deref()
+                        .is_some_and(|value| field_matches_terms(value, &anchor.terms));
+                if !matched {
+                    return None;
+                }
+                Some(EmaReferralEntry {
+                    referral_name,
+                    active_substance,
+                    associated_medicines,
+                    current_status: scalar_value(&row.current_status),
+                    safety_referral: scalar_value(&row.safety_referral),
+                    referral_type: scalar_value(&row.referral_type),
+                    procedure_start_date: scalar_value(&row.procedure_start_date),
+                    prac_recommendation: scalar_value(&row.prac_recommendation),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut psusas = self
+            .read_feed::<EmaPsusaRow>(PSUSAS_FILE)?
+            .into_iter()
+            .filter_map(|row| {
+                let related_medicines = scalar_value(&row.related_medicines);
+                let active_substance = scalar_value(&row.active_substance);
+                let matched = related_medicines
+                    .as_deref()
+                    .is_some_and(|value| field_matches_terms(value, &anchor.terms))
+                    || active_substance
+                        .as_deref()
+                        .is_some_and(|value| field_matches_terms(value, &anchor.terms));
+                if !matched {
+                    return None;
+                }
+                Some(EmaPsusaEntry {
+                    related_medicines,
+                    active_substance,
+                    procedure_number: scalar_value(&row.procedure_number),
+                    regulatory_outcome: scalar_value(&row.regulatory_outcome),
+                    first_published_date: scalar_value(&row.first_published_date),
+                    last_updated_date: scalar_value(&row.last_updated_date),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut dhpcs = dhpcs;
+        dhpcs.sort_by(|a, b| {
+            cmp_date_desc(
+                a.first_published_date.as_deref(),
+                b.first_published_date.as_deref(),
+            )
+        });
+        referrals.sort_by(|a, b| {
+            cmp_date_desc(
+                a.procedure_start_date.as_deref(),
+                b.procedure_start_date.as_deref(),
+            )
+        });
+        psusas.sort_by(|a, b| {
+            cmp_date_desc(
+                a.first_published_date.as_deref(),
+                b.first_published_date.as_deref(),
+            )
+        });
+
+        Ok(EmaSafetyInfo {
+            dhpcs,
+            referrals,
+            psusas,
+        })
+    }
+
+    pub(crate) fn shortages(
+        &self,
+        anchor: &EmaAnchor,
+    ) -> Result<Vec<EmaShortageEntry>, BioMcpError> {
+        self.require_files(&[MEDICINES_FILE, SHORTAGES_FILE])?;
+        if anchor.medicines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut out = self
+            .read_feed::<EmaShortageRow>(SHORTAGES_FILE)?
+            .into_iter()
+            .filter_map(|row| {
+                let medicine_affected = scalar_value(&row.medicine_affected)?;
+                if !field_matches_terms(&medicine_affected, &anchor.terms) {
+                    return None;
+                }
+                Some(EmaShortageEntry {
+                    medicine_affected,
+                    status: scalar_value(&row.supply_shortage_status),
+                    availability_of_alternatives: scalar_value(&row.availability_of_alternatives),
+                    first_published_date: scalar_value(&row.first_published_date),
+                    last_updated_date: scalar_value(&row.last_updated_date),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        out.sort_by(|a, b| {
+            cmp_date_desc(
+                a.last_updated_date
+                    .as_deref()
+                    .or(a.first_published_date.as_deref()),
+                b.last_updated_date
+                    .as_deref()
+                    .or(b.first_published_date.as_deref()),
+            )
+        });
+        Ok(out)
+    }
+
+    fn require_files(&self, files: &[&str]) -> Result<(), BioMcpError> {
+        let missing = ema_missing_files(&self.root, files);
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        Err(BioMcpError::SourceUnavailable {
+            source_name: SOURCE_NAME.to_string(),
+            reason: format!(
+                "Missing required EMA file(s) under {}: {}",
+                self.root.display(),
+                missing.join(", ")
+            ),
+            suggestion: format!(
+                "Download the EMA human-medicines JSON batch from {DOWNLOAD_URL} into {} or set BIOMCP_EMA_DIR",
+                self.root.display()
+            ),
+        })
+    }
+
+    fn read_feed<T>(&self, file: &str) -> Result<Vec<T>, BioMcpError>
+    where
+        T: DeserializeOwned,
+    {
+        self.require_files(&[file])?;
+        let reader = File::open(self.root.join(file))?;
+        let wrapper: EmaWrapper<T> = serde_json::from_reader(reader)?;
+        Ok(wrapper.data)
+    }
+}
+
+pub(crate) fn ema_missing_files<'a>(root: &Path, files: &[&'a str]) -> Vec<&'a str> {
+    files
+        .iter()
+        .filter(|file| !root.join(file).is_file())
+        .copied()
+        .collect()
+}
+
+pub(crate) fn resolve_ema_root() -> PathBuf {
+    if let Some(path) = std::env::var("BIOMCP_EMA_DIR")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(path);
+    }
+
+    match dirs::data_dir() {
+        Some(path) => path.join("biomcp").join("ema"),
+        None => std::env::temp_dir().join("biomcp").join("ema"),
+    }
+}
+
+fn normalize_term(value: &str) -> Option<String> {
+    clean_text(value).map(|value| value.to_ascii_lowercase())
+}
+
+fn clean_text(value: &str) -> Option<String> {
+    let normalized = value
+        .split_whitespace()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn scalar_value(value: &StringOrVec) -> Option<String> {
+    value.first().and_then(clean_text)
+}
+
+fn is_human_category(value: &StringOrVec) -> bool {
+    value
+        .first()
+        .and_then(normalize_term)
+        .is_some_and(|category| category == "human")
+}
+
+fn field_matches_terms(value: &str, terms: &HashSet<String>) -> bool {
+    let Some(field) = normalize_term(value) else {
+        return false;
+    };
+    if terms.contains(&field) {
+        return true;
+    }
+
+    for piece in field.split(['/', ',', ';', '|']).filter_map(normalize_term) {
+        if terms.contains(&piece) {
+            return true;
+        }
+    }
+
+    terms
+        .iter()
+        .any(|term| contains_boundary_phrase(&field, term))
+}
+
+fn contains_boundary_phrase(field: &str, term: &str) -> bool {
+    if field.is_empty() || term.is_empty() {
+        return false;
+    }
+
+    let field_bytes = field.as_bytes();
+    let mut search_from = 0usize;
+    while let Some(pos) = field[search_from..].find(term) {
+        let start = search_from + pos;
+        let end = start + term.len();
+        let before_ok = start == 0 || !field_bytes[start - 1].is_ascii_alphanumeric();
+        let after_ok = end == field_bytes.len() || !field_bytes[end].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        search_from = start + 1;
+    }
+    false
+}
+
+fn cmp_date_desc(a: Option<&str>, b: Option<&str>) -> std::cmp::Ordering {
+    parse_ema_date(b).cmp(&parse_ema_date(a))
+}
+
+fn parse_ema_date(value: Option<&str>) -> Option<(u32, u32, u32)> {
+    let value = value?.trim();
+    let mut parts = value.split('/');
+    let day = parts.next()?.parse::<u32>().ok()?;
+    let month = parts.next()?.parse::<u32>().ok()?;
+    let year = parts.next()?.parse::<u32>().ok()?;
+    Some((year, month, day))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{
+        EMA_REQUIRED_FILES, EmaClient, EmaDrugIdentity, MEDICINES_FILE, ema_missing_files,
+    };
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(label: &str) -> Self {
+            let suffix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "biomcp-ema-test-{label}-{}-{suffix}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn fixture_client() -> EmaClient {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("spec")
+            .join("fixtures")
+            .join("ema-human");
+        EmaClient::from_root(root)
+    }
+
+    #[test]
+    fn resolve_anchor_matches_brand_and_filters_non_human_rows() {
+        let client = fixture_client();
+        let anchor = client
+            .resolve_anchor(&EmaDrugIdentity::new("Keytruda"))
+            .expect("anchor");
+
+        assert_eq!(anchor.medicines.len(), 1);
+        assert_eq!(anchor.medicines[0].medicine_name, "Keytruda");
+        assert_eq!(anchor.medicines[0].ema_product_number, "EMEA/H/C/003820");
+    }
+
+    #[test]
+    fn safety_ozempic_has_dhpcs_but_empty_referrals_and_psusas() {
+        let client = fixture_client();
+        let anchor = client
+            .resolve_anchor(&EmaDrugIdentity::new("Ozempic"))
+            .expect("anchor");
+        let safety = client.safety(&anchor).expect("safety");
+
+        assert_eq!(safety.dhpcs.len(), 4);
+        assert!(safety.referrals.is_empty());
+        assert!(safety.psusas.is_empty());
+    }
+
+    #[test]
+    fn shortage_matches_resolved_human_medicine_anchor() {
+        let client = fixture_client();
+        let anchor = client
+            .resolve_anchor(&EmaDrugIdentity::new("Ozempic"))
+            .expect("anchor");
+        let shortages = client.shortages(&anchor).expect("shortages");
+
+        assert_eq!(shortages.len(), 1);
+        assert_eq!(shortages[0].status.as_deref(), Some("Resolved"));
+        assert_eq!(
+            shortages[0].availability_of_alternatives.as_deref(),
+            Some("Yes")
+        );
+    }
+
+    #[test]
+    fn ema_missing_files_tracks_required_file_contract_in_order() {
+        let root = TempDirGuard::new("missing-files");
+        std::fs::write(root.path().join(MEDICINES_FILE), b"{}").expect("write medicines fixture");
+
+        let missing = ema_missing_files(root.path(), EMA_REQUIRED_FILES);
+
+        assert_eq!(missing, EMA_REQUIRED_FILES[1..].to_vec());
+    }
+}

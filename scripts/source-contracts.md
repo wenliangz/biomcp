@@ -194,17 +194,26 @@ curl -sS -L "https://www.ebi.ac.uk/intact/complex-ws/search/P15056?number=25&fil
 curl -sS -L "https://www.ebi.ac.uk/intact/complex-ws/search/NO_SUCH_PROTEIN_091?number=25&filters=species_f:(%22Homo%20sapiens%22)"
 ```
 
-## Semantic Scholar (optional, requires `S2_API_KEY`)
+## Semantic Scholar (optional auth via `S2_API_KEY`)
 
-Keep this probe bounded because the approved key tier is 1 request / second.
-Skip it cleanly when `S2_API_KEY` is absent.
+Keep this probe bounded. Authenticated requests use `x-api-key` at 1 request /
+second. Without `S2_API_KEY`, shared-pool probes omit the header, use
+1 request / 2 seconds, and may legitimately return HTTP `429`.
 
-- Happy detail
+- Shared-pool detail (`200` or `429`)
+```bash
+curl -sS -L "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011?fields=paperId,title"
+```
+- Shared-pool citation graph (`200` or `429`)
+```bash
+curl -sS -L "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011/citations?fields=contexts,intents,isInfluential&limit=1"
+```
+- Authenticated detail (optional)
 ```bash
 curl -sS -L "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011?fields=paperId,title" \
   -H "x-api-key: $S2_API_KEY"
 ```
-- Happy citation graph
+- Authenticated citation graph (optional)
 ```bash
 curl -sS -L "https://api.semanticscholar.org/graph/v1/paper/PMID:22663011/citations?fields=contexts,intents,isInfluential&limit=1" \
   -H "x-api-key: $S2_API_KEY"

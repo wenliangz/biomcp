@@ -3,11 +3,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use futures::{StreamExt, future::try_join_all};
 use tracing::{debug, warn};
 
 use crate::cli::debug_plan::{DebugPlan, DebugPlanLeg};
+use crate::entities::drug::DrugRegion;
 
 pub mod chart;
 pub mod debug_plan;
@@ -68,6 +69,63 @@ impl ChartType {
 impl std::fmt::Display for ChartType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DrugRegionArg {
+    Us,
+    Eu,
+    All,
+}
+
+const DRUG_SEARCH_EMA_STRUCTURED_FILTER_ERROR: &str = "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters.";
+const RUNTIME_HELP_SUBCOMMANDS: [&str; 4] = ["mcp", "serve", "serve-http", "serve-sse"];
+
+fn hide_runtime_help_globals(
+    command: clap::Command,
+    subcommand_name: &'static str,
+    json_arg: &clap::Arg,
+    no_cache_arg: &clap::Arg,
+) -> clap::Command {
+    command.mut_subcommand(subcommand_name, |runtime| {
+        runtime.arg(json_arg.clone()).arg(no_cache_arg.clone())
+    })
+}
+
+pub fn build_cli() -> clap::Command {
+    let mut command = Cli::command();
+    let json_arg = command
+        .get_arguments()
+        .find(|arg| arg.get_id() == "json")
+        .cloned()
+        .expect("json arg should exist")
+        .hide(true);
+    let no_cache_arg = command
+        .get_arguments()
+        .find(|arg| arg.get_id() == "no_cache")
+        .cloned()
+        .expect("no_cache arg should exist")
+        .hide(true);
+
+    for subcommand_name in RUNTIME_HELP_SUBCOMMANDS {
+        command = hide_runtime_help_globals(command, subcommand_name, &json_arg, &no_cache_arg);
+    }
+    command
+}
+
+pub fn parse_cli_from_env() -> Cli {
+    let matches = build_cli().get_matches();
+    Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit())
+}
+
+impl From<DrugRegionArg> for DrugRegion {
+    fn from(value: DrugRegionArg) -> Self {
+        match value {
+            DrugRegionArg::Us => DrugRegion::Us,
+            DrugRegionArg::Eu => DrugRegion::Eu,
+            DrugRegionArg::All => DrugRegion::All,
+        }
     }
 }
 
@@ -248,6 +306,7 @@ pub enum Commands {
         port: u16,
     },
     #[command(
+        hide = true,
         about = "removed legacy SSE compatibility command; use `serve-http`",
         long_about = "removed legacy SSE compatibility command.\n\ndeprecated users should run `biomcp serve-http` and connect remote clients to `/mcp` instead."
     )]
@@ -560,10 +619,10 @@ See also: biomcp list article")]
         #[arg(value_name = "QUERY")]
         positional_query: Option<String>,
 
-        /// Published after date (YYYY-MM-DD)
+        /// Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)
         #[arg(long = "date-from", alias = "since")]
         date_from: Option<String>,
-        /// Published before date (YYYY-MM-DD)
+        /// Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)
         #[arg(long = "date-to", alias = "until")]
         date_to: Option<String>,
 
@@ -833,9 +892,14 @@ See also: biomcp list variant")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp search drug pembrolizumab
+  biomcp search drug Keytruda --limit 5
+  biomcp search drug Keytruda --region eu --limit 5
   biomcp search drug -q \"kinase inhibitor\" --target EGFR --atc L01 --pharm-class kinase --limit 5
 
 Note: --interactions is currently unavailable from the public data sources BioMCP uses.
+Omitting --region on a plain name/alias search checks both U.S. and EU data.
+If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path.
+Explicit --region eu|all with structured filters still errors.
 
 See also: biomcp list drug")]
     Drug {
@@ -877,6 +941,9 @@ See also: biomcp list drug")]
         /// Skip the first N results
         #[arg(long, default_value = "0")]
         offset: usize,
+        /// Data region for drug regulatory context [default: all]
+        #[arg(long, value_enum)]
+        region: Option<DrugRegionArg>,
     },
     /// Search pathways by name or keyword
     #[command(
@@ -1127,6 +1194,8 @@ See also: biomcp list variant")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp get drug pembrolizumab
+  biomcp get drug Keytruda regulatory --region eu
+  biomcp get drug Ozempic safety --region eu
   biomcp get drug pembrolizumab targets
   biomcp get drug pembrolizumab approvals
 
@@ -1134,9 +1203,13 @@ See also: biomcp list drug")]
     Drug {
         /// Drug name (e.g., pembrolizumab, carboplatin)
         name: String,
-        /// Sections to include (label, shortage, targets, indications, interactions, civic, approvals, all)
-        #[arg(trailing_var_arg = true)]
+        // Keep this as clap's default variadic positional so named flags like
+        // --region still parse as first-class options and appear in help.
+        /// Sections to include (label, regulatory, safety, shortage, targets, indications, interactions, civic, approvals, all)
         sections: Vec<String>,
+        /// Data region for regional sections (regulatory, safety, shortage, or all)
+        #[arg(long, value_enum)]
+        region: Option<DrugRegionArg>,
     },
     /// Get pathway by ID
     #[command(after_help = "\
@@ -1375,7 +1448,9 @@ EXAMPLES:
   biomcp article batch 22663011 10.1056/NEJMoa1203421 --json
 
 Returns compact multi-article summary cards for anchor selection.
-S2_API_KEY adds optional TLDR and citation metadata when available.
+Semantic Scholar enrichment is optional. With S2_API_KEY, BioMCP uses
+authenticated requests at 1 req/sec; without it, BioMCP uses the shared pool at
+1 req/2sec.
 See also: biomcp list article")]
     Batch {
         /// PMIDs, PMCIDs, or DOIs
@@ -1388,7 +1463,8 @@ EXAMPLES:
   biomcp article citations 22663011 --limit 5
   biomcp article citations PMC9984800 --limit 5
 
-Requires: S2_API_KEY
+Works without S2_API_KEY; authenticated requests are more reliable when the key
+is set.
 See also: biomcp list article")]
     Citations {
         /// PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID
@@ -1403,7 +1479,8 @@ EXAMPLES:
   biomcp article references 22663011 --limit 5
   biomcp article references 10.1056/NEJMoa1203421 --limit 5
 
-Requires: S2_API_KEY
+Works without S2_API_KEY; authenticated requests are more reliable when the key
+is set.
 See also: biomcp list article")]
     References {
         /// PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID
@@ -1418,7 +1495,8 @@ EXAMPLES:
   biomcp article recommendations 22663011 --limit 5
   biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 5
 
-Requires: S2_API_KEY
+Works without S2_API_KEY; authenticated requests are more reliable when the key
+is set.
 See also: biomcp list article")]
     Recommendations {
         /// One or more positive seeds (PMID, PMCID, DOI, arXiv ID, or Semantic Scholar paper ID)
@@ -2097,6 +2175,23 @@ fn resolve_query_input(
     }
 }
 
+fn resolve_drug_search_region(
+    region_arg: Option<DrugRegionArg>,
+    filters: &crate::entities::drug::DrugSearchFilters,
+) -> Result<DrugRegion, crate::error::BioMcpError> {
+    match (region_arg, filters.has_structured_filters()) {
+        (None, false) => Ok(DrugRegion::All),
+        (None, true) | (Some(DrugRegionArg::Us), _) => Ok(DrugRegion::Us),
+        (Some(DrugRegionArg::Eu), false) => Ok(DrugRegion::Eu),
+        (Some(DrugRegionArg::All), false) => Ok(DrugRegion::All),
+        (Some(DrugRegionArg::Eu | DrugRegionArg::All), true) => {
+            Err(crate::error::BioMcpError::InvalidArgument(
+                DRUG_SEARCH_EMA_STRUCTURED_FILTER_ERROR.into(),
+            ))
+        }
+    }
+}
+
 fn parse_simple_gene_change(query: &str) -> Option<(String, String)> {
     let parts = query.split_whitespace().collect::<Vec<_>>();
     if parts.len() != 2 {
@@ -2657,10 +2752,14 @@ async fn render_variant_search_outcome(
 async fn render_drug_card_outcome(
     name: &str,
     sections: &[String],
+    region: Option<DrugRegion>,
     json_output: bool,
     alias_suggestions_as_json: bool,
 ) -> anyhow::Result<CommandOutcome> {
-    match crate::entities::drug::get(name, sections).await {
+    let effective_region = region.unwrap_or(DrugRegion::Us);
+    match crate::entities::drug::get_with_region(name, sections, effective_region, region.is_some())
+        .await
+    {
         Ok(drug) => {
             let text = if json_output {
                 crate::render::json::to_entity_json(
@@ -2670,7 +2769,11 @@ async fn render_drug_card_outcome(
                     crate::render::provenance::drug_section_sources(&drug),
                 )?
             } else {
-                crate::render::markdown::drug_markdown(&drug, sections)?
+                crate::render::markdown::drug_markdown_with_region(
+                    &drug,
+                    sections,
+                    effective_region,
+                )?
             };
             Ok(CommandOutcome::stdout(text))
         }
@@ -3458,11 +3561,23 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                 }
             }
             Commands::Get {
-                entity: GetEntity::Drug { name, sections },
+                entity: GetEntity::Drug {
+                    name,
+                    sections,
+                    region,
+                },
             } => {
                 let (sections, json_override) = extract_json_from_sections(&sections);
+                let region = region.map(DrugRegion::from);
                 let json_output = cli.json || json_override;
-                let drug = crate::entities::drug::get(&name, &sections).await?;
+                let effective_region = region.unwrap_or(DrugRegion::Us);
+                let drug = crate::entities::drug::get_with_region(
+                    &name,
+                    &sections,
+                    effective_region,
+                    region.is_some(),
+                )
+                .await?;
                 if json_output {
                     Ok(crate::render::json::to_entity_json(
                         &drug,
@@ -3471,7 +3586,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         crate::render::provenance::drug_section_sources(&drug),
                     )?)
                 } else {
-                    Ok(crate::render::markdown::drug_markdown(&drug, &sections)?)
+                    Ok(crate::render::markdown::drug_markdown_with_region(
+                        &drug,
+                        &sections,
+                        effective_region,
+                    )?)
                 }
             }
             Commands::Get {
@@ -5506,6 +5625,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     interactions,
                     limit,
                     offset,
+                    region,
                 } => {
                     let query = resolve_query_input(query, positional_query, "--query")?;
                     let filters = crate::entities::drug::DrugSearchFilters {
@@ -5518,24 +5638,130 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         pharm_class,
                         interactions,
                     };
+                    let region = resolve_drug_search_region(region, &filters)?;
                     let mut query_summary = crate::entities::drug::search_query_summary(&filters);
                     if offset > 0 {
                         query_summary = format!("{query_summary}, offset={offset}");
                     }
-                    let page = crate::entities::drug::search_page(&filters, limit, offset).await?;
-                    let results = page.results;
-                    let pagination =
-                        PaginationMeta::offset(offset, limit, results.len(), page.total);
-                    if cli.json {
-                        search_json(results, pagination)
+                    if region == DrugRegion::Us {
+                        let page =
+                            crate::entities::drug::search_page(&filters, limit, offset).await?;
+                        let results = page.results;
+                        let pagination =
+                            PaginationMeta::offset(offset, limit, results.len(), page.total);
+                        if cli.json {
+                            search_json(results, pagination)
+                        } else {
+                            let footer = pagination_footer_offset(&pagination);
+                            Ok(crate::render::markdown::drug_search_markdown_with_footer(
+                                &query_summary,
+                                &results,
+                                pagination.total,
+                                &footer,
+                            )?)
+                        }
                     } else {
-                        let footer = pagination_footer_offset(&pagination);
-                        Ok(crate::render::markdown::drug_search_markdown_with_footer(
-                            &query_summary,
-                            &results,
-                            pagination.total,
-                            &footer,
-                        )?)
+                        let query_value = filters.query.as_deref().unwrap_or_default();
+                        match crate::entities::drug::search_name_query_with_region(
+                            query_value,
+                            limit,
+                            offset,
+                            region,
+                        )
+                        .await?
+                        {
+                            crate::entities::drug::DrugSearchPageWithRegion::Us(page) => {
+                                let results = page.results;
+                                let pagination = PaginationMeta::offset(
+                                    offset,
+                                    limit,
+                                    results.len(),
+                                    page.total,
+                                );
+                                if cli.json {
+                                    search_json(results, pagination)
+                                } else {
+                                    let footer = pagination_footer_offset(&pagination);
+                                    Ok(crate::render::markdown::drug_search_markdown_with_footer(
+                                        &query_summary,
+                                        &results,
+                                        pagination.total,
+                                        &footer,
+                                    )?)
+                                }
+                            }
+                            crate::entities::drug::DrugSearchPageWithRegion::Eu(page) => {
+                                let results = page.results;
+                                let pagination = PaginationMeta::offset(
+                                    offset,
+                                    limit,
+                                    results.len(),
+                                    page.total,
+                                );
+                                if cli.json {
+                                    search_json(results, pagination)
+                                } else {
+                                    let footer = pagination_footer_offset(&pagination);
+                                    Ok(
+                                        crate::render::markdown::drug_search_markdown_with_region(
+                                            &query_summary,
+                                            region,
+                                            &[],
+                                            None,
+                                            &results,
+                                            pagination.total,
+                                            &footer,
+                                        )?,
+                                    )
+                                }
+                            }
+                            crate::entities::drug::DrugSearchPageWithRegion::All { us, eu } => {
+                                if cli.json {
+                                    #[derive(serde::Serialize)]
+                                    struct RegionResults<T: serde::Serialize> {
+                                        count: usize,
+                                        total: Option<usize>,
+                                        results: Vec<T>,
+                                    }
+
+                                    #[derive(serde::Serialize)]
+                                    struct SearchResponse<T: serde::Serialize, U: serde::Serialize> {
+                                        region: &'static str,
+                                        query: String,
+                                        us: RegionResults<T>,
+                                        eu: RegionResults<U>,
+                                    }
+
+                                    crate::render::json::to_pretty(&SearchResponse {
+                                        region: region.as_str(),
+                                        query: query_summary.clone(),
+                                        us: RegionResults {
+                                            count: us.results.len(),
+                                            total: us.total,
+                                            results: us.results,
+                                        },
+                                        eu: RegionResults {
+                                            count: eu.results.len(),
+                                            total: eu.total,
+                                            results: eu.results,
+                                        },
+                                    })
+                                    .map_err(Into::into)
+                                } else {
+                                    Ok(
+                                        crate::render::markdown::drug_search_markdown_with_region(
+                                            &query_summary,
+                                            region,
+                                            &us.results,
+                                            us.total,
+                                            &eu.results,
+                                            eu.total,
+                                            "",
+                                        )?,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 SearchEntity::Pathway {
@@ -6048,15 +6274,27 @@ async fn run_outcome_inner(
             .await
         }
         Commands::Get {
-            entity: GetEntity::Drug { name, sections },
+            entity:
+                GetEntity::Drug {
+                    name,
+                    sections,
+                    region,
+                },
         } => {
             let json = cli.json;
             let no_cache = cli.no_cache;
             crate::sources::with_no_cache(no_cache, async move {
                 let (sections, json_override) = extract_json_from_sections(&sections);
+                let region = region.map(DrugRegion::from);
                 let json_output = json || json_override;
-                render_drug_card_outcome(&name, &sections, json_output, alias_suggestions_as_json)
-                    .await
+                render_drug_card_outcome(
+                    &name,
+                    &sections,
+                    region,
+                    json_output,
+                    alias_suggestions_as_json,
+                )
+                .await
             })
             .await
         }
@@ -6161,8 +6399,14 @@ async fn run_outcome_inner(
             let json = cli.json;
             let no_cache = cli.no_cache;
             crate::sources::with_no_cache(no_cache, async move {
-                render_drug_card_outcome(&name, empty_sections(), json, alias_suggestions_as_json)
-                    .await
+                render_drug_card_outcome(
+                    &name,
+                    empty_sections(),
+                    None,
+                    json,
+                    alias_suggestions_as_json,
+                )
+                .await
             })
             .await
         }
@@ -6191,7 +6435,9 @@ pub async fn execute(mut args: Vec<String>) -> anyhow::Result<String> {
         args.push("biomcp".to_string());
     }
     let cli = Cli::try_parse_from(args)?;
-    let outcome = run_outcome(cli).await?;
+    // Box the command future so in-process callers do not need a large worker
+    // stack just to dispatch the full CLI match tree.
+    let outcome = Box::pin(run_outcome(cli)).await?;
     if outcome.exit_code == 0 {
         Ok(outcome.text)
     } else {
@@ -6206,15 +6452,15 @@ pub async fn execute_mcp(mut args: Vec<String>) -> anyhow::Result<CliOutput> {
 
     let cli = Cli::try_parse_from(args.clone())?;
     if !is_charted_mcp_study_command(&cli)? {
-        let outcome = run_outcome_inner(cli, true).await?;
+        let outcome = Box::pin(run_outcome_inner(cli, true)).await?;
         return Ok(CliOutput {
             text: outcome.text,
             svg: None,
         });
     }
 
-    let text = execute(rewrite_mcp_chart_args(&args, McpChartPass::Text)?).await?;
-    let svg = execute(rewrite_mcp_chart_args(&args, McpChartPass::Svg)?).await?;
+    let text = Box::pin(execute(rewrite_mcp_chart_args(&args, McpChartPass::Text)?)).await?;
+    let svg = Box::pin(execute(rewrite_mcp_chart_args(&args, McpChartPass::Svg)?)).await?;
     Ok(CliOutput {
         text,
         svg: Some(svg),
@@ -6223,15 +6469,22 @@ pub async fn execute_mcp(mut args: Vec<String>) -> anyhow::Result<CliOutput> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use super::{
-        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, GeneCommand, GetEntity,
-        OutputStream, PaginationMeta, ProteinCommand, StudyCommand, VariantCommand,
-        VariantSearchPlan, article_search_json, execute, execute_mcp, extract_json_from_sections,
-        paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
-        resolve_query_input, resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
+        ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, DrugRegionArg,
+        GeneCommand, GetEntity, OutputStream, PaginationMeta, ProteinCommand, StudyCommand,
+        VariantCommand, VariantSearchPlan, article_search_json, execute, execute_mcp,
+        extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
+        parse_trial_location_paging, resolve_drug_search_region, resolve_query_input,
+        resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
         trial_locations_json, trial_search_query_summary, truncate_article_annotations,
     };
-    use clap::{CommandFactory, Parser};
+    use crate::entities::drug::{DrugRegion, DrugSearchFilters};
+    use clap::{CommandFactory, FromArgMatches, Parser};
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -6391,6 +6644,146 @@ mod tests {
     }
 
     #[test]
+    fn get_drug_help_lists_region_flag_and_examples() {
+        let mut command = Cli::command();
+        let get = command
+            .find_subcommand_mut("get")
+            .expect("get subcommand should exist");
+        let drug = get
+            .find_subcommand_mut("drug")
+            .expect("drug subcommand should exist");
+        let mut help = Vec::new();
+        drug.write_long_help(&mut help)
+            .expect("drug help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--region <REGION>"));
+        assert!(help.contains("biomcp get drug Keytruda regulatory --region eu"));
+        assert!(help.contains("biomcp get drug Ozempic safety --region eu"));
+    }
+
+    #[test]
+    fn get_drug_parses_region_split_form() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "get",
+            "drug",
+            "Keytruda",
+            "regulatory",
+            "--region",
+            "eu",
+        ])
+        .expect("get drug should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            region,
+                        },
+                },
+            json,
+            no_cache,
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "Keytruda");
+        assert_eq!(sections, vec!["regulatory".to_string()]);
+        assert_eq!(region, Some(DrugRegionArg::Eu));
+        assert!(!json);
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_parses_region_equals_form() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "get", "drug", "Ozempic", "safety", "--region=all"])
+                .expect("get drug should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            region,
+                        },
+                },
+            json,
+            no_cache,
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "Ozempic");
+        assert_eq!(sections, vec!["safety".to_string()]);
+        assert_eq!(region, Some(DrugRegionArg::All));
+        assert!(!json);
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_parses_global_json_after_sections() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "get",
+            "drug",
+            "Keytruda",
+            "regulatory",
+            "--region",
+            "eu",
+            "--json",
+        ])
+        .expect("get drug should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            region,
+                        },
+                },
+            json,
+            no_cache,
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "Keytruda");
+        assert_eq!(sections, vec!["regulatory".to_string()]);
+        assert_eq!(region, Some(DrugRegionArg::Eu));
+        assert!(json);
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_region_parse_error_mentions_region() {
+        let err = Cli::try_parse_from([
+            "biomcp",
+            "get",
+            "drug",
+            "Keytruda",
+            "regulatory",
+            "--region",
+        ])
+        .expect_err("missing region value should fail");
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("--region"));
+    }
+
+    #[test]
     fn skill_help_examples_match_installed_surface() {
         let mut command = Cli::command();
         let skill = command
@@ -6411,8 +6804,62 @@ mod tests {
     }
 
     #[test]
+    fn runtime_help_hides_query_only_global_flags() {
+        for subcommand_name in super::RUNTIME_HELP_SUBCOMMANDS {
+            let mut command = super::build_cli();
+            let runtime = command
+                .find_subcommand_mut(subcommand_name)
+                .expect("runtime subcommand should exist");
+            let mut help = Vec::new();
+            runtime
+                .write_long_help(&mut help)
+                .expect("runtime help should render");
+            let help = String::from_utf8(help).expect("help should be utf-8");
+
+            assert!(
+                !help.contains("--json"),
+                "{subcommand_name} help should not advertise --json"
+            );
+            assert!(
+                !help.contains("--no-cache"),
+                "{subcommand_name} help should not advertise --no-cache"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_commands_still_parse_hidden_global_flags() {
+        let cli = parse_built_cli([
+            "biomcp",
+            "serve-http",
+            "--json",
+            "--no-cache",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8080",
+        ]);
+        assert!(cli.json);
+        assert!(cli.no_cache);
+        assert!(matches!(
+            cli.command,
+            Commands::ServeHttp { host, port } if host == "127.0.0.1" && port == 8080
+        ));
+
+        for args in [
+            ["biomcp", "mcp", "--json", "--no-cache"].as_slice(),
+            ["biomcp", "serve", "--json", "--no-cache"].as_slice(),
+            ["biomcp", "serve-sse", "--json", "--no-cache"].as_slice(),
+        ] {
+            let cli = parse_built_cli(args);
+            assert!(cli.json);
+            assert!(cli.no_cache);
+        }
+    }
+
+    #[test]
     fn serve_http_help_describes_streamable_http() {
-        let mut command = Cli::command();
+        let mut command = super::build_cli();
         let serve_http = command
             .find_subcommand_mut("serve-http")
             .expect("serve-http subcommand should exist");
@@ -6424,12 +6871,16 @@ mod tests {
 
         assert!(help.contains("Streamable HTTP"));
         assert!(help.contains("/mcp"));
+        assert!(help.contains("--host <HOST>"));
+        assert!(help.contains("--port <PORT>"));
         assert!(!help.contains("SSE transport"));
+        assert!(!help.contains("--json"));
+        assert!(!help.contains("--no-cache"));
     }
 
     #[test]
-    fn serve_sse_help_stays_visible_and_deprecated() {
-        let mut command = Cli::command();
+    fn serve_sse_help_stays_callable_and_deprecated() {
+        let mut command = super::build_cli();
         let serve_sse = command
             .find_subcommand_mut("serve-sse")
             .expect("serve-sse subcommand should exist");
@@ -6442,6 +6893,22 @@ mod tests {
         assert!(help.contains("serve-sse"));
         assert!(help.contains("removed"));
         assert!(help.contains("serve-http"));
+        assert!(help.contains("/mcp"));
+        assert!(!help.contains("--json"));
+        assert!(!help.contains("--no-cache"));
+    }
+
+    #[test]
+    fn top_level_help_hides_serve_sse_but_keeps_serve_http() {
+        let mut command = super::build_cli();
+        let mut help = Vec::new();
+        command
+            .write_long_help(&mut help)
+            .expect("top-level help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("serve-http"));
+        assert!(!help.contains("serve-sse"));
     }
 
     fn render_trial_search_long_help() -> String {
@@ -6459,6 +6926,17 @@ mod tests {
         String::from_utf8(help).expect("help should be utf-8")
     }
 
+    fn parse_built_cli<I, T>(args: I) -> Cli
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let matches = super::build_cli()
+            .try_get_matches_from(args)
+            .expect("args should parse with canonical CLI");
+        Cli::from_arg_matches(&matches).expect("matches should decode into Cli")
+    }
+
     fn render_pathway_search_long_help() -> String {
         let mut command = Cli::command();
         let search = command
@@ -6471,6 +6949,21 @@ mod tests {
         pathway
             .write_long_help(&mut help)
             .expect("pathway help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_article_search_long_help() -> String {
+        let mut command = Cli::command();
+        let search = command
+            .find_subcommand_mut("search")
+            .expect("search subcommand should exist");
+        let article = search
+            .find_subcommand_mut("article")
+            .expect("article subcommand should exist");
+        let mut help = Vec::new();
+        article
+            .write_long_help(&mut help)
+            .expect("article help should render");
         String::from_utf8(help).expect("help should be utf-8")
     }
 
@@ -6498,6 +6991,14 @@ mod tests {
 
         assert!(help.contains("all"));
         assert!(help.contains("no sex restriction"));
+    }
+
+    #[test]
+    fn article_date_help_advertises_shared_accepted_formats() {
+        let help = render_article_search_long_help();
+
+        assert!(help.contains("Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)"));
+        assert!(help.contains("Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)"));
     }
 
     #[test]
@@ -6770,6 +7271,70 @@ mod tests {
         let err_gene =
             resolve_query_input(Some("TP53".into()), Some("BRAF".into()), "--gene").unwrap_err();
         assert!(format!("{err_gene}").contains("Use either positional QUERY or --gene, not both"));
+    }
+
+    #[test]
+    fn search_drug_region_defaults_to_all_for_name_only_queries() {
+        let filters = DrugSearchFilters {
+            query: Some("Keytruda".into()),
+            ..Default::default()
+        };
+
+        let region = resolve_drug_search_region(None, &filters).expect("name-only default");
+        assert_eq!(region, DrugRegion::All);
+    }
+
+    #[test]
+    fn search_drug_region_defaults_to_us_for_structured_queries() {
+        let filters = DrugSearchFilters {
+            target: Some("EGFR".into()),
+            ..Default::default()
+        };
+
+        let region = resolve_drug_search_region(None, &filters).expect("structured default");
+        assert_eq!(region, DrugRegion::Us);
+    }
+
+    #[test]
+    fn search_drug_region_rejects_explicit_non_us_for_structured_queries() {
+        let filters = DrugSearchFilters {
+            target: Some("EGFR".into()),
+            ..Default::default()
+        };
+
+        let err = resolve_drug_search_region(Some(super::DrugRegionArg::Eu), &filters)
+            .expect_err("explicit eu should be rejected");
+        assert!(format!("{err}").contains(
+            "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters."
+        ));
+
+        let err = resolve_drug_search_region(Some(super::DrugRegionArg::All), &filters)
+            .expect_err("explicit all should be rejected");
+        assert!(format!("{err}").contains(
+            "EMA region search currently supports name/alias lookups only; use --region us for structured MyChem filters."
+        ));
+    }
+
+    #[test]
+    fn search_drug_help_mentions_default_all_and_structured_filter_note() {
+        let mut cmd = Cli::command();
+        let search = cmd.find_subcommand_mut("search").expect("search command");
+        let drug = search
+            .find_subcommand_mut("drug")
+            .expect("search drug command");
+
+        let mut long_help = Vec::new();
+        drug.write_long_help(&mut long_help)
+            .expect("search drug help should render");
+        let long_help = String::from_utf8(long_help).expect("utf8 help");
+
+        assert!(long_help.contains("[default: all]"));
+        assert!(long_help.contains(
+            "Omitting --region on a plain name/alias search checks both U.S. and EU data."
+        ));
+        assert!(long_help.contains(
+            "If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path."
+        ));
     }
 
     #[test]
@@ -8678,13 +9243,40 @@ mod tests {
         let _umls_key = set_env_var("UMLS_API_KEY", None);
 
         mount_gene_lookup_miss(&mygene, "ERBB1").await;
+        let ols_calls = Arc::new(AtomicUsize::new(0));
+        let ols_calls_for_responder = Arc::clone(&ols_calls);
         Mock::given(method("GET"))
             .and(path("/api/search"))
             .and(query_param("q", "ERBB1"))
-            .respond_with(ResponseTemplate::new(500).set_body_raw("upstream down", "text/plain"))
-            .expect(1u64..)
+            .respond_with(move |_request: &wiremock::Request| {
+                let call_index = ols_calls_for_responder.fetch_add(1, Ordering::SeqCst);
+                if call_index == 0 {
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "response": {
+                            "docs": [{
+                                "iri": "http://example.org/hgnc/HGNC_3236",
+                                "ontology_name": "hgnc",
+                                "ontology_prefix": "hgnc",
+                                "short_form": "hgnc:3236",
+                                "obo_id": "HGNC:3236",
+                                "label": "EGFR",
+                                "description": [],
+                                "exact_synonyms": ["ERBB1"],
+                                "type": "class"
+                            }]
+                        }
+                    }))
+                } else {
+                    ResponseTemplate::new(500).set_body_raw("upstream down", "text/plain")
+                }
+            })
+            .expect(2u64..)
             .mount(&ols)
             .await;
+
+        crate::cli::discover::resolve_query("ERBB1", crate::cli::discover::DiscoverMode::Command)
+            .await
+            .expect("warm cache with a successful discover lookup");
 
         let cli = Cli::try_parse_from(["biomcp", "get", "gene", "ERBB1"]).expect("parse");
         let err = run_outcome(cli)
@@ -8692,6 +9284,10 @@ mod tests {
             .expect_err("should preserve not found");
         let rendered = err.to_string();
 
+        assert!(
+            ols_calls.load(Ordering::SeqCst) >= 2,
+            "alias fallback should re-query OLS after the cache warm-up"
+        );
         assert!(rendered.contains("gene 'ERBB1' not found"));
         assert!(rendered.contains("Try searching: biomcp search gene -q ERBB1"));
     }
@@ -9159,6 +9755,10 @@ mod next_commands_json_property {
             label_set_id: None,
             shortage: None,
             approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
             civic: None,
         };
 

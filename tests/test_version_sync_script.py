@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+CITATION_VERSION_PATTERN = re.compile(r'^version:\s*"?([^"\n]+)"?\s*$', re.MULTILINE)
 LOCK_ROOT_VERSION_PATTERN = re.compile(
     r'(name = "biomcp-cli"\nversion = ")([^"]+)(")', re.MULTILINE
 )
@@ -18,6 +21,8 @@ def _copy_version_sync_fixture(tmp_path: Path) -> Path:
     for relative_path in (
         "Cargo.toml",
         "Cargo.lock",
+        "CITATION.cff",
+        "manifest.json",
         "pyproject.toml",
         "scripts/check-version-sync.sh",
     ):
@@ -44,6 +49,16 @@ def _read_version(path: Path) -> str:
     return match.group(1)
 
 
+def _read_manifest_version(path: Path) -> str:
+    return json.loads(path.read_text(encoding="utf-8"))["version"]
+
+
+def _read_citation_version(path: Path) -> str:
+    match = CITATION_VERSION_PATTERN.search(path.read_text(encoding="utf-8"))
+    assert match is not None, f"missing version in {path}"
+    return match.group(1)
+
+
 def _replace_first_version(path: Path, new_version: str) -> None:
     updated, count = VERSION_PATTERN.subn(
         lambda match: match.group(0).replace(match.group(1), new_version, 1),
@@ -64,9 +79,27 @@ def _replace_lock_root_version(path: Path, new_version: str) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
+def _replace_manifest_version(path: Path, new_version: str) -> None:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["version"] = new_version
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def _replace_citation_version(path: Path, new_version: str) -> None:
+    updated, count = CITATION_VERSION_PATTERN.subn(
+        lambda match: match.group(0).replace(match.group(1), new_version, 1),
+        path.read_text(encoding="utf-8"),
+        count=1,
+    )
+    assert count == 1, f"missing version in {path}"
+    path.write_text(updated, encoding="utf-8")
+
+
 def test_version_sync_script_passes_when_all_versions_match(tmp_path: Path) -> None:
     repo_root = _copy_version_sync_fixture(tmp_path)
     expected_version = _read_version(repo_root / "Cargo.toml")
+    assert _read_manifest_version(repo_root / "manifest.json") == expected_version
+    assert _read_citation_version(repo_root / "CITATION.cff") == expected_version
 
     result = _run_version_sync_script(repo_root)
 
@@ -107,15 +140,53 @@ def test_version_sync_script_reports_cargo_lock_mismatch(tmp_path: Path) -> None
     ) in result.stderr
 
 
+def test_version_sync_script_reports_manifest_mismatch(tmp_path: Path) -> None:
+    repo_root = _copy_version_sync_fixture(tmp_path)
+    manifest = repo_root / "manifest.json"
+    current_version = _read_version(repo_root / "Cargo.toml")
+    mismatched_version = f"{current_version}-manifest-mismatch"
+    _replace_manifest_version(manifest, mismatched_version)
+
+    result = _run_version_sync_script(repo_root)
+
+    assert result.returncode == 1
+    assert (
+        f"Version mismatch: Cargo.toml={current_version}, "
+        f"manifest.json={mismatched_version}"
+    ) in result.stderr
+
+
+def test_version_sync_script_reports_citation_mismatch(tmp_path: Path) -> None:
+    repo_root = _copy_version_sync_fixture(tmp_path)
+    citation = repo_root / "CITATION.cff"
+    current_version = _read_version(repo_root / "Cargo.toml")
+    mismatched_version = f"{current_version}-citation-mismatch"
+    _replace_citation_version(citation, mismatched_version)
+
+    result = _run_version_sync_script(repo_root)
+
+    assert result.returncode == 1
+    assert (
+        f"Version mismatch: Cargo.toml={current_version}, "
+        f"CITATION.cff={mismatched_version}"
+    ) in result.stderr
+
+
 def test_version_sync_script_reports_all_mismatches_in_one_run(tmp_path: Path) -> None:
     repo_root = _copy_version_sync_fixture(tmp_path)
     pyproject = repo_root / "pyproject.toml"
     cargo_lock = repo_root / "Cargo.lock"
+    manifest = repo_root / "manifest.json"
+    citation = repo_root / "CITATION.cff"
     current_version = _read_version(repo_root / "Cargo.toml")
     pyproject_mismatch = f"{current_version}-pyproject-mismatch"
     lock_mismatch = f"{current_version}-lock-mismatch"
+    manifest_mismatch = f"{current_version}-manifest-mismatch"
+    citation_mismatch = f"{current_version}-citation-mismatch"
     _replace_first_version(pyproject, pyproject_mismatch)
     _replace_lock_root_version(cargo_lock, lock_mismatch)
+    _replace_manifest_version(manifest, manifest_mismatch)
+    _replace_citation_version(citation, citation_mismatch)
 
     result = _run_version_sync_script(repo_root)
 
@@ -128,3 +199,21 @@ def test_version_sync_script_reports_all_mismatches_in_one_run(tmp_path: Path) -
         f"Version mismatch: Cargo.toml={current_version}, "
         f"Cargo.lock={lock_mismatch}"
     ) in result.stderr
+    assert (
+        f"Version mismatch: Cargo.toml={current_version}, "
+        f"manifest.json={manifest_mismatch}"
+    ) in result.stderr
+    assert (
+        f"Version mismatch: Cargo.toml={current_version}, "
+        f"CITATION.cff={citation_mismatch}"
+    ) in result.stderr
+
+
+def test_manifest_and_citation_versions_match_repo_metadata() -> None:
+    cargo = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert _read_manifest_version(REPO_ROOT / "manifest.json") == cargo["package"]["version"]
+    assert _read_manifest_version(REPO_ROOT / "manifest.json") == pyproject["project"]["version"]
+    assert _read_citation_version(REPO_ROOT / "CITATION.cff") == cargo["package"]["version"]
+    assert _read_citation_version(REPO_ROOT / "CITATION.cff") == pyproject["project"]["version"]

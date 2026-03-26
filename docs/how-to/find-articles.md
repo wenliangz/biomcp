@@ -8,9 +8,11 @@ This guide shows practical literature-search patterns.
 biomcp search article -g BRAF --limit 10
 ```
 
-`search article` always works without credentials. When `S2_API_KEY` is set,
-BioMCP adds an optional Semantic Scholar search leg and keeps `sort=relevance`
-directness-first instead of citation-first.
+`search article` always works without credentials. BioMCP keeps
+`sort=relevance` directness-first instead of citation-first, and the
+Semantic Scholar leg is eligible whenever the filter set is compatible.
+`S2_API_KEY` upgrades those Semantic Scholar requests to authenticated quota;
+without it, BioMCP uses the shared pool.
 
 ## Add disease context
 
