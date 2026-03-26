@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -443,6 +444,9 @@ const HEALTH_SOURCES: &[SourceDescriptor] = &[
     },
 ];
 
+const EMA_LOCAL_DATA_AFFECTS: &str =
+    "search/get drug --region eu|all and EU regulatory/safety/shortage sections";
+
 fn health_sources() -> &'static [SourceDescriptor] {
     HEALTH_SOURCES
 }
@@ -789,6 +793,52 @@ async fn check_alphagenome_connect(
     }
 }
 
+fn ema_local_data_outcome(root: &Path, env_configured: bool) -> ProbeOutcome {
+    let api = format!("EMA local data ({})", root.display());
+    let missing =
+        crate::sources::ema::ema_missing_files(root, crate::sources::ema::EMA_REQUIRED_FILES);
+
+    if missing.is_empty() {
+        let status = if env_configured {
+            "configured"
+        } else {
+            "available (default path)"
+        };
+        return outcome(
+            health_row(&api, status.to_string(), "n/a".into(), None),
+            ProbeClass::Healthy,
+        );
+    }
+
+    if !env_configured && missing.len() == crate::sources::ema::EMA_REQUIRED_FILES.len() {
+        return outcome(
+            health_row(
+                &api,
+                "not configured".into(),
+                "n/a".into(),
+                Some(EMA_LOCAL_DATA_AFFECTS),
+            ),
+            ProbeClass::Excluded,
+        );
+    }
+
+    outcome(
+        health_row(
+            &api,
+            format!("error (missing: {})", missing.join(", ")),
+            "n/a".into(),
+            Some(EMA_LOCAL_DATA_AFFECTS),
+        ),
+        ProbeClass::Error,
+    )
+}
+
+fn check_ema_local_data() -> ProbeOutcome {
+    let env_configured = configured_key("BIOMCP_EMA_DIR").is_some();
+    let root = crate::sources::ema::resolve_ema_root();
+    ema_local_data_outcome(&root, env_configured)
+}
+
 async fn probe_source(client: reqwest::Client, source: &SourceDescriptor) -> ProbeOutcome {
     match source.probe {
         ProbeKind::Get { url } => check_get(client, source.api, url, source.affects).await,
@@ -956,7 +1006,7 @@ fn report_from_outcomes(outcomes: Vec<ProbeOutcome>) -> HealthReport {
     }
 }
 
-/// Runs connectivity checks for configured upstream APIs and local cache directory.
+/// Runs connectivity checks for configured upstream APIs and local EMA/cache readiness.
 ///
 /// # Errors
 ///
@@ -971,6 +1021,7 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
     .await;
 
     if !apis_only {
+        outcomes.push(check_ema_local_data());
         outcomes.push(check_cache_dir().await);
     }
 
@@ -980,13 +1031,15 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
 #[cfg(test)]
 mod tests {
     use std::future::Future;
+    use std::path::{Path, PathBuf};
     use tokio::sync::MutexGuard;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::{
-        HealthReport, HealthRow, ProbeClass, ProbeKind, ProbeOutcome, SourceDescriptor,
-        affects_for_api, health_sources, masked_key_hint, probe_source, report_from_outcomes,
+        EMA_LOCAL_DATA_AFFECTS, HealthReport, HealthRow, ProbeClass, ProbeKind, ProbeOutcome,
+        SourceDescriptor, affects_for_api, ema_local_data_outcome, health_sources, masked_key_hint,
+        probe_source, report_from_outcomes,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -1028,6 +1081,48 @@ mod tests {
             }
         }
         EnvVarGuard { name, previous }
+    }
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new() -> Self {
+            let suffix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "biomcp-health-test-{}-{suffix}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn fixture_ema_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("spec")
+            .join("fixtures")
+            .join("ema-human")
+    }
+
+    fn write_ema_files(root: &Path, files: &[&str]) {
+        for file in files {
+            std::fs::write(root.join(file), b"{}").expect("write EMA fixture file");
+        }
     }
 
     #[test]
@@ -1133,6 +1228,122 @@ mod tests {
                 "cBioPortal",
             ]
         );
+    }
+
+    #[test]
+    fn ema_local_data_not_configured_when_default_root_is_empty() {
+        let root = TempDirGuard::new();
+
+        let outcome = ema_local_data_outcome(root.path(), false);
+
+        assert_eq!(outcome.class, ProbeClass::Excluded);
+        assert_eq!(
+            outcome.row.api,
+            format!("EMA local data ({})", root.path().display())
+        );
+        assert_eq!(outcome.row.status, "not configured");
+        assert_eq!(outcome.row.latency, "n/a");
+        assert_eq!(outcome.row.affects.as_deref(), Some(EMA_LOCAL_DATA_AFFECTS));
+    }
+
+    #[test]
+    fn ema_local_data_errors_when_default_root_is_partial() {
+        let root = TempDirGuard::new();
+        write_ema_files(root.path(), &[crate::sources::ema::EMA_REQUIRED_FILES[0]]);
+
+        let outcome = ema_local_data_outcome(root.path(), false);
+
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(
+            outcome.row.status,
+            format!(
+                "error (missing: {})",
+                crate::sources::ema::EMA_REQUIRED_FILES[1..].join(", ")
+            )
+        );
+        assert_eq!(outcome.row.affects.as_deref(), Some(EMA_LOCAL_DATA_AFFECTS));
+    }
+
+    #[test]
+    fn ema_local_data_errors_when_env_root_is_missing_files() {
+        let root = TempDirGuard::new();
+
+        let outcome = ema_local_data_outcome(root.path(), true);
+
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(
+            outcome.row.status,
+            format!(
+                "error (missing: {})",
+                crate::sources::ema::EMA_REQUIRED_FILES.join(", ")
+            )
+        );
+        assert_eq!(outcome.row.affects.as_deref(), Some(EMA_LOCAL_DATA_AFFECTS));
+    }
+
+    #[test]
+    fn ema_local_data_reports_available_when_default_root_is_complete() {
+        let fixture_root = fixture_ema_root();
+
+        let outcome = ema_local_data_outcome(&fixture_root, false);
+
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(
+            outcome.row.api,
+            format!("EMA local data ({})", fixture_root.display())
+        );
+        assert_eq!(outcome.row.status, "available (default path)");
+        assert_eq!(outcome.row.latency, "n/a");
+        assert_eq!(outcome.row.affects, None);
+    }
+
+    #[test]
+    fn ema_local_data_reports_configured_when_env_root_is_complete() {
+        let fixture_root = fixture_ema_root();
+
+        let outcome = ema_local_data_outcome(&fixture_root, true);
+
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(outcome.row.status, "configured");
+        assert_eq!(outcome.row.affects, None);
+    }
+
+    #[test]
+    fn ema_local_data_json_reports_healthy_row_without_affects() {
+        let fixture_root = fixture_ema_root();
+        let report = report_from_outcomes(vec![ema_local_data_outcome(&fixture_root, false)]);
+
+        let value = serde_json::to_value(&report).expect("serialize health report");
+        let rows = value["rows"].as_array().expect("rows array");
+        let row = rows.first().expect("EMA row");
+
+        assert_eq!(
+            row["api"],
+            format!("EMA local data ({})", fixture_root.display())
+        );
+        assert_eq!(row["status"], "available (default path)");
+        assert_eq!(row["latency"], "n/a");
+        assert!(row.get("affects").is_none());
+    }
+
+    #[test]
+    fn ema_local_data_json_reports_error_row_with_affects() {
+        let root = TempDirGuard::new();
+        write_ema_files(root.path(), &[crate::sources::ema::EMA_REQUIRED_FILES[0]]);
+        let report = report_from_outcomes(vec![ema_local_data_outcome(root.path(), false)]);
+
+        let value = serde_json::to_value(&report).expect("serialize health report");
+        let rows = value["rows"].as_array().expect("rows array");
+        let row = rows.first().expect("EMA row");
+
+        assert_eq!(
+            row["status"],
+            format!(
+                "error (missing: {})",
+                crate::sources::ema::EMA_REQUIRED_FILES[1..].join(", ")
+            )
+        );
+        assert_eq!(row["affects"], EMA_LOCAL_DATA_AFFECTS);
     }
 
     #[test]

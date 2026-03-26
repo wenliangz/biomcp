@@ -348,7 +348,7 @@ for the full `study` command family and dataset prerequisites.
 
 ```bash
 biomcp version          # show version and build info
-biomcp health           # check all API connectivity
+biomcp health           # inspect API connectivity plus local EMA/cache readiness
 biomcp update           # self-update to latest release
 biomcp update --check   # check for updates without installing
 biomcp uninstall        # remove biomcp from ~/.local/bin

@@ -136,13 +136,14 @@ Users should always be able to trace:
 
 When debugging source discrepancies:
 
-1. Run `biomcp health --apis-only` to inspect per-source connectivity plus any excluded key-gated sources
-2. Treat `biomcp health` as an inspection surface: it does not currently exit non-zero on partial upstream failures
-3. Run `./scripts/contract-smoke.sh --fast` for representative live probes, or `./scripts/contract-smoke.sh` for the fuller contract set
-4. Retry with `--no-cache`
-5. Confirm required API keys are set for optional sources
-6. Switch source when applicable (`--source ctgov` vs `--source nci`)
-7. Reduce filter complexity and retest
+1. Run `biomcp health --apis-only` to inspect upstream/API connectivity plus any excluded key-gated sources
+2. Run `biomcp health` to inspect local readiness rows such as EMA local data and cache dir
+3. Treat `biomcp health` as an inspection surface: it does not currently exit non-zero on partial upstream failures
+4. Run `./scripts/contract-smoke.sh --fast` for representative live probes, or `./scripts/contract-smoke.sh` for the fuller contract set
+5. Retry with `--no-cache`
+6. Confirm required API keys are set for optional sources
+7. Switch source when applicable (`--source ctgov` vs `--source nci`)
+8. Reduce filter complexity and retest
 
 ## Related docs
 

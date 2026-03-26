@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -22,6 +22,15 @@ const REFERRALS_FILE: &str = "referrals.json";
 const PSUSAS_FILE: &str = "psusas.json";
 const DHPCS_FILE: &str = "dhpcs.json";
 const SHORTAGES_FILE: &str = "shortages.json";
+
+pub(crate) const EMA_REQUIRED_FILES: &[&str] = &[
+    MEDICINES_FILE,
+    POST_AUTHORISATION_FILE,
+    REFERRALS_FILE,
+    PSUSAS_FILE,
+    DHPCS_FILE,
+    SHORTAGES_FILE,
+];
 
 #[derive(Debug, Clone)]
 pub(crate) struct EmaDrugIdentity {
@@ -482,11 +491,7 @@ impl EmaClient {
     }
 
     fn require_files(&self, files: &[&str]) -> Result<(), BioMcpError> {
-        let missing = files
-            .iter()
-            .filter(|file| !self.root.join(file).is_file())
-            .copied()
-            .collect::<Vec<_>>();
+        let missing = ema_missing_files(&self.root, files);
         if missing.is_empty() {
             return Ok(());
         }
@@ -514,6 +519,14 @@ impl EmaClient {
         let wrapper: EmaWrapper<T> = serde_json::from_reader(reader)?;
         Ok(wrapper.data)
     }
+}
+
+pub(crate) fn ema_missing_files<'a>(root: &Path, files: &[&'a str]) -> Vec<&'a str> {
+    files
+        .iter()
+        .filter(|file| !root.join(file).is_file())
+        .copied()
+        .collect()
 }
 
 pub(crate) fn resolve_ema_root() -> PathBuf {
@@ -609,7 +622,40 @@ fn parse_ema_date(value: Option<&str>) -> Option<(u32, u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmaClient, EmaDrugIdentity};
+    use std::path::{Path, PathBuf};
+
+    use super::{
+        EMA_REQUIRED_FILES, EmaClient, EmaDrugIdentity, MEDICINES_FILE, ema_missing_files,
+    };
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(label: &str) -> Self {
+            let suffix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "biomcp-ema-test-{label}-{}-{suffix}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     fn fixture_client() -> EmaClient {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -658,5 +704,15 @@ mod tests {
             shortages[0].availability_of_alternatives.as_deref(),
             Some("Yes")
         );
+    }
+
+    #[test]
+    fn ema_missing_files_tracks_required_file_contract_in_order() {
+        let root = TempDirGuard::new("missing-files");
+        std::fs::write(root.path().join(MEDICINES_FILE), b"{}").expect("write medicines fixture");
+
+        let missing = ema_missing_files(root.path(), EMA_REQUIRED_FILES);
+
+        assert_eq!(missing, EMA_REQUIRED_FILES[1..].to_vec());
     }
 }

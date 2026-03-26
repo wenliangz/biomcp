@@ -21,11 +21,13 @@ echo "$out" | mustmatch '/[0-9]+\.[0-9]+\.[0-9]+/'
 
 ## Health Check
 
-The API-only health command reports one row per live upstream provider plus explicit excluded rows for key-gated sources. We assert on the table header and the explicit status summary, which are stable formatting markers.
+The API-only health command reports one row per live upstream provider plus explicit excluded rows for key-gated sources. Full `biomcp health` adds local readiness rows such as EMA local data and cache dir. We assert on the API-only table header and the explicit status summary here because those are stable formatting markers for the upstream inventory contract.
 
 ```bash
 out="$(biomcp health --apis-only)"
 echo "$out" | mustmatch like "| API | Status | Latency |"
+echo "$out" | mustmatch not like "EMA local data ("
+echo "$out" | mustmatch not like "Cache dir ("
 echo "$out" | mustmatch like "Status:"
 ```
 
