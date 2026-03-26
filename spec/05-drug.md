@@ -17,10 +17,11 @@ Drug commands connect mechanism and target context with trial and adverse-event 
 Full `biomcp health` should expose local EMA readiness separately from the API-only inventory so operators can confirm EU drug prerequisites before debugging query output.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp health)"
-echo "$out" | mustmatch like "EMA local data ($fixture_root)"
-echo "$out" | mustmatch like "| EMA local data ($fixture_root) | configured |"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp health)"
+echo "$out" | mustmatch like "EMA local data ($BIOMCP_EMA_DIR)"
+echo "$out" | mustmatch like "| EMA local data ($BIOMCP_EMA_DIR) | configured |"
 ```
 
 ## Searching by Name
@@ -203,8 +204,9 @@ product number and authorization status while still honoring existing drug
 normalization.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --region eu --limit 5)"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp search drug Keytruda --region eu --limit 5)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
 echo "$out" | mustmatch like "|Name|Active Substance|EMA Number|Status|"
 echo "$out" | mustmatch like "Keytruda"
@@ -219,8 +221,9 @@ Omitting `--region` on a plain name query should render the same split U.S./EU
 layout as the explicit all-regions mode.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --limit 5)"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp search drug Keytruda --limit 5)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
 echo "$out" | mustmatch like "## US (MyChem.info / OpenFDA)"
 echo "$out" | mustmatch like "## EU (EMA)"
@@ -233,8 +236,9 @@ echo "$out" | mustmatch like "EMEA/H/C/003820"
 of flattening them into one unlabeled table.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp search drug Keytruda --region all --limit 5)"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp search drug Keytruda --region all --limit 5)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
 echo "$out" | mustmatch like "## US (MyChem.info / OpenFDA)"
 echo "$out" | mustmatch like "## EU (EMA)"
@@ -247,8 +251,9 @@ The EU regulatory section should anchor on the EMA medicine row and show recent
 post-authorisation activity.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp get drug Keytruda regulatory --region eu)"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp get drug Keytruda regulatory --region eu)"
 echo "$out" | mustmatch like "## Regulatory (EU"
 echo "$out" | mustmatch like "EMEA/H/C/003820"
 echo "$out" | mustmatch like "Authorised"
@@ -261,8 +266,9 @@ The EU safety surface should render DHPC matches and keep referrals/PSUSAs
 truthful when the EMA batch has no matching rows.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp get drug Ozempic safety --region eu)"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp get drug Ozempic safety --region eu)"
 echo "$out" | mustmatch like "## Safety (EU"
 echo "$out" | mustmatch like "### DHPCs"
 echo "$out" | mustmatch like "Medicine shortage"
@@ -278,8 +284,9 @@ EU shortage output should expose the EMA shortage status, alternatives flag,
 and update date from the local batch.
 
 ```bash
-fixture_root="$(git rev-parse --show-toplevel)/spec/fixtures/ema-human"
-out="$(BIOMCP_EMA_DIR="$fixture_root" biomcp get drug Ozempic shortage --region eu)"
+bash fixtures/setup-ema-spec-fixture.sh "$PWD"
+. "$PWD/.cache/spec-ema-env"
+out="$(biomcp get drug Ozempic shortage --region eu)"
 echo "$out" | mustmatch like "## Shortage (EU"
 echo "$out" | mustmatch like "Resolved"
 echo "$out" | mustmatch like "Yes"

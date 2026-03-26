@@ -303,7 +303,8 @@ fn list_drug() -> String {
 - Omitting `--region` searches both U.S. and EU data for plain name/alias lookups.
 - Structured filters remain U.S.-only when `--region` is omitted.
 - Explicit `--region eu|all` is still invalid with structured filters.
-- EU regional commands require the EMA human-medicines JSON batch via `BIOMCP_EMA_DIR` or the default data directory.
+- EU regional commands auto-download the EMA human-medicines JSON feeds into `BIOMCP_EMA_DIR` or the default data directory on first use.
+- Run `biomcp ema sync` to force-refresh the EMA local data feeds.
 "#
     .to_string()
 }
@@ -766,6 +767,8 @@ mod tests {
         assert!(
             out.contains("Explicit `--region eu|all` is still invalid with structured filters.")
         );
+        assert!(out.contains("auto-download the EMA human-medicines JSON feeds"));
+        assert!(out.contains("biomcp ema sync"));
     }
 
     #[test]

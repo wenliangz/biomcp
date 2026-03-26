@@ -293,6 +293,14 @@ pub enum Commands {
         #[arg(long)]
         apis_only: bool,
     },
+    /// EMA (European Medicines Agency) local data management
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp ema sync    # force refresh the EMA local data feeds")]
+    Ema {
+        #[command(subcommand)]
+        cmd: EmaCommand,
+    },
     /// Run MCP server over stdio
     Mcp,
     /// Alias for `mcp` (Claude Desktop friendly)
@@ -387,6 +395,12 @@ See also: biomcp list discover")]
         #[arg(long)]
         verbose: bool,
     },
+}
+
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmaCommand {
+    /// Force refresh the EMA local data feeds
+    Sync,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -6181,6 +6195,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     Ok(report.to_markdown())
                 }
             }
+            Commands::Ema { cmd } => match cmd {
+                EmaCommand::Sync => {
+                    crate::sources::ema::EmaClient::sync(crate::sources::ema::EmaSyncMode::Force)
+                        .await?;
+                    Ok("EMA data synchronized successfully.\n".to_string())
+                }
+            },
             Commands::Skill { command } => match command {
                 None => Ok(crate::cli::skill::show_overview()?),
                 Some(crate::cli::skill::SkillCommand::List) => Ok(crate::cli::skill::list_use_cases()?),
@@ -6480,8 +6501,8 @@ mod tests {
 
     use super::{
         ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, DrugRegionArg,
-        GeneCommand, GetEntity, OutputStream, PaginationMeta, ProteinCommand, StudyCommand,
-        VariantCommand, VariantSearchPlan, article_search_json, execute, execute_mcp,
+        EmaCommand, GeneCommand, GetEntity, OutputStream, PaginationMeta, ProteinCommand,
+        StudyCommand, VariantCommand, VariantSearchPlan, article_search_json, execute, execute_mcp,
         extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
         parse_trial_location_paging, resolve_drug_search_region, resolve_query_input,
         resolve_variant_query, run_outcome, should_try_pathway_trial_fallback,
@@ -6805,6 +6826,31 @@ mod tests {
         assert!(!help.contains("biomcp skill 03"));
         assert!(!help.contains("variant-to-treatment"));
         assert!(!help.contains("Commands:\n  list"));
+    }
+
+    #[test]
+    fn ema_sync_parses_subcommand() {
+        let cli = parse_built_cli(["biomcp", "ema", "sync"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Ema {
+                cmd: EmaCommand::Sync
+            }
+        ));
+    }
+
+    #[test]
+    fn ema_help_mentions_sync_example() {
+        let mut command = Cli::command();
+        let ema = command
+            .find_subcommand_mut("ema")
+            .expect("ema subcommand should exist");
+        let mut help = Vec::new();
+        ema.write_long_help(&mut help)
+            .expect("ema help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("biomcp ema sync"));
     }
 
     #[test]

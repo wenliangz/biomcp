@@ -92,12 +92,14 @@ Results depend on source document wording and may vary across sources.
 
 - Set `NCBI_API_KEY` to increase NCBI request throughput for article annotation/full-text paths.
 - Set `S2_API_KEY` for authenticated Semantic Scholar requests at 1 req/sec; without it, BioMCP uses the shared pool at 1 req/2sec.
-- Place the EMA human-medicines JSON batch in the default data dir or set `BIOMCP_EMA_DIR` to enable EU drug regulatory/safety/shortage context.
+- EU drug commands auto-download the EMA human-medicines JSON feeds on first use into the default data dir or `BIOMCP_EMA_DIR`, then refresh stale files after 72 hours.
+- Run `ema sync` to force-refresh the EMA local data feeds.
 - Use `biomcp health --apis-only` for upstream/API checks and full `biomcp health` for local EMA/cache readiness.
 - In multi-worker environments, run one shared `biomcp serve-http` process so workers share one Streamable HTTP `/mcp` endpoint and one limiter budget.
 
 ## Ops
 
+- `ema sync`
 - `update [--check]`
 - `uninstall`
 - `health [--apis-only]`

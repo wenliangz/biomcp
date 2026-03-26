@@ -39,6 +39,7 @@ The command index is the human entry point for discovery. This check asserts tha
 out="$(biomcp list)"
 echo "$out" | mustmatch like "# BioMCP Command Reference"
 echo "$out" | mustmatch like "- `discover <query>`"
+echo "$out" | mustmatch like "- `ema sync`"
 echo "$out" | mustmatch like "- variant"
 echo "$out" | mustmatch like "- trial"
 ```

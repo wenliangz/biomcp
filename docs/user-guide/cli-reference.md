@@ -32,6 +32,7 @@ biomcp discover <query>
 biomcp enrich <GENE1,GENE2,...> [--limit N]
 biomcp batch <entity> <id1,id2,...> [--sections ...] [--source ...]
 biomcp chart [type]
+biomcp ema sync
 biomcp health [--apis-only]
 biomcp list [entity]
 biomcp study list
