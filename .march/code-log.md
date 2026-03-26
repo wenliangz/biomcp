@@ -1,66 +1,77 @@
 # Code Log
 
+## Summary
+
+Implemented the new `Sources` docs section for the approved high-value SEO batch:
+
+- added `docs/sources/index.md`
+- added eight source landing pages:
+  - `docs/sources/pubmed.md`
+  - `docs/sources/clinicaltrials-gov.md`
+  - `docs/sources/clinvar.md`
+  - `docs/sources/openfda.md`
+  - `docs/sources/uniprot.md`
+  - `docs/sources/gnomad.md`
+  - `docs/sources/reactome.md`
+  - `docs/sources/semantic-scholar.md`
+- updated `mkdocs.yml` to add the `Sources` nav section between `User Guide` and `How-To`
+- added a repo-native docs contract test at `tests/test_source_pages_docs_contract.py`
+
 ## Commands Run
 
-```bash
-checkpoint status
-sed -n '1,240p' .march/ticket.md
-sed -n '1,260p' .march/design-draft.md
-sed -n '1,260p' .march/design-final.md
-sed -n '1,260p' spec/05-drug.md
-sed -n '1,140p' Makefile
-env -u BIOMCP_EMA_DIR XDG_DATA_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)" ./target/release/biomcp search drug pembrolizumab --limit 3
-env -u BIOMCP_EMA_DIR XDG_DATA_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)" ./target/release/biomcp search drug pembrolizumab --region us --limit 3
-PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md --collect-only -q
-PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md -k 'Searching and Name' --mustmatch-lang bash --mustmatch-timeout 60 -v
-PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md -k 'Search and Help and Shows and Region and Defaults' --mustmatch-lang bash --mustmatch-timeout 60 -v
-PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md -k 'EMA and Search and Region or Default and Drug and Search and Covers and US and EU or EMA and Search and All and Regions or EMA and Regulatory and Section or EMA and Safety and Truthful and Empty and Sections or EMA and Shortage and Section' --mustmatch-lang bash --mustmatch-timeout 60 -v
-env -u BIOMCP_EMA_DIR XDG_DATA_HOME="$(mktemp -d)" make spec-pr
-make check
-git status --short
-git diff -- spec/05-drug.md .march/checkpoint.json .march/code-log.md
-checkpoint done 1
-checkpoint note "Approved design keeps CI topology unchanged; repair spec/05-drug.md::Searching by Name to use --region us so spec-pr stays EMA-independent."
-checkpoint note "Proof updated in spec/05-drug.md; stable clean-environment search uses --region us and the remaining EMA sections still pass via fixture-backed markdown specs. Markdown spec selection needed pytest -k filters because direct file.md::Heading selection does not resolve in this repo."
-checkpoint note "make spec-pr passed with BIOMCP_EMA_DIR unset and a fresh XDG_DATA_HOME: 208 passed, 6 skipped, 36 deselected. make check also passed after the spec update."
-checkpoint done 2
-checkpoint done 3
-```
+- `checkpoint status`
+- `sed -n '1,220p' .march/ticket.md`
+- `sed -n '1,260p' .march/design-draft.md`
+- `sed -n '1,520p' .march/design-final.md`
+- `sed -n '1,260p' mkdocs.yml`
+- `sed -n '1,220p' docs/reference/sources.json`
+- `sed -n '1,240p' docs/reference/data-sources.md`
+- `sed -n '1,220p' docs/reference/source-licensing.md`
+- `sed -n '1,220p' docs/getting-started/api-keys.md`
+- `sed -n '1,260p' docs/user-guide/article.md`
+- `sed -n '1,260p' docs/user-guide/trial.md`
+- `sed -n '1,260p' docs/user-guide/variant.md`
+- `sed -n '1,260p' docs/user-guide/adverse-event.md`
+- `sed -n '1,260p' docs/user-guide/drug.md`
+- `sed -n '1,260p' docs/user-guide/gene.md`
+- `sed -n '1,260p' docs/user-guide/pathway.md`
+- `sed -n '1,260p' docs/user-guide/protein.md`
+- `sed -n '1,220p' /home/ian/workspace/marketing/biomcp/plan.md`
+- `uv sync --extra dev --no-install-project`
+- `.venv/bin/python -m pytest tests/test_source_pages_docs_contract.py -v`
+- `cargo build --release --locked`
+- `.venv/bin/mkdocs build --strict`
+- `rg -n '<title>|meta name="description"' site/sources/index.html site/sources/*/index.html`
+- `make check`
+- `git status --short`
 
-## What Changed
+### Live example verification
 
-- Updated [spec/05-drug.md](/home/ian/workspace/worktrees/056-ci-ema-spec-lane/spec/05-drug.md) so the stable `Searching by Name` section now uses `biomcp search drug pembrolizumab --region us --limit 3`.
-- Adjusted the summary table in [spec/05-drug.md](/home/ian/workspace/worktrees/056-ci-ema-spec-lane/spec/05-drug.md) to document the U.S.-only stable proof instead of the hidden all-regions path.
-- Rewrote the `Searching by Name` prose in [spec/05-drug.md](/home/ian/workspace/worktrees/056-ci-ema-spec-lane/spec/05-drug.md) to make the contract explicit: the PR gate covers stable U.S. lookup there, while later fixture-backed sections continue to cover the no-flag U.S.+EU default and explicit EMA regions.
-- Left `Makefile`, workflows, and runtime code unchanged, per the approved final design.
+Ran the published source-page examples against `target/release/biomcp`:
 
-## Tests And Proof Added/Updated
+- PubMed: `search article -g BRAF --limit 3`, `get article 22663011`, `get article 22663011 annotations`, `article entities 22663011`, `get article 27083046 fulltext`
+- ClinicalTrials.gov: `search trial -c melanoma --status recruiting --limit 3`, `search trial -c melanoma --mutation "BRAF V600E" --limit 3`, `get trial NCT02576665`, `get trial NCT02576665 eligibility`, `get trial NCT02576665 locations --limit 3`
+- ClinVar: `get variant rs113488022`, `get variant rs113488022 clinvar`, `get variant "BRAF V600E" clinvar`, `search variant -g BRCA1 --significance pathogenic --limit 5`
+- OpenFDA: `search adverse-event --drug pembrolizumab --limit 3`, `search adverse-event --type recall --drug metformin --limit 3`, `search adverse-event --type device --device "insulin pump" --limit 3`, `get drug vemurafenib label`, `get drug dabrafenib approvals`
+- UniProt: `search protein BRAF --limit 3`, `get protein P15056`, `get gene BRAF protein`, `get protein P15056 structures`
+- gnomAD: `get gene BRAF constraint`, `get variant rs113488022 population`, `get variant "chr7:g.140453136A>T" population`, `search variant -g BRCA1 --max-frequency 0.01 --limit 5`
+- Reactome: `search pathway "MAPK signaling" --limit 5`, `get pathway R-HSA-5673001`, `get pathway R-HSA-5673001 genes`, `get pathway R-HSA-5673001 events`, `get gene BRAF pathways`
+- Semantic Scholar: `get article 22663011 tldr`, `article citations 22663011 --limit 3`, `article references 22663011 --limit 3`, `article recommendations 22663011 --limit 3`
 
-- Updated the markdown spec proof in [spec/05-drug.md](/home/ian/workspace/worktrees/056-ci-ema-spec-lane/spec/05-drug.md) instead of adding a new code-level test, because the final design scoped the fix to the stable spec contract.
-- Captured the pre-change behavior with a clean-environment CLI probe:
-  - `search drug pembrolizumab --limit 3` created an EMA data root and emitted `Downloading EMA data`.
-- Captured the intended behavior with a matching clean-environment CLI probe:
-  - `search drug pembrolizumab --region us --limit 3` succeeded with the expected heading/table and no EMA directory creation or download message.
-- Verified the updated stable section and adjacent contract coverage with focused markdown-spec runs:
-  - `Searching by Name`
-  - `Search Help Shows Region Defaults`
-  - `EMA Search Region`
-  - `Default Drug Search Covers US and EU`
-  - `EMA Search All Regions`
-  - `EMA Regulatory Section`
-  - `EMA Safety Truthful Empty Sections`
-  - `EMA Shortage Section`
+## Proof Added
 
-## Verification Results
+- Added `tests/test_source_pages_docs_contract.py`
+- Verified the new contract failed before implementation and passed after implementation
 
-- Passed clean-environment CLI proof for `biomcp search drug pembrolizumab --region us --limit 3` with no EMA side effects.
-- Passed `PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md -k 'Searching and Name' --mustmatch-lang bash --mustmatch-timeout 60 -v`.
-- Passed `PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md -k 'Search and Help and Shows and Region and Defaults' --mustmatch-lang bash --mustmatch-timeout 60 -v`.
-- Passed `PATH="$PWD/target/release:$PATH" uv run --extra dev pytest spec/05-drug.md -k 'EMA and Search and Region or Default and Drug and Search and Covers and US and EU or EMA and Search and All and Regions or EMA and Regulatory and Section or EMA and Safety and Truthful and Empty and Sections or EMA and Shortage and Section' --mustmatch-lang bash --mustmatch-timeout 60 -v`.
-- Passed `env -u BIOMCP_EMA_DIR XDG_DATA_HOME="$(mktemp -d)" make spec-pr` with `208 passed, 6 skipped, 36 deselected`.
-- Passed `make check`.
+## Tests and Verification
+
+- `.venv/bin/python -m pytest tests/test_source_pages_docs_contract.py -v` passed
+- `cargo build --release --locked` passed
+- `.venv/bin/mkdocs build --strict` passed
+- `rg` against `site/sources/*.html` confirmed rendered `<title>` and `<meta name="description">` entries for the new pages
+- `make check` passed
 
 ## Deviations
 
-- The approved final design superseded the draft design. No `Makefile` or workflow changes were made.
-- The proof matrix in the design used `pytest spec/file.md::Heading` examples, but this repo's markdown collector did not resolve those selectors directly. Verification used `pytest spec/05-drug.md -k ...` filters against the collected `BashItem` headings instead.
+- No design deviations in file set or nav placement
+- Semantic Scholar's unauthenticated helper path hit a live provider rate limit during verification, so the final proof used the configured `S2_API_KEY` path for the published Semantic Scholar examples

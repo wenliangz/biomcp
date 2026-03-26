@@ -34,6 +34,16 @@ nav:
       - PGx: user-guide/pgx.md
       - GWAS: user-guide/gwas.md
       - Phenotype: user-guide/phenotype.md
+  - Sources:
+      - Overview: sources/index.md
+      - PubMed: sources/pubmed.md
+      - ClinicalTrials.gov: sources/clinicaltrials-gov.md
+      - ClinVar: sources/clinvar.md
+      - OpenFDA: sources/openfda.md
+      - UniProt: sources/uniprot.md
+      - gnomAD: sources/gnomad.md
+      - Reactome: sources/reactome.md
+      - Semantic Scholar: sources/semantic-scholar.md
   - How-To:
       - Annotate Variants: how-to/annotate-variants.md
       - Cross-Entity Pivots: how-to/cross-entity-pivots.md
