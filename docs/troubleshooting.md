@@ -158,7 +158,10 @@ Capture one failing command with full stderr and include:
 
 ## 13) EU drug data not available
 
-EU drug regulatory, safety, and shortage sections depend on the local EMA human-medicines JSON batch. Check local readiness with full health output, not the API-only inventory view:
+EU drug regulatory, safety, and shortage sections depend on the local EMA
+human-medicines JSON batch. BioMCP now auto-downloads that data on first use,
+but full `biomcp health` is still the right readiness view when you need to
+debug the local EMA state:
 
 ```bash
 biomcp health
@@ -171,14 +174,11 @@ Interpret the EMA row like this:
 - `not configured`: no EMA batch was found at the default path, so EU drug features are currently unavailable but the install is not considered broken
 - `error (missing: ...)`: BioMCP found a partial EMA batch; install the missing files or point `BIOMCP_EMA_DIR` at a complete batch
 
-Expected EMA files:
+If a refresh fails, retry explicitly:
 
-- `medicines.json`
-- `post_authorisation.json`
-- `referrals.json`
-- `psusas.json`
-- `dhpcs.json`
-- `shortages.json`
+```bash
+biomcp ema sync
+```
 
 If you need to override the default path:
 
@@ -186,3 +186,13 @@ If you need to override the default path:
 export BIOMCP_EMA_DIR="/path/to/ema-human"
 biomcp health
 ```
+
+Manual preseed remains supported for offline or controlled environments. A
+complete EMA root must contain:
+
+- `medicines.json`
+- `post_authorisation.json`
+- `referrals.json`
+- `psusas.json`
+- `dhpcs.json`
+- `shortages.json`

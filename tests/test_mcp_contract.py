@@ -77,6 +77,7 @@ async def test_biomcp_description_matches_list_contract(
         assert "SEARCH FILTERS:" in description
         assert "AGENT GUIDANCE:" in description
         assert "biomcp list" in description
+        assert "ema sync" not in description
         assert "skill install" not in description
         assert "update [--check]" not in description
         assert "uninstall" not in description

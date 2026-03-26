@@ -1,9 +1,14 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs::File;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
+use http_cache_reqwest::CacheMode;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::entities::SearchPage;
 use crate::entities::drug::{
@@ -16,12 +21,52 @@ use crate::utils::serde::StringOrVec;
 const SOURCE_NAME: &str = "EMA";
 const DOWNLOAD_URL: &str =
     "https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format";
-const MEDICINES_FILE: &str = "medicines.json";
-const POST_AUTHORISATION_FILE: &str = "post_authorisation.json";
-const REFERRALS_FILE: &str = "referrals.json";
-const PSUSAS_FILE: &str = "psusas.json";
-const DHPCS_FILE: &str = "dhpcs.json";
-const SHORTAGES_FILE: &str = "shortages.json";
+const EMA_API: &str = "ema";
+const EMA_REPORT_BASE: &str = "https://www.ema.europa.eu/en/documents/report";
+const EMA_REPORT_BASE_ENV: &str = "BIOMCP_EMA_REPORT_BASE";
+const EMA_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+const EMA_STALE_AFTER: Duration = Duration::from_secs(72 * 60 * 60);
+const EMA_SIZE_HINT: &str = "~11 MB";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EmaFeed {
+    local_name: &'static str,
+    report_name: &'static str,
+}
+
+const EMA_FEEDS: [EmaFeed; 6] = [
+    EmaFeed {
+        local_name: "medicines.json",
+        report_name: "medicines-output-medicines_json-report_en.json",
+    },
+    EmaFeed {
+        local_name: "post_authorisation.json",
+        report_name: "medicines-output-post_authorisation_json-report_en.json",
+    },
+    EmaFeed {
+        local_name: "referrals.json",
+        report_name: "referrals-output-json-report_en.json",
+    },
+    EmaFeed {
+        local_name: "psusas.json",
+        report_name: "medicines-output-periodic_safety_update_report_single_assessments-output-json-report_en.json",
+    },
+    EmaFeed {
+        local_name: "dhpcs.json",
+        report_name: "dhpc-output-json-report_en.json",
+    },
+    EmaFeed {
+        local_name: "shortages.json",
+        report_name: "shortages-output-json-report_en.json",
+    },
+];
+
+const MEDICINES_FILE: &str = EMA_FEEDS[0].local_name;
+const POST_AUTHORISATION_FILE: &str = EMA_FEEDS[1].local_name;
+const REFERRALS_FILE: &str = EMA_FEEDS[2].local_name;
+const PSUSAS_FILE: &str = EMA_FEEDS[3].local_name;
+const DHPCS_FILE: &str = EMA_FEEDS[4].local_name;
+const SHORTAGES_FILE: &str = EMA_FEEDS[5].local_name;
 
 pub(crate) const EMA_REQUIRED_FILES: &[&str] = &[
     MEDICINES_FILE,
@@ -31,6 +76,26 @@ pub(crate) const EMA_REQUIRED_FILES: &[&str] = &[
     DHPCS_FILE,
     SHORTAGES_FILE,
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmaSyncMode {
+    Auto,
+    Force,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FeedSyncState {
+    Fresh,
+    Missing,
+    Stale,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FeedSyncPlan {
+    feed: EmaFeed,
+    state: FeedSyncState,
+    cache_mode: CacheMode,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct EmaDrugIdentity {
@@ -189,6 +254,7 @@ struct EmaShortageRow {
 }
 
 impl EmaClient {
+    #[allow(dead_code)]
     pub(crate) fn new() -> Self {
         Self {
             root: resolve_ema_root(),
@@ -198,6 +264,17 @@ impl EmaClient {
     #[cfg(test)]
     fn from_root(root: PathBuf) -> Self {
         Self { root }
+    }
+
+    pub(crate) async fn ready(mode: EmaSyncMode) -> Result<Self, BioMcpError> {
+        let root = resolve_ema_root();
+        sync_ema_root(&root, mode).await?;
+        Ok(Self { root })
+    }
+
+    pub(crate) async fn sync(mode: EmaSyncMode) -> Result<(), BioMcpError> {
+        let root = resolve_ema_root();
+        sync_ema_root(&root, mode).await
     }
 
     pub(crate) fn resolve_anchor(
@@ -504,7 +581,7 @@ impl EmaClient {
                 missing.join(", ")
             ),
             suggestion: format!(
-                "Download the EMA human-medicines JSON batch from {DOWNLOAD_URL} into {} or set BIOMCP_EMA_DIR",
+                "Run `biomcp ema sync`, retry with network access, or place the EMA human-medicines JSON batch from {DOWNLOAD_URL} into {}. You can also set BIOMCP_EMA_DIR.",
                 self.root.display()
             ),
         })
@@ -519,6 +596,232 @@ impl EmaClient {
         let wrapper: EmaWrapper<T> = serde_json::from_reader(reader)?;
         Ok(wrapper.data)
     }
+}
+
+fn ema_report_base() -> Cow<'static, str> {
+    crate::sources::env_base(EMA_REPORT_BASE, EMA_REPORT_BASE_ENV)
+}
+
+fn normalize_sync_mode(mode: EmaSyncMode) -> EmaSyncMode {
+    if matches!(mode, EmaSyncMode::Auto) && crate::sources::is_no_cache_enabled() {
+        EmaSyncMode::Force
+    } else {
+        mode
+    }
+}
+
+fn file_is_stale(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return true;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return true;
+    };
+    match SystemTime::now().duration_since(modified) {
+        Ok(age) => age >= EMA_STALE_AFTER,
+        Err(_) => false,
+    }
+}
+
+fn feed_sync_state(root: &Path, feed: EmaFeed) -> FeedSyncState {
+    let path = root.join(feed.local_name);
+    if !path.is_file() {
+        return FeedSyncState::Missing;
+    }
+    if file_is_stale(&path) {
+        FeedSyncState::Stale
+    } else {
+        FeedSyncState::Fresh
+    }
+}
+
+fn sync_plan(root: &Path, mode: EmaSyncMode) -> Vec<FeedSyncPlan> {
+    let mode = normalize_sync_mode(mode);
+    EMA_FEEDS
+        .iter()
+        .copied()
+        .filter_map(|feed| {
+            let state = feed_sync_state(root, feed);
+            match mode {
+                EmaSyncMode::Force => Some(FeedSyncPlan {
+                    feed,
+                    state,
+                    cache_mode: CacheMode::Reload,
+                }),
+                EmaSyncMode::Auto => match state {
+                    FeedSyncState::Fresh => None,
+                    FeedSyncState::Missing => Some(FeedSyncPlan {
+                        feed,
+                        state,
+                        cache_mode: CacheMode::Default,
+                    }),
+                    FeedSyncState::Stale => Some(FeedSyncPlan {
+                        feed,
+                        state,
+                        cache_mode: CacheMode::Default,
+                    }),
+                },
+            }
+        })
+        .collect()
+}
+
+fn sync_intro(plan: &[FeedSyncPlan], mode: EmaSyncMode) -> &'static str {
+    if matches!(normalize_sync_mode(mode), EmaSyncMode::Force)
+        || plan
+            .iter()
+            .any(|entry| matches!(entry.state, FeedSyncState::Stale))
+    {
+        "Refreshing"
+    } else {
+        "Downloading"
+    }
+}
+
+fn has_readable_local_file(path: &Path) -> bool {
+    path.is_file() && File::open(path).is_ok()
+}
+
+fn touch_file(path: &Path) -> Result<(), BioMcpError> {
+    let file = std::fs::OpenOptions::new().write(true).open(path)?;
+    file.set_modified(SystemTime::now())?;
+    Ok(())
+}
+
+fn validate_feed_payload(feed: EmaFeed, body: &[u8]) -> Result<(), BioMcpError> {
+    let payload: Value = serde_json::from_slice(body).map_err(|source| BioMcpError::ApiJson {
+        api: EMA_API.to_string(),
+        source,
+    })?;
+    let Some(object) = payload.as_object() else {
+        return Err(BioMcpError::Api {
+            api: EMA_API.to_string(),
+            message: format!("{}: expected a top-level JSON object", feed.local_name),
+        });
+    };
+    if !object.get("data").is_some_and(|value| value.is_array()) {
+        return Err(BioMcpError::Api {
+            api: EMA_API.to_string(),
+            message: format!(
+                "{}: expected a top-level `data` array in the EMA payload",
+                feed.local_name
+            ),
+        });
+    }
+    Ok(())
+}
+
+async fn sync_feed(root: &Path, plan: FeedSyncPlan) -> Result<(), BioMcpError> {
+    let client = crate::sources::shared_client()?;
+    let url = format!(
+        "{}/{}",
+        ema_report_base().trim_end_matches('/'),
+        plan.feed.report_name
+    );
+    let mut request = client.get(url).with_extension(plan.cache_mode);
+    if matches!(plan.state, FeedSyncState::Stale) {
+        // `http-cache`'s `NoCache` mode performs an unconditional network fetch.
+        // `Default` plus a request `Cache-Control: no-cache` forces validator-based
+        // revalidation with the cached ETag/Last-Modified metadata.
+        request = request.header(reqwest::header::CACHE_CONTROL, "no-cache");
+    }
+    let response = request.send().await?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .cloned();
+    let body =
+        crate::sources::read_limited_body_with_limit(response, EMA_API, EMA_MAX_BODY_BYTES).await?;
+    if !status.is_success() {
+        return Err(BioMcpError::Api {
+            api: EMA_API.to_string(),
+            message: format!(
+                "{}: HTTP {status}: {}",
+                plan.feed.local_name,
+                crate::sources::body_excerpt(&body)
+            ),
+        });
+    }
+
+    crate::sources::ensure_json_content_type(EMA_API, content_type.as_ref(), &body)?;
+    validate_feed_payload(plan.feed, &body)?;
+
+    let path = root.join(plan.feed.local_name);
+    if let Ok(existing) = tokio::fs::read(&path).await
+        && existing == body
+    {
+        touch_file(&path)?;
+        return Ok(());
+    }
+
+    crate::utils::download::write_atomic_bytes(&path, &body).await
+}
+
+fn ema_sync_error(root: &Path, detail: impl Into<String>) -> BioMcpError {
+    BioMcpError::SourceUnavailable {
+        source_name: SOURCE_NAME.to_string(),
+        reason: format!(
+            "Could not prepare EMA data under {}. {}",
+            root.display(),
+            detail.into()
+        ),
+        suggestion: format!(
+            "Retry with network access or run `biomcp ema sync`. You can also preseed the EMA human-medicines JSON batch from {DOWNLOAD_URL} into {} or set BIOMCP_EMA_DIR.",
+            root.display()
+        ),
+    }
+}
+
+fn write_stderr_line(line: &str) -> Result<(), BioMcpError> {
+    let mut stderr = std::io::stderr().lock();
+    writeln!(stderr, "{line}")?;
+    Ok(())
+}
+
+async fn sync_ema_root(root: &Path, mode: EmaSyncMode) -> Result<(), BioMcpError> {
+    let plan = sync_plan(root, mode);
+    if plan.is_empty() {
+        return Ok(());
+    }
+
+    tokio::fs::create_dir_all(root).await?;
+
+    write_stderr_line(&format!(
+        "{} EMA data ({EMA_SIZE_HINT})...",
+        sync_intro(&plan, mode)
+    ))?;
+
+    let mut fatal_errors = Vec::new();
+    for entry in plan {
+        if let Err(err) = sync_feed(root, entry).await {
+            let path = root.join(entry.feed.local_name);
+            if has_readable_local_file(&path) {
+                write_stderr_line(&format!(
+                    "Warning: EMA refresh failed for {}: {err}. Using existing data.",
+                    entry.feed.local_name
+                ))?;
+                continue;
+            }
+            fatal_errors.push(format!("{}: {err}", entry.feed.local_name));
+        }
+    }
+
+    let missing = ema_missing_files(root, EMA_REQUIRED_FILES);
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let detail = if fatal_errors.is_empty() {
+        format!("Missing required EMA file(s): {}", missing.join(", "))
+    } else {
+        format!(
+            "{} Missing required EMA file(s): {}",
+            fatal_errors.join("; "),
+            missing.join(", ")
+        )
+    };
+    Err(ema_sync_error(root, detail))
 }
 
 pub(crate) fn ema_missing_files<'a>(root: &Path, files: &[&'a str]) -> Vec<&'a str> {
@@ -625,8 +928,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        EMA_REQUIRED_FILES, EmaClient, EmaDrugIdentity, MEDICINES_FILE, ema_missing_files,
+        EMA_FEEDS, EMA_REQUIRED_FILES, EmaClient, EmaDrugIdentity, EmaSyncMode, FeedSyncState,
+        MEDICINES_FILE, ema_missing_files, sync_plan, validate_feed_payload,
     };
+    use http_cache_reqwest::CacheMode;
 
     struct TempDirGuard {
         path: PathBuf,
@@ -714,5 +1019,62 @@ mod tests {
         let missing = ema_missing_files(root.path(), EMA_REQUIRED_FILES);
 
         assert_eq!(missing, EMA_REQUIRED_FILES[1..].to_vec());
+    }
+
+    #[test]
+    fn ema_feed_table_matches_required_file_contract() {
+        let required = EMA_FEEDS
+            .iter()
+            .map(|feed| feed.local_name)
+            .collect::<Vec<_>>();
+        assert_eq!(required, EMA_REQUIRED_FILES);
+    }
+
+    #[test]
+    fn sync_plan_marks_missing_and_stale_feeds() {
+        let root = TempDirGuard::new("sync-plan");
+        for feed in EMA_FEEDS {
+            std::fs::write(root.path().join(feed.local_name), br#"{"data":[]}"#)
+                .expect("fixture write should succeed");
+        }
+        let stale_path = root.path().join("medicines.json");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&stale_path)
+            .expect("stale file should open");
+        file.set_modified(
+            std::time::SystemTime::now()
+                .checked_sub(std::time::Duration::from_secs(73 * 60 * 60))
+                .expect("stale time should be valid"),
+        )
+        .expect("stale mtime should update");
+        std::fs::remove_file(root.path().join("shortages.json"))
+            .expect("missing file should be removable");
+
+        let plan = sync_plan(root.path(), EmaSyncMode::Auto);
+        let files = plan
+            .iter()
+            .map(|entry| entry.feed.local_name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, vec!["medicines.json", "shortages.json"]);
+        assert!(matches!(plan[0].state, FeedSyncState::Stale));
+        assert_eq!(plan[0].cache_mode, CacheMode::Default);
+        assert!(matches!(plan[1].state, FeedSyncState::Missing));
+        assert_eq!(plan[1].cache_mode, CacheMode::Default);
+    }
+
+    #[test]
+    fn html_response_is_rejected_before_write() {
+        let err = validate_feed_payload(EMA_FEEDS[0], b"<html>error</html>")
+            .expect_err("html should fail JSON validation");
+        assert!(err.to_string().contains("API JSON error from ema"));
+    }
+
+    #[test]
+    fn malformed_json_is_rejected_before_write() {
+        let err = validate_feed_payload(EMA_FEEDS[0], br#"{"data":"oops"}"#)
+            .expect_err("missing array should fail");
+        assert!(err.to_string().contains("top-level `data` array"));
     }
 }
