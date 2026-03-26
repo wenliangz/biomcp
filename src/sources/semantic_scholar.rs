@@ -433,242 +433,275 @@ pub struct SemanticScholarRecommendationsResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
     use wiremock::matchers::{body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    async fn run_no_cache_test<F>(future: F)
+    where
+        F: Future<Output = ()>,
+    {
+        crate::sources::with_no_cache(true, future).await;
+    }
+
     #[tokio::test]
     async fn paper_detail_sends_api_key_header_and_fields() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/graph/v1/paper/PMID:22663011"))
-            .and(query_param("fields", GRAPH_PAPER_FIELDS))
-            .and(header("x-api-key", "test-key"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "paperId": "paper-1",
-                "title": "Example"
-            })))
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/graph/v1/paper/PMID:22663011"))
+                .and(query_param("fields", GRAPH_PAPER_FIELDS))
+                .and(header("x-api-key", "test-key"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "paperId": "paper-1",
+                    "title": "Example"
+                })))
+                .mount(&server)
+                .await;
 
-        let client =
-            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
-                .unwrap();
-        let paper = client.paper_detail("PMID:22663011").await.unwrap();
-        assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+            let client =
+                SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                    .unwrap();
+            let paper = client.paper_detail("PMID:22663011").await.unwrap();
+            assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn paper_batch_posts_ids_and_parses_rows() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/graph/v1/paper/batch"))
-            .and(query_param("fields", BATCH_PAPER_FIELDS))
-            .and(header("x-api-key", "test-key"))
-            .and(body_string_contains("\"PMID:22663011\""))
-            .and(body_string_contains("\"PMID:24200969\""))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {"paperId": "paper-1", "title": "One"},
-                {"paperId": "paper-2", "title": "Two"}
-            ])))
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/graph/v1/paper/batch"))
+                .and(query_param("fields", BATCH_PAPER_FIELDS))
+                .and(header("x-api-key", "test-key"))
+                .and(body_string_contains("\"PMID:22663011\""))
+                .and(body_string_contains("\"PMID:24200969\""))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                    {"paperId": "paper-1", "title": "One"},
+                    {"paperId": "paper-2", "title": "Two"}
+                ])))
+                .mount(&server)
+                .await;
 
-        let client =
-            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+            let client =
+                SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                    .unwrap();
+            let rows = client
+                .paper_batch(&["PMID:22663011".to_string(), "PMID:24200969".to_string()])
+                .await
                 .unwrap();
-        let rows = client
-            .paper_batch(&["PMID:22663011".to_string(), "PMID:24200969".to_string()])
-            .await
-            .unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0].as_ref().and_then(|row| row.paper_id.as_deref()),
-            Some("paper-1")
-        );
+            assert_eq!(rows.len(), 2);
+            assert_eq!(
+                rows[0].as_ref().and_then(|row| row.paper_id.as_deref()),
+                Some("paper-1")
+            );
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn paper_batch_compact_requests_tldr_and_citation_fields() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/graph/v1/paper/batch"))
-            .and(query_param("fields", BATCH_PAPER_COMPACT_FIELDS))
-            .and(header("x-api-key", "test-key"))
-            .and(body_string_contains("\"PMID:22663011\""))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                    "paperId": "paper-1",
-                    "externalIds": {"PubMed": "22663011"},
-                    "title": "One",
-                    "venue": "NEJM",
-                    "year": 2012,
-                    "tldr": {"text": "Compact summary"},
-                    "citationCount": 12,
-                    "influentialCitationCount": 3
-                }
-            ])))
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/graph/v1/paper/batch"))
+                .and(query_param("fields", BATCH_PAPER_COMPACT_FIELDS))
+                .and(header("x-api-key", "test-key"))
+                .and(body_string_contains("\"PMID:22663011\""))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                    {
+                        "paperId": "paper-1",
+                        "externalIds": {"PubMed": "22663011"},
+                        "title": "One",
+                        "venue": "NEJM",
+                        "year": 2012,
+                        "tldr": {"text": "Compact summary"},
+                        "citationCount": 12,
+                        "influentialCitationCount": 3
+                    }
+                ])))
+                .mount(&server)
+                .await;
 
-        let client =
-            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+            let client =
+                SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                    .unwrap();
+            let rows = client
+                .paper_batch_compact(&["PMID:22663011".to_string()])
+                .await
                 .unwrap();
-        let rows = client
-            .paper_batch_compact(&["PMID:22663011".to_string()])
-            .await
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        let paper = rows[0].as_ref().expect("paper");
-        assert_eq!(
-            paper.tldr.as_ref().and_then(|tldr| tldr.text.as_deref()),
-            Some("Compact summary")
-        );
-        assert_eq!(paper.citation_count, Some(12));
-        assert_eq!(paper.influential_citation_count, Some(3));
+            assert_eq!(rows.len(), 1);
+            let paper = rows[0].as_ref().expect("paper");
+            assert_eq!(
+                paper.tldr.as_ref().and_then(|tldr| tldr.text.as_deref()),
+                Some("Compact summary")
+            );
+            assert_eq!(paper.citation_count, Some(12));
+            assert_eq!(paper.influential_citation_count, Some(3));
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn recommendations_post_uses_expected_shape() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/recommendations/v1/papers/"))
-            .and(query_param("fields", RECOMMENDATION_FIELDS))
-            .and(query_param("limit", "2"))
-            .and(header("x-api-key", "test-key"))
-            .and(body_string_contains("\"positivePaperIds\":[\"paper-1\"]"))
-            .and(body_string_contains("\"negativePaperIds\":[\"paper-2\"]"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "recommendedPapers": [{"paperId": "paper-3", "title": "Three"}]
-            })))
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/recommendations/v1/papers/"))
+                .and(query_param("fields", RECOMMENDATION_FIELDS))
+                .and(query_param("limit", "2"))
+                .and(header("x-api-key", "test-key"))
+                .and(body_string_contains("\"positivePaperIds\":[\"paper-1\"]"))
+                .and(body_string_contains("\"negativePaperIds\":[\"paper-2\"]"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "recommendedPapers": [{"paperId": "paper-3", "title": "Three"}]
+                })))
+                .mount(&server)
+                .await;
 
-        let client =
-            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+            let client =
+                SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                    .unwrap();
+            let response = client
+                .recommendations(&["paper-1".to_string()], &["paper-2".to_string()], 2)
+                .await
                 .unwrap();
-        let response = client
-            .recommendations(&["paper-1".to_string()], &["paper-2".to_string()], 2)
-            .await
-            .unwrap();
-        assert_eq!(response.recommended_papers.len(), 1);
-        assert_eq!(
-            response.recommended_papers[0].paper_id.as_deref(),
-            Some("paper-3")
-        );
+            assert_eq!(response.recommended_papers.len(), 1);
+            assert_eq!(
+                response.recommended_papers[0].paper_id.as_deref(),
+                Some("paper-3")
+            );
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn paper_detail_without_api_key_omits_header_and_succeeds() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/graph/v1/paper/PMID:22663011"))
-            .and(query_param("fields", GRAPH_PAPER_FIELDS))
-            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "paperId": "paper-1",
-                "title": "Example"
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/graph/v1/paper/PMID:22663011"))
+                .and(query_param("fields", GRAPH_PAPER_FIELDS))
+                .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "paperId": "paper-1",
+                    "title": "Example"
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
 
-        let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
-        let paper = client.paper_detail("PMID:22663011").await.unwrap();
-        assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+            let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
+            let paper = client.paper_detail("PMID:22663011").await.unwrap();
+            assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn paper_detail_without_api_key_returns_rate_limit_guidance_without_retry() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/graph/v1/paper/PMID:22663011"))
-            .and(query_param("fields", GRAPH_PAPER_FIELDS))
-            .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
-            .respond_with(ResponseTemplate::new(429).set_body_string("shared rate limit"))
-            .expect(1)
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/graph/v1/paper/PMID:22663011"))
+                .and(query_param("fields", GRAPH_PAPER_FIELDS))
+                .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+                .respond_with(ResponseTemplate::new(429).set_body_string("shared rate limit"))
+                .expect(1)
+                .mount(&server)
+                .await;
 
-        let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
-        let err = client.paper_detail("PMID:22663011").await.unwrap_err();
-        match err {
-            BioMcpError::Api { api, message } => {
-                assert_eq!(api, SEMANTIC_SCHOLAR_API);
-                assert_eq!(
-                    message,
-                    format!(
-                        "Rate limited by Semantic Scholar. Set S2_API_KEY for a dedicated rate limit. See {SEMANTIC_SCHOLAR_DOCS_URL}"
-                    )
-                );
+            let client = SemanticScholarClient::new_for_test(server.uri(), None).unwrap();
+            let err = client.paper_detail("PMID:22663011").await.unwrap_err();
+            match err {
+                BioMcpError::Api { api, message } => {
+                    assert_eq!(api, SEMANTIC_SCHOLAR_API);
+                    assert_eq!(
+                        message,
+                        format!(
+                            "Rate limited by Semantic Scholar. Set S2_API_KEY for a dedicated rate limit. See {SEMANTIC_SCHOLAR_DOCS_URL}"
+                        )
+                    );
+                }
+                other => panic!("unexpected error: {other:?}"),
             }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn paper_detail_with_invalid_api_key_returns_http_403_error() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/graph/v1/paper/PMID:22663011"))
-            .and(query_param("fields", GRAPH_PAPER_FIELDS))
-            .and(header("x-api-key", "bad-key"))
-            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
-            .expect(1)
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/graph/v1/paper/PMID:22663011"))
+                .and(query_param("fields", GRAPH_PAPER_FIELDS))
+                .and(header("x-api-key", "bad-key"))
+                .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+                .expect(1)
+                .mount(&server)
+                .await;
 
-        let client = SemanticScholarClient::new_for_test(server.uri(), Some("bad-key".into()))
-            .expect("client should build");
-        let err = client.paper_detail("PMID:22663011").await.unwrap_err();
-        match err {
-            BioMcpError::Api { api, message } => {
-                assert_eq!(api, SEMANTIC_SCHOLAR_API);
-                assert!(message.contains("HTTP 403"));
-                assert!(message.contains("forbidden"));
+            let client = SemanticScholarClient::new_for_test(server.uri(), Some("bad-key".into()))
+                .expect("client should build");
+            let err = client.paper_detail("PMID:22663011").await.unwrap_err();
+            match err {
+                BioMcpError::Api { api, message } => {
+                    assert_eq!(api, SEMANTIC_SCHOLAR_API);
+                    assert!(message.contains("HTTP 403"));
+                    assert!(message.contains("forbidden"));
+                }
+                other => panic!("unexpected error: {other:?}"),
             }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn paper_search_sends_query_limit_and_parses_abstract_metadata() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/graph/v1/paper/search"))
-            .and(query_param("query", "braf melanoma"))
-            .and(query_param("fields", SEARCH_PAPER_FIELDS))
-            .and(query_param("limit", "3"))
-            .and(header("x-api-key", "test-key"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "total": 1,
-                "data": [{
-                    "paperId": "paper-1",
-                    "externalIds": {
-                        "PubMed": "22663011",
-                        "DOI": "10.1056/NEJMoa1203421"
-                    },
-                    "title": "BRAF melanoma response",
-                    "citationCount": 12,
-                    "influentialCitationCount": 4,
-                    "abstract": "Direct answer abstract."
-                }]
-            })))
-            .mount(&server)
-            .await;
+        run_no_cache_test(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/graph/v1/paper/search"))
+                .and(query_param("query", "braf melanoma"))
+                .and(query_param("fields", SEARCH_PAPER_FIELDS))
+                .and(query_param("limit", "3"))
+                .and(header("x-api-key", "test-key"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "total": 1,
+                    "data": [{
+                        "paperId": "paper-1",
+                        "externalIds": {
+                            "PubMed": "22663011",
+                            "DOI": "10.1056/NEJMoa1203421"
+                        },
+                        "title": "BRAF melanoma response",
+                        "citationCount": 12,
+                        "influentialCitationCount": 4,
+                        "abstract": "Direct answer abstract."
+                    }]
+                })))
+                .mount(&server)
+                .await;
 
-        let client =
-            SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
-                .unwrap();
-        let response = client.paper_search("braf melanoma", 3).await.unwrap();
-        assert_eq!(response.total, Some(1));
-        assert_eq!(response.data.len(), 1);
-        let paper = &response.data[0];
-        assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
-        assert_eq!(paper.influential_citation_count, Some(4));
-        assert_eq!(
-            paper.abstract_text.as_deref(),
-            Some("Direct answer abstract.")
-        );
+            let client =
+                SemanticScholarClient::new_for_test(server.uri(), Some("test-key".to_string()))
+                    .unwrap();
+            let response = client.paper_search("braf melanoma", 3).await.unwrap();
+            assert_eq!(response.total, Some(1));
+            assert_eq!(response.data.len(), 1);
+            let paper = &response.data[0];
+            assert_eq!(paper.paper_id.as_deref(), Some("paper-1"));
+            assert_eq!(paper.influential_citation_count, Some(4));
+            assert_eq!(
+                paper.abstract_text.as_deref(),
+                Some("Direct answer abstract.")
+            );
+        })
+        .await;
     }
 }
