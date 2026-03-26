@@ -28,12 +28,13 @@ curl ... install.sh | bash       # binary installer (resolves latest release)
 ```
 
 - **Edition:** Rust 2024
-- **Current version:** 0.8.17 (as of 2026-03-23)
+- **Current version:** 0.8.18 (as of 2026-03-25)
 - **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
 - **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
-- **Release checklist:** Bump `Cargo.toml` and `pyproject.toml`, update
-  `CHANGELOG.md`, verify version sync, then cut a GitHub release tag — the
-  release workflow builds and publishes
+- **Release checklist:** Bump `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
+  `manifest.json`, and `CITATION.cff`, update `CHANGELOG.md`, verify version
+  sync, then cut a GitHub release tag — the release workflow builds and
+  publishes
 
 ## Source Integration Patterns
 
@@ -87,7 +88,8 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
 
 ## Release Pipeline
 
-1. Update version in `Cargo.toml`, `pyproject.toml`, and `CHANGELOG.md`
+1. Update version in `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
+   `manifest.json`, `CITATION.cff`, and `CHANGELOG.md`
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
@@ -97,10 +99,33 @@ share one limiter budget and one Streamable HTTP `/mcp` surface.
    - Release validation runs the Rust checks again, then
      `uv run pytest tests/ -v --mcp-cmd "biomcp serve"` and
      `uv run mkdocs build --strict`.
-   - release validation runs `pytest tests/` and `mkdocs build --strict`.
    - Release build jobs package cross-platform binaries, publish PyPI wheels,
      and deploy docs.
 5. `install.sh` resolves the latest tagged release with downloadable assets
+
+### Post-tag public proof
+
+After the `v0.8.18` tag is published, hand these commands to the verify/devops
+pass so release-visible version identity and docs parity are checked against
+the live surfaces:
+
+```bash
+curl -fsSL https://api.github.com/repos/genomoncology/biomcp/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])"
+tmpdir="$(mktemp -d)" && BIOMCP_INSTALL_DIR="$tmpdir" BIOMCP_VERSION=v0.8.18 bash install.sh >/tmp/biomcp-install.log && "$tmpdir/biomcp" version | head -n 1
+bioasq_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/reference/bioasq-benchmark/ >"$bioasq_page" && rg -q 'hf-public-pre2026' "$bioasq_page" && rg -q 'Phase A\+' "$bioasq_page" && rg -q 'Phase B' "$bioasq_page"
+api_keys_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/getting-started/api-keys/ >"$api_keys_page" && rg -q 'shared Semantic Scholar pool at 1 req/2sec' "$api_keys_page" && rg -q 'authenticated quota at 1 req/sec' "$api_keys_page"
+drug_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/user-guide/drug/ >"$drug_page" && rg -q 'Keytruda regulatory --region eu' "$drug_page" && rg -q 'EMA local data setup' "$drug_page" && rg -q 'available \(default path\)' "$drug_page"
+```
+
+Expected markers:
+
+- latest release tag is `v0.8.18`
+- installed binary starts with `biomcp 0.8.18`
+- BioASQ route returns all shipped benchmark page markers
+- live API Keys docs show both shared-pool and authenticated Semantic Scholar
+  guidance
+- live Drug docs show the EMA `--region` workflow and local-data setup copy
+  together with the local-data path marker
 
 Known issue: `uv sync --extra dev` may rewrite the editable root package
 version in `uv.lock` during a release cut. Verify whether the lockfile
@@ -134,9 +159,6 @@ relies on the Makefile's `target/release`-first `PATH` handling so specs do
 not accidentally execute a stale `.venv/bin/biomcp`. Volatile live-network
 headings run in the separate `Spec smoke (volatile live-network)` workflow
 instead.
-
-PR CI now runs `make spec-pr` via the `spec-stable` job in `.github/workflows/ci.yml`.
-Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`.
 
 Run locally with `make spec`.
 
