@@ -4,58 +4,78 @@
 
 ```bash
 checkpoint status
-sed -n '1,220p' .march/ticket.md
+sed -n '1,240p' .march/ticket.md
 sed -n '1,260p' .march/design-draft.md
-sed -n '1,260p' .march/design-final.md
-rg -n "Semantic Scholar|OptionalAuthGet|optional_auth_get" src/cli/health.rs
-sed -n '80,280p' src/cli/health.rs
-sed -n '620,760p' src/cli/health.rs
-sed -n '1020,1585p' src/cli/health.rs
-cargo test optional_auth_get_reports_ --lib
-cargo fmt --all
-cargo test sources::semantic_scholar::tests --lib
-make check
+sed -n '1,520p' .march/design-final.md
+rg -n "enum ChartType|ChartCommand|render_co_occurrence_chart|render_mutation_compare_chart|validate_compare_chart_type" src docs spec mkdocs.yml
+cargo test study_co_occurrence_parses_heatmap_chart_flag --lib
+cargo test study_compare_mutations_invalid_chart_lists_stacked_bar --lib
+cargo fmt
+cargo test --lib
+cargo build --release
+XDG_CACHE_HOME="$(pwd)/.cache" PATH="$(pwd)/target/release:$PATH" uv run --extra dev sh -c 'PATH="$(pwd)/target/release:$PATH" pytest spec/13-study.md --mustmatch-lang bash --mustmatch-timeout 60 -v'
+uv run --extra dev mkdocs build --strict
 git status --short
-git add src/cli/health.rs src/sources/semantic_scholar.rs
-git add -f .march/code-log.md
+git add docs/blog/cbioportal-study-analytics.md docs/blog/kuva-charting-guide.md docs/charts/index.md docs/charts/heatmap.md docs/charts/stacked-bar.md docs/reference/dependencies.md mkdocs.yml spec/13-study.md src/cli/chart.rs src/cli/mod.rs src/render/chart.rs
 git diff --cached --stat
-git diff --cached
 ```
 
 ## What Changed
 
-- Updated `src/cli/health.rs` to extend `ProbeKind::OptionalAuthGet` with an optional unauthenticated-429 status override.
-- Changed the Semantic Scholar health source descriptor to use the shorter affects text `Semantic Scholar features` and the new unauthenticated 429 guidance string.
-- Updated the optional-auth probe path so an unauthenticated Semantic Scholar `429` renders as:
-  - status: `unavailable (set S2_API_KEY for reliable access)`
-  - latency: plain `Nms`
-  - affects: omitted
-  - probe class: `Healthy`
-- Kept authenticated `429` responses on the existing generic error path, including the HTTP suffix and shortened affects text.
-- Reworked the Semantic Scholar health tests to anchor to the production descriptor instead of duplicating a handwritten test descriptor.
+- Extended the chart CLI surface with `heatmap` and `stacked-bar`:
+  - `ChartType` now supports `Heatmap` and `StackedBar`
+  - `ChartCommand` now serves `biomcp chart heatmap` and `biomcp chart stacked-bar`
+  - `study co-occurrence` validation now allows `heatmap`
+  - `study compare --type mutations` validation now allows `stacked-bar`
+- Implemented a dedicated co-occurrence heatmap renderer in `src/render/chart.rs`:
+  - builds an NxN both-mutated matrix from `CoOccurrenceResult`
+  - uses Kuva `Heatmap` with categorical axes
+  - keeps shared terminal/SVG/PNG output plumbing via a small layout render helper
+  - rejects `--palette` with the documented fixed-colormap error
+- Extended mutation comparison chart rendering:
+  - existing `--chart bar` remains mutation rate by group
+  - new `--chart stacked-bar` renders mutated vs not-mutated sample counts per group
+- Added embedded chart docs and living docs updates:
+  - new `docs/charts/heatmap.md`
+  - new `docs/charts/stacked-bar.md`
+  - updated charts index, MkDocs nav, dependency inventory, and the two living blog/reference pages called out in the design
+- Updated the fixture-backed study spec to cover:
+  - co-occurrence heatmap
+  - heatmap palette rejection
+  - mutation compare stacked bar
+  - invalid chart combinations advertising the new valid types
+  - chart doc subcommands for `heatmap` and `stacked-bar`
 
 ## Tests And Proof Added/Updated
 
-- Updated:
-  - `optional_auth_get_reports_unauthed_semantic_scholar_as_healthy`
-  - `optional_auth_get_reports_authed_semantic_scholar_as_configured`
-- Added:
-  - `optional_auth_get_reports_unauthenticated_429_as_unavailable`
-  - `optional_auth_get_reports_authenticated_429_as_error`
-- The new unauthenticated 429 proof asserts:
-  - `ProbeClass::Healthy`
-  - no `affects` field in JSON
-  - `healthy == 1`, `excluded == 0`
-  - markdown renders `-` in the `Affects` column when the table includes that column
+- Added CLI proof tests in `src/cli/mod.rs`:
+  - `study_co_occurrence_parses_heatmap_chart_flag`
+  - `study_compare_mutations_parses_stacked_bar_chart_flag`
+  - `study_chart_subcommand_parses_heatmap_topic`
+  - `study_chart_subcommand_parses_stacked_bar_topic`
+  - `study_co_occurrence_invalid_chart_lists_heatmap`
+  - `study_compare_mutations_invalid_chart_lists_stacked_bar`
+- Added embedded-doc tests in `src/cli/chart.rs`:
+  - `show_returns_heatmap_doc`
+  - `show_returns_stacked_bar_doc`
+- Added renderer tests in `src/render/chart.rs`:
+  - `co_occurrence_heatmap_renders_inline_svg`
+  - `co_occurrence_heatmap_rejects_palette_override`
+  - `mutation_compare_stacked_bar_renders_inline_svg`
+  - `mutation_compare_validation_lists_stacked_bar`
+- Updated `spec/13-study.md` with fixture-backed chart/spec coverage for the new surfaces and validation messages
 
 ## Verification Results
 
-- `cargo test optional_auth_get_reports_ --lib`
-- `cargo test sources::semantic_scholar::tests --lib`
-- `make check`
-
-All verification commands passed.
+- Proof-first failure confirmed before implementation:
+  - `cargo test study_co_occurrence_parses_heatmap_chart_flag --lib`
+  - `cargo test study_compare_mutations_invalid_chart_lists_stacked_bar --lib`
+- Final verification passed:
+  - `cargo test --lib`
+  - `cargo build --release`
+  - `XDG_CACHE_HOME="$(pwd)/.cache" PATH="$(pwd)/target/release:$PATH" uv run --extra dev sh -c 'PATH="$(pwd)/target/release:$PATH" pytest spec/13-study.md --mustmatch-lang bash --mustmatch-timeout 60 -v'`
+  - `uv run --extra dev mkdocs build --strict`
 
 ## Deviations
 
-- Small test-only deviation from the design: `src/sources/semantic_scholar.rs` now wraps its mock-server tests with `with_no_cache(true)`. This was needed because `make check` exposed shared HTTP cache bleed between parallel Semantic Scholar tests. No production behavior changed outside `src/cli/health.rs`.
+- None.

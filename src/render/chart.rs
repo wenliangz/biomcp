@@ -1,13 +1,15 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
 use kuva::backend::svg::SvgBackend;
 use kuva::backend::terminal::TerminalBackend;
 use kuva::plot::{
-    BarPlot, BoxPlot, DensityPlot, Histogram, LinePlot, PiePlot, RidgelinePlot, ViolinPlot,
+    BarPlot, BoxPlot, ColorMap, DensityPlot, Heatmap, Histogram, LinePlot, PiePlot, RidgelinePlot,
+    ViolinPlot,
 };
-use kuva::prelude::{Layout, Palette, PieLabelPosition, Plot, Theme, render_multiple};
+use kuva::prelude::{Layout, Palette, PieLabelPosition, Plot, Theme, TickFormat, render_multiple};
 
 #[cfg(feature = "charts-png")]
 use kuva::PngBackend;
@@ -112,7 +114,7 @@ pub(crate) fn validate_compare_chart_type(
         "mutations" | "mutation" => validate_standalone_chart_type(
             "study compare --type mutations",
             chart_type,
-            &[ChartType::Bar],
+            &[ChartType::Bar, ChartType::StackedBar],
         ),
         other => Err(BioMcpError::InvalidArgument(format!(
             "Unknown comparison type '{other}'. Expected: expression, mutations."
@@ -390,28 +392,66 @@ pub(crate) fn render_mutation_compare_chart(
     validate_standalone_chart_type(
         "study compare --type mutations",
         chart_type,
-        &[ChartType::Bar],
+        &[ChartType::Bar, ChartType::StackedBar],
     )?;
     let palette = palette_colors(options.palette.as_deref())?;
-    let plot = BarPlot::new()
-        .with_bars(
-            result
-                .groups
-                .iter()
-                .map(|group| (group.group_name.clone(), group.mutation_rate))
-                .collect::<Vec<_>>(),
-        )
-        .with_color(palette[0].clone());
-    render_chart(
-        vec![Plot::Bar(plot)],
-        options,
-        &format!(
-            "{} mutation rate by {}",
-            result.target_gene, result.stratify_gene
-        ),
-        "Group",
-        "Mutation rate",
-    )
+    match chart_type {
+        ChartType::Bar => {
+            let plot = BarPlot::new()
+                .with_bars(
+                    result
+                        .groups
+                        .iter()
+                        .map(|group| (group.group_name.clone(), group.mutation_rate))
+                        .collect::<Vec<_>>(),
+                )
+                .with_color(palette[0].clone());
+            render_chart(
+                vec![Plot::Bar(plot)],
+                options,
+                &format!(
+                    "{} mutation rate by {}",
+                    result.target_gene, result.stratify_gene
+                ),
+                "Group",
+                "Mutation rate",
+            )
+        }
+        ChartType::StackedBar => {
+            let mut plot = BarPlot::new();
+            for group in &result.groups {
+                let not_mutated = group.sample_count.saturating_sub(group.mutated_count);
+                plot = plot.with_group(
+                    group.group_name.clone(),
+                    vec![
+                        (group.mutated_count as f64, palette[0].as_str()),
+                        (not_mutated as f64, palette[1].as_str()),
+                    ],
+                );
+            }
+            plot = plot
+                .with_stacked()
+                .with_legend(vec!["Mutated", "Not mutated"]);
+            render_chart_with_layout(
+                vec![Plot::Bar(plot)],
+                options,
+                &format!(
+                    "{} mutation status by {}",
+                    result.target_gene, result.stratify_gene
+                ),
+                "Group",
+                "Samples",
+                |layout| {
+                    layout
+                        .with_y_tick_step(1.0)
+                        .with_y_tick_format(TickFormat::Integer)
+                },
+            )
+        }
+        other => Err(BioMcpError::InvalidArgument(format!(
+            "Unsupported mutation comparison chart type '{other}'"
+        ))),
+    }
 }
 
 pub(crate) fn render_co_occurrence_chart(
@@ -422,16 +462,16 @@ pub(crate) fn render_co_occurrence_chart(
     validate_standalone_chart_type(
         "study co-occurrence",
         chart_type,
-        &[ChartType::Bar, ChartType::Pie],
+        &[ChartType::Bar, ChartType::Pie, ChartType::Heatmap],
     )?;
     if result.pairs.is_empty() {
         return Err(BioMcpError::InvalidArgument(
             "Co-occurrence chart requires at least one gene pair.".into(),
         ));
     }
-    let palette = palette_colors(options.palette.as_deref())?;
     match chart_type {
         ChartType::Bar => {
+            let palette = palette_colors(options.palette.as_deref())?;
             let plot = BarPlot::new()
                 .with_bars(
                     result
@@ -455,6 +495,7 @@ pub(crate) fn render_co_occurrence_chart(
             )
         }
         ChartType::Pie => {
+            let palette = palette_colors(options.palette.as_deref())?;
             let pair = &result.pairs[0];
             let mut plot = PiePlot::new()
                 .with_legend("Contingency")
@@ -479,6 +520,7 @@ pub(crate) fn render_co_occurrence_chart(
                 "Count",
             )
         }
+        ChartType::Heatmap => render_co_occurrence_heatmap(result, options),
         other => Err(BioMcpError::InvalidArgument(format!(
             "Unsupported co-occurrence chart type '{other}'"
         ))),
@@ -551,6 +593,63 @@ pub(crate) fn render_survival_chart(
     }
 }
 
+fn render_co_occurrence_heatmap(
+    result: &CoOccurrenceResult,
+    options: &ChartRenderOptions,
+) -> Result<String, BioMcpError> {
+    reject_palette_override("study co-occurrence --chart heatmap", options)?;
+
+    let gene_count = result.genes.len();
+    let mut matrix = vec![vec![0.0; gene_count]; gene_count];
+    let gene_index = result
+        .genes
+        .iter()
+        .enumerate()
+        .map(|(idx, gene)| (gene.as_str(), idx))
+        .collect::<HashMap<_, _>>();
+
+    for pair in &result.pairs {
+        let i = *gene_index.get(pair.gene_a.as_str()).ok_or_else(|| {
+            BioMcpError::InvalidArgument(format!(
+                "Co-occurrence pair references unknown gene '{}'.",
+                pair.gene_a
+            ))
+        })?;
+        let j = *gene_index.get(pair.gene_b.as_str()).ok_or_else(|| {
+            BioMcpError::InvalidArgument(format!(
+                "Co-occurrence pair references unknown gene '{}'.",
+                pair.gene_b
+            ))
+        })?;
+        matrix[i][j] = pair.both_mutated as f64;
+        matrix[j][i] = pair.both_mutated as f64;
+    }
+
+    let plot = Heatmap::new()
+        .with_data(matrix)
+        .with_labels(result.genes.clone(), result.genes.clone())
+        .with_color_map(ColorMap::Viridis)
+        .with_legend("Both-mutated sample count");
+    let plots = vec![Plot::Heatmap(plot)];
+    let target = output_target(options)?;
+    let terminal_default = !options.inline_svg && options.output.is_none();
+    let theme = theme_from_name(options.theme.as_deref(), terminal_default)?;
+
+    let mut layout = Layout::auto_from_plots(&plots)
+        .with_x_categories(result.genes.clone())
+        .with_y_categories(result.genes.clone())
+        .with_x_label("Gene")
+        .with_y_label("Gene")
+        .with_theme(theme);
+    let default_title = format!("Co-mutation heatmap ({})", result.study_id);
+    let title = options.title.as_deref().unwrap_or(default_title.as_str());
+    if !title.trim().is_empty() {
+        layout = layout.with_title(title);
+    }
+
+    render_layout(plots, layout, target)
+}
+
 fn render_chart(
     plots: Vec<Plot>,
     options: &ChartRenderOptions,
@@ -558,12 +657,31 @@ fn render_chart(
     x_label: &str,
     y_label: &str,
 ) -> Result<String, BioMcpError> {
+    render_chart_with_layout(
+        plots,
+        options,
+        default_title,
+        x_label,
+        y_label,
+        |layout: Layout| layout,
+    )
+}
+
+fn render_chart_with_layout<F>(
+    plots: Vec<Plot>,
+    options: &ChartRenderOptions,
+    default_title: &str,
+    x_label: &str,
+    y_label: &str,
+    configure_layout: F,
+) -> Result<String, BioMcpError>
+where
+    F: FnOnce(Layout) -> Layout,
+{
     let target = output_target(options)?;
     let palette = palette_from_name(options.palette.as_deref())?;
-    let theme = theme_from_name(
-        options.theme.as_deref(),
-        matches!(target, OutputTarget::Terminal),
-    )?;
+    let terminal_default = !options.inline_svg && options.output.is_none();
+    let theme = theme_from_name(options.theme.as_deref(), terminal_default)?;
 
     let mut layout = Layout::auto_from_plots(&plots)
         .with_x_label(x_label)
@@ -575,6 +693,15 @@ fn render_chart(
         layout = layout.with_title(title);
     }
 
+    let layout = configure_layout(layout);
+    render_layout(plots, layout, target)
+}
+
+fn render_layout(
+    plots: Vec<Plot>,
+    layout: Layout,
+    target: OutputTarget,
+) -> Result<String, BioMcpError> {
     let scene = render_multiple(plots, layout);
     match target {
         OutputTarget::Terminal => {
@@ -588,6 +715,18 @@ fn render_chart(
         OutputTarget::Png(path) => write_png(&scene, &path),
         OutputTarget::InlineSvg => Ok(SvgBackend.render_scene(&scene)),
     }
+}
+
+fn reject_palette_override(
+    command_label: &str,
+    options: &ChartRenderOptions,
+) -> Result<(), BioMcpError> {
+    if options.palette.is_some() {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--palette is not supported for '{command_label}'. Omit --palette; heatmaps use a fixed continuous colormap."
+        )));
+    }
+    Ok(())
 }
 
 fn output_target(options: &ChartRenderOptions) -> Result<OutputTarget, BioMcpError> {
@@ -775,6 +914,17 @@ mod tests {
         }
     }
 
+    fn svg_heatmap_options(path: PathBuf) -> ChartRenderOptions {
+        ChartRenderOptions {
+            terminal: false,
+            inline_svg: false,
+            output: Some(path),
+            title: None,
+            theme: Some("minimal".into()),
+            palette: None,
+        }
+    }
+
     fn inline_svg_options() -> ChartRenderOptions {
         ChartRenderOptions {
             terminal: false,
@@ -783,6 +933,17 @@ mod tests {
             title: Some("Example".into()),
             theme: Some("minimal".into()),
             palette: Some("wong".into()),
+        }
+    }
+
+    fn inline_svg_heatmap_options() -> ChartRenderOptions {
+        ChartRenderOptions {
+            terminal: false,
+            inline_svg: true,
+            output: None,
+            title: None,
+            theme: Some("minimal".into()),
+            palette: None,
         }
     }
 
@@ -855,6 +1016,16 @@ mod tests {
         assert!(msg.contains("box"));
         assert!(msg.contains("violin"));
         assert!(msg.contains("ridgeline"));
+    }
+
+    #[test]
+    fn mutation_compare_validation_lists_stacked_bar() {
+        let err = validate_compare_chart_type("mutations", ChartType::Violin)
+            .expect_err("violin should be rejected for mutation compare");
+        let msg = err.to_string();
+        assert!(msg.contains("study compare --type mutations"));
+        assert!(msg.contains("bar"));
+        assert!(msg.contains("stacked-bar"));
     }
 
     #[test]
@@ -1113,6 +1284,245 @@ mod tests {
         assert!(!hist.trim().is_empty());
         assert!(!density.trim().is_empty());
         assert!(!violin.trim().is_empty());
+    }
+
+    #[test]
+    fn co_occurrence_heatmap_renders_inline_svg() {
+        let co_occurrence = CoOccurrenceResult {
+            study_id: "demo".into(),
+            genes: vec!["TP53".into(), "KRAS".into(), "PIK3CA".into()],
+            total_samples: 20,
+            sample_universe_basis: SampleUniverseBasis::ClinicalSampleFile,
+            pairs: vec![
+                CoOccurrencePair {
+                    gene_a: "TP53".into(),
+                    gene_b: "KRAS".into(),
+                    both_mutated: 3,
+                    a_only: 5,
+                    b_only: 2,
+                    neither: 10,
+                    log_odds_ratio: Some(0.7),
+                    p_value: Some(0.04),
+                },
+                CoOccurrencePair {
+                    gene_a: "TP53".into(),
+                    gene_b: "PIK3CA".into(),
+                    both_mutated: 2,
+                    a_only: 6,
+                    b_only: 1,
+                    neither: 11,
+                    log_odds_ratio: Some(0.2),
+                    p_value: Some(0.3),
+                },
+                CoOccurrencePair {
+                    gene_a: "KRAS".into(),
+                    gene_b: "PIK3CA".into(),
+                    both_mutated: 1,
+                    a_only: 4,
+                    b_only: 2,
+                    neither: 13,
+                    log_odds_ratio: Some(-0.4),
+                    p_value: Some(0.6),
+                },
+            ],
+        };
+
+        let svg = render_co_occurrence_chart(
+            &co_occurrence,
+            ChartType::Heatmap,
+            &inline_svg_heatmap_options(),
+        )
+        .expect("co-occurrence heatmap svg");
+
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("Co-mutation heatmap (demo)"));
+        assert!(svg.contains("TP53"));
+        assert!(svg.contains("KRAS"));
+        assert!(svg.contains("PIK3CA"));
+    }
+
+    #[test]
+    fn co_occurrence_heatmap_rejects_palette_override() {
+        let co_occurrence = CoOccurrenceResult {
+            study_id: "demo".into(),
+            genes: vec!["TP53".into(), "KRAS".into()],
+            total_samples: 20,
+            sample_universe_basis: SampleUniverseBasis::ClinicalSampleFile,
+            pairs: vec![CoOccurrencePair {
+                gene_a: "TP53".into(),
+                gene_b: "KRAS".into(),
+                both_mutated: 3,
+                a_only: 5,
+                b_only: 2,
+                neither: 10,
+                log_odds_ratio: Some(0.7),
+                p_value: Some(0.04),
+            }],
+        };
+
+        let err =
+            render_co_occurrence_chart(&co_occurrence, ChartType::Heatmap, &inline_svg_options())
+                .expect_err("heatmap should reject palette overrides");
+        assert!(err.to_string().contains(
+            "--palette is not supported for 'study co-occurrence --chart heatmap'. Omit --palette; heatmaps use a fixed continuous colormap."
+        ));
+    }
+
+    #[test]
+    fn mutation_compare_stacked_bar_renders_inline_svg() {
+        let mutation_compare = MutationComparisonResult {
+            study_id: "demo".into(),
+            stratify_gene: "TP53".into(),
+            target_gene: "PIK3CA".into(),
+            groups: vec![
+                MutationGroupStats {
+                    group_name: "TP53-mutant".into(),
+                    sample_count: 8,
+                    mutated_count: 4,
+                    mutation_rate: 0.5,
+                },
+                MutationGroupStats {
+                    group_name: "TP53-wildtype".into(),
+                    sample_count: 12,
+                    mutated_count: 3,
+                    mutation_rate: 0.25,
+                },
+            ],
+        };
+
+        let svg = render_mutation_compare_chart(
+            &mutation_compare,
+            ChartType::StackedBar,
+            &inline_svg_auto_title_options(),
+        )
+        .expect("stacked-bar svg");
+
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("PIK3CA mutation status by TP53"));
+        assert!(svg.contains("Mutated"));
+        assert!(svg.contains("Not mutated"));
+        assert!(svg.contains("Samples"));
+    }
+
+    #[test]
+    fn mutation_compare_stacked_bar_uses_integer_sample_ticks() {
+        let mutation_compare = MutationComparisonResult {
+            study_id: "demo".into(),
+            stratify_gene: "TP53".into(),
+            target_gene: "PIK3CA".into(),
+            groups: vec![
+                MutationGroupStats {
+                    group_name: "TP53-mutant".into(),
+                    sample_count: 2,
+                    mutated_count: 0,
+                    mutation_rate: 0.0,
+                },
+                MutationGroupStats {
+                    group_name: "TP53-wildtype".into(),
+                    sample_count: 1,
+                    mutated_count: 1,
+                    mutation_rate: 1.0,
+                },
+            ],
+        };
+
+        let svg = render_mutation_compare_chart(
+            &mutation_compare,
+            ChartType::StackedBar,
+            &inline_svg_auto_title_options(),
+        )
+        .expect("stacked-bar svg");
+
+        assert!(!svg.contains(">0.5<"), "svg={svg}");
+        assert!(!svg.contains(">1.5<"), "svg={svg}");
+    }
+
+    #[test]
+    fn heatmap_and_stacked_bar_svg_outputs_write_files() {
+        let output_dir = TestOutputDir::new();
+        let heatmap = CoOccurrenceResult {
+            study_id: "demo".into(),
+            genes: vec!["TP53".into(), "KRAS".into(), "PIK3CA".into()],
+            total_samples: 20,
+            sample_universe_basis: SampleUniverseBasis::ClinicalSampleFile,
+            pairs: vec![
+                CoOccurrencePair {
+                    gene_a: "TP53".into(),
+                    gene_b: "KRAS".into(),
+                    both_mutated: 3,
+                    a_only: 5,
+                    b_only: 2,
+                    neither: 10,
+                    log_odds_ratio: Some(0.7),
+                    p_value: Some(0.04),
+                },
+                CoOccurrencePair {
+                    gene_a: "TP53".into(),
+                    gene_b: "PIK3CA".into(),
+                    both_mutated: 2,
+                    a_only: 6,
+                    b_only: 1,
+                    neither: 11,
+                    log_odds_ratio: Some(0.2),
+                    p_value: Some(0.3),
+                },
+                CoOccurrencePair {
+                    gene_a: "KRAS".into(),
+                    gene_b: "PIK3CA".into(),
+                    both_mutated: 1,
+                    a_only: 4,
+                    b_only: 2,
+                    neither: 13,
+                    log_odds_ratio: Some(-0.4),
+                    p_value: Some(0.6),
+                },
+            ],
+        };
+        let mutation_compare = MutationComparisonResult {
+            study_id: "demo".into(),
+            stratify_gene: "TP53".into(),
+            target_gene: "PIK3CA".into(),
+            groups: vec![
+                MutationGroupStats {
+                    group_name: "TP53-mutant".into(),
+                    sample_count: 2,
+                    mutated_count: 0,
+                    mutation_rate: 0.0,
+                },
+                MutationGroupStats {
+                    group_name: "TP53-wildtype".into(),
+                    sample_count: 1,
+                    mutated_count: 1,
+                    mutation_rate: 1.0,
+                },
+            ],
+        };
+        let heatmap_path = output_dir.svg_path("heatmap.svg");
+        let stacked_path = output_dir.svg_path("stacked.svg");
+
+        assert!(
+            render_co_occurrence_chart(
+                &heatmap,
+                ChartType::Heatmap,
+                &svg_heatmap_options(heatmap_path.clone()),
+            )
+            .expect("heatmap svg")
+            .contains(heatmap_path.to_string_lossy().as_ref())
+        );
+        assert!(
+            render_mutation_compare_chart(
+                &mutation_compare,
+                ChartType::StackedBar,
+                &svg_options(stacked_path.clone()),
+            )
+            .expect("stacked-bar svg")
+            .contains(stacked_path.to_string_lossy().as_ref())
+        );
+
+        let heatmap_svg = fs::read_to_string(&heatmap_path).expect("heatmap file should exist");
+        let stacked_svg = fs::read_to_string(&stacked_path).expect("stacked file should exist");
+        assert!(heatmap_svg.contains("<svg"));
+        assert!(stacked_svg.contains("<svg"));
     }
 
     #[test]

@@ -42,7 +42,9 @@ pub struct Cli {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ChartType {
     Bar,
+    StackedBar,
     Pie,
+    Heatmap,
     Histogram,
     Density,
     Box,
@@ -55,7 +57,9 @@ impl ChartType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Bar => "bar",
+            Self::StackedBar => "stacked-bar",
             Self::Pie => "pie",
+            Self::Heatmap => "heatmap",
             Self::Histogram => "histogram",
             Self::Density => "density",
             Self::Box => "box",
@@ -4780,7 +4784,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         crate::render::chart::validate_standalone_chart_type(
                             "study co-occurrence",
                             chart_type,
-                            &[ChartType::Bar, ChartType::Pie],
+                            &[ChartType::Bar, ChartType::Pie, ChartType::Heatmap],
                         )?;
                         let result = crate::entities::study::co_occurrence(&study, &genes).await?;
                         let options = crate::render::chart::ChartRenderOptions::from_args(
@@ -8278,6 +8282,86 @@ mod tests {
     }
 
     #[test]
+    fn study_co_occurrence_parses_heatmap_chart_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "co-occurrence",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--genes",
+            "TP53,PIK3CA,GATA3",
+            "--chart",
+            "heatmap",
+            "--terminal",
+        ])
+        .expect("study co-occurrence heatmap chart should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::CoOccurrence { chart, .. },
+            } => {
+                assert_eq!(chart.chart, Some(ChartType::Heatmap));
+                assert!(chart.terminal);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_compare_mutations_parses_stacked_bar_chart_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "compare",
+            "--study",
+            "brca_tcga_pan_can_atlas_2018",
+            "--gene",
+            "TP53",
+            "--type",
+            "mutations",
+            "--target",
+            "PIK3CA",
+            "--chart",
+            "stacked-bar",
+            "--terminal",
+        ])
+        .expect("study compare stacked-bar chart should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::Compare { chart, .. },
+            } => {
+                assert_eq!(chart.chart, Some(ChartType::StackedBar));
+                assert!(chart.terminal);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_chart_subcommand_parses_heatmap_topic() {
+        let cli = Cli::try_parse_from(["biomcp", "chart", "heatmap"])
+            .expect("heatmap chart docs should parse");
+        match cli.command {
+            Commands::Chart { command } => {
+                assert_eq!(command, Some(crate::cli::chart::ChartCommand::Heatmap));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_chart_subcommand_parses_stacked_bar_topic() {
+        let cli = Cli::try_parse_from(["biomcp", "chart", "stacked-bar"])
+            .expect("stacked-bar chart docs should parse");
+        match cli.command {
+            Commands::Chart { command } => {
+                assert_eq!(command, Some(crate::cli::chart::ChartCommand::StackedBar));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn study_survival_parses_survival_chart_flag() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -9078,6 +9162,55 @@ mod tests {
         .await
         .expect_err("study compare should validate type");
         assert!(err.to_string().contains("Unknown comparison type"));
+    }
+
+    #[tokio::test]
+    async fn study_co_occurrence_invalid_chart_lists_heatmap() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "co-occurrence".to_string(),
+            "--study".to_string(),
+            "msk_impact_2017".to_string(),
+            "--genes".to_string(),
+            "TP53,KRAS".to_string(),
+            "--chart".to_string(),
+            "violin".to_string(),
+            "--terminal".to_string(),
+        ])
+        .await
+        .expect_err("study co-occurrence should reject violin");
+        let msg = err.to_string();
+        assert!(msg.contains("study co-occurrence"));
+        assert!(msg.contains("bar"));
+        assert!(msg.contains("pie"));
+        assert!(msg.contains("heatmap"));
+    }
+
+    #[tokio::test]
+    async fn study_compare_mutations_invalid_chart_lists_stacked_bar() {
+        let err = execute(vec![
+            "biomcp".to_string(),
+            "study".to_string(),
+            "compare".to_string(),
+            "--study".to_string(),
+            "msk_impact_2017".to_string(),
+            "--gene".to_string(),
+            "TP53".to_string(),
+            "--type".to_string(),
+            "mutations".to_string(),
+            "--target".to_string(),
+            "KRAS".to_string(),
+            "--chart".to_string(),
+            "violin".to_string(),
+            "--terminal".to_string(),
+        ])
+        .await
+        .expect_err("mutation compare should reject violin");
+        let msg = err.to_string();
+        assert!(msg.contains("study compare --type mutations"));
+        assert!(msg.contains("bar"));
+        assert!(msg.contains("stacked-bar"));
     }
 
     #[tokio::test]

@@ -47,12 +47,15 @@ nav:
   - Study Charts:
       - Overview: charts/index.md
       - Bar: charts/bar.md
+      - Stacked Bar: charts/stacked-bar.md
       - Pie: charts/pie.md
+      - Heatmap: charts/heatmap.md
       - Histogram: charts/histogram.md
       - Density: charts/density.md
       - Box: charts/box.md
       - Violin: charts/violin.md
       - Ridgeline: charts/ridgeline.md
+      - Survival: charts/survival.md
   - Reference:
       - Quick Reference: reference/quick-reference.md
       - Data Sources: reference/data-sources.md
