@@ -3995,10 +3995,7 @@ mod tests {
         assert!(!page.results.is_empty());
         assert!(page.results.iter().any(|row| {
             row.source == ArticleSource::PubTator
-                || row
-                    .matched_sources
-                    .iter()
-                    .any(|source| *source == ArticleSource::PubTator)
+                || row.matched_sources.contains(&ArticleSource::PubTator)
         }));
     }
 

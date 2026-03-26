@@ -6,7 +6,7 @@ BioMCP is a single Rust binary. All dependencies are compiled in — no runtime 
 
 ### Kuva — Charting
 
-[Kuva](https://github.com/Psy-Fer/kuva) (v0.1.4) is the charting engine behind BioMCP's `--chart` flag. It renders 8 chart types (bar, pie, histogram, density, box, violin, ridgeline, survival) to terminal, SVG, and PNG.
+[Kuva](https://github.com/Psy-Fer/kuva) (v0.1.4) is the charting engine behind BioMCP's `--chart` flag. BioMCP currently exposes 12 chart modes (`bar`, `stacked-bar`, `pie`, `waterfall`, `heatmap`, `histogram`, `density`, `box`, `violin`, `ridgeline`, `scatter`, `survival`) backed by Kuva plots and rendered to terminal, SVG, and PNG.
 
 Kuva is linked as a Rust library, not called as a subprocess. Charts are generated in-process with no additional runtime dependencies.
 

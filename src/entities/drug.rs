@@ -8,7 +8,7 @@ use crate::entities::SearchPage;
 use crate::error::BioMcpError;
 use crate::sources::chembl::ChemblClient;
 use crate::sources::civic::{CivicClient, CivicContext};
-use crate::sources::ema::{EmaClient, EmaDrugIdentity};
+use crate::sources::ema::{EmaClient, EmaDrugIdentity, EmaSyncMode};
 use crate::sources::mychem::{
     MYCHEM_FIELDS_GET, MYCHEM_FIELDS_SEARCH, MyChemClient, MyChemHit, MyChemNdcField,
 };
@@ -1816,7 +1816,7 @@ async fn populate_ema_sections(
         return Ok(());
     }
 
-    let client = EmaClient::new();
+    let client = EmaClient::ready(EmaSyncMode::Auto).await?;
     let identity = build_ema_identity(requested_name, drug);
     let anchor = client.resolve_anchor(&identity)?;
 
@@ -1950,16 +1950,28 @@ pub async fn search_name_query_with_region(
         None => EmaDrugIdentity::new(query),
     };
 
+    let eu_client = if region.includes_eu() {
+        Some(EmaClient::ready(EmaSyncMode::Auto).await?)
+    } else {
+        None
+    };
+
     match region {
         DrugRegion::Us => Ok(DrugSearchPageWithRegion::Us(
             search_page(&filters, limit, offset).await?,
         )),
         DrugRegion::Eu => Ok(DrugSearchPageWithRegion::Eu(
-            EmaClient::new().search_medicines(&eu_identity, limit, offset)?,
+            eu_client
+                .as_ref()
+                .expect("EU client should exist for EU region")
+                .search_medicines(&eu_identity, limit, offset)?,
         )),
         DrugRegion::All => Ok(DrugSearchPageWithRegion::All {
             us: search_page(&filters, limit, offset).await?,
-            eu: EmaClient::new().search_medicines(&eu_identity, limit, offset)?,
+            eu: eu_client
+                .as_ref()
+                .expect("EU client should exist for all region")
+                .search_medicines(&eu_identity, limit, offset)?,
         }),
     }
 }

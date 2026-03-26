@@ -175,12 +175,12 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - BioMCP surfaces: `search drug --region eu|all; get drug <name> regulatory|safety|shortage --region eu|all`
 - Integration mode: `direct_api`
 - BioMCP auth: `none`
-- Provider access / registration: manual download of the EMA website JSON batch or set `BIOMCP_EMA_DIR`
+- Provider access / registration: on-demand local download by BioMCP on first EMA use, or manual preseed via `BIOMCP_EMA_DIR`
 - License / terms summary: EMA website material may be reused with source attribution; third-party content can carry separate rights
 - Redistribution / reuse summary: EMA-published website data is generally reusable with attribution, but embedded third-party materials may need separate permission
 - Official terms URL: <https://www.ema.europa.eu/en/about-us/about-website/legal-notice>
 - Reviewed on: `2026-03-24`
-- Notes: BioMCP reads the downloaded human-medicines JSON batch from `BIOMCP_EMA_DIR` or the default data directory and does not query a live EMA API. The download landing page is <https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format>.
+- Notes: BioMCP auto-downloads the EMA human-medicines JSON batch into `BIOMCP_EMA_DIR` or the default data directory on first use, refreshes stale files, and supports explicit refresh via `biomcp ema sync`. The download landing page is <https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format>.
 
 ### Enrichr
 

@@ -5,8 +5,12 @@ use std::process::Command;
 const MCP_SHELL_INTRO: &str = "BioMCP is a read-only biomedical MCP tool for \
 search, detail retrieval, discovery, enrichment, and study analytics across \
 15 biomedical sources.\n\n";
-const BLOCKED_MCP_DESCRIPTION_TERMS: &[&str] =
-    &["`skill install`", "`update [--check]`", "`uninstall`"];
+const BLOCKED_MCP_DESCRIPTION_TERMS: &[&str] = &[
+    "`skill install`",
+    "`ema sync`",
+    "`update [--check]`",
+    "`uninstall`",
+];
 
 fn command_output(command: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(command).args(args).output().ok()?;

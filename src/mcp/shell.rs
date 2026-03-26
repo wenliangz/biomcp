@@ -374,6 +374,11 @@ mod tests {
             "skill".into(),
             "uninstall".into()
         ]));
+        assert!(!is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "ema".into(),
+            "sync".into()
+        ]));
     }
 
     #[tokio::test]

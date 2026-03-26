@@ -116,8 +116,12 @@ where
     NO_CACHE.scope(no_cache, fut).await
 }
 
+pub(crate) fn is_no_cache_enabled() -> bool {
+    matches!(NO_CACHE.try_with(|v| *v), Ok(true))
+}
+
 pub(crate) fn apply_cache_mode(req: RequestBuilder) -> RequestBuilder {
-    let no_cache = matches!(NO_CACHE.try_with(|v| *v), Ok(true));
+    let no_cache = is_no_cache_enabled();
     if let Some(mode) = resolve_cache_mode(no_cache, false, env_cache_mode()) {
         return req.with_extension(mode);
     }
@@ -128,7 +132,7 @@ pub(crate) fn apply_cache_mode_with_auth(
     req: RequestBuilder,
     authenticated: bool,
 ) -> RequestBuilder {
-    let no_cache = matches!(NO_CACHE.try_with(|v| *v), Ok(true));
+    let no_cache = is_no_cache_enabled();
     if let Some(mode) = resolve_cache_mode(no_cache, authenticated, env_cache_mode()) {
         return req.with_extension(mode);
     }
@@ -510,24 +514,32 @@ pub(crate) fn validate_biothings_result_window(
     Ok(())
 }
 
-pub(crate) async fn read_limited_body(
+pub(crate) async fn read_limited_body_with_limit(
     mut resp: reqwest::Response,
     api: &str,
+    max_bytes: usize,
 ) -> Result<Vec<u8>, BioMcpError> {
     let mut body: Vec<u8> = Vec::new();
 
     while let Some(chunk) = resp.chunk().await? {
         let next_len = body.len().saturating_add(chunk.len());
-        if next_len > DEFAULT_MAX_BODY_BYTES {
+        if next_len > max_bytes {
             return Err(BioMcpError::Api {
                 api: api.to_string(),
-                message: format!("Response body exceeded {DEFAULT_MAX_BODY_BYTES} bytes"),
+                message: format!("Response body exceeded {max_bytes} bytes"),
             });
         }
         body.extend_from_slice(&chunk);
     }
 
     Ok(body)
+}
+
+pub(crate) async fn read_limited_body(
+    resp: reqwest::Response,
+    api: &str,
+) -> Result<Vec<u8>, BioMcpError> {
+    read_limited_body_with_limit(resp, api, DEFAULT_MAX_BODY_BYTES).await
 }
 
 #[cfg(test)]

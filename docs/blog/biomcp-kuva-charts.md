@@ -161,6 +161,9 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations \
 
 - `--theme` accepts `light`, `dark`, `solarized`, and `minimal`
 - `--palette` accepts `category10`, `wong`, `okabe-ito`, `tol-bright`, `tol-muted`, `tol-light`, `ibm`, `deuteranopia`, `protanopia`, `tritanopia`, `pastel`, and `bold`
+- `--cols` and `--rows` control terminal chart dimensions
+- `--width` and `--height` control SVG, PNG, and MCP inline-SVG canvas size
+- `--scale` controls PNG pixel density and defaults to `2.0`
 - `-o file.svg` writes vector output
 - `-o file.png` works when BioMCP is built with `--features charts-png`
 
@@ -184,7 +187,7 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations \
   --chart violin --terminal
 ```
 
-BioMCP reports that `violin` is invalid for `study query --type mutations` and lists the valid alternatives: `bar, pie`.
+BioMCP reports that `violin` is invalid for `study query --type mutations` and lists the valid alternatives: `bar, pie, waterfall`.
 
 ## Why SVG is the best handoff format for agents
 

@@ -98,13 +98,14 @@ biomcp get drug dabrafenib approvals
 
 ## EMA local data setup
 
-EU regional commands read the EMA human-medicines JSON batch from `BIOMCP_EMA_DIR` first, then the platform data directory (`~/.local/share/biomcp/ema` on typical Linux systems).
+EU regional commands read EMA local data from `BIOMCP_EMA_DIR` first, then the
+platform data directory (`~/.local/share/biomcp/ema` on typical Linux systems).
+On first use, BioMCP now auto-downloads the six EMA human-medicines JSON feeds
+into that root and refreshes stale files after 72 hours. Use `biomcp ema sync`
+to force a refresh at any time.
 
-Download the current batch from:
-
-- <https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format>
-
-Expected files:
+Manual preseed still works. If you need an offline or pre-populated root, place
+these files in the target directory:
 
 - `medicines.json`
 - `post_authorisation.json`
@@ -117,6 +118,12 @@ Confirm local EMA readiness with full health output:
 
 ```bash
 biomcp health
+```
+
+Force-refresh EMA local data manually:
+
+```bash
+biomcp ema sync
 ```
 
 EMA row meanings:

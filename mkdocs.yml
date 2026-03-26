@@ -34,6 +34,26 @@ nav:
       - PGx: user-guide/pgx.md
       - GWAS: user-guide/gwas.md
       - Phenotype: user-guide/phenotype.md
+  - Sources:
+      - Overview: sources/index.md
+      - PubMed: sources/pubmed.md
+      - ClinicalTrials.gov: sources/clinicaltrials-gov.md
+      - ClinVar: sources/clinvar.md
+      - OpenFDA: sources/openfda.md
+      - UniProt: sources/uniprot.md
+      - gnomAD: sources/gnomad.md
+      - Reactome: sources/reactome.md
+      - Semantic Scholar: sources/semantic-scholar.md
+      - ChEMBL: sources/chembl.md
+      - OpenTargets: sources/opentargets.md
+      - CIViC: sources/civic.md
+      - OncoKB: sources/oncokb.md
+      - cBioPortal: sources/cbioportal.md
+      - EMA: sources/ema.md
+      - KEGG: sources/kegg.md
+      - PharmGKB / CPIC: sources/pharmgkb.md
+      - Human Protein Atlas: sources/human-protein-atlas.md
+      - Monarch Initiative: sources/monarch-initiative.md
   - How-To:
       - Annotate Variants: how-to/annotate-variants.md
       - Cross-Entity Pivots: how-to/cross-entity-pivots.md
@@ -47,12 +67,15 @@ nav:
   - Study Charts:
       - Overview: charts/index.md
       - Bar: charts/bar.md
+      - Stacked Bar: charts/stacked-bar.md
       - Pie: charts/pie.md
+      - Heatmap: charts/heatmap.md
       - Histogram: charts/histogram.md
       - Density: charts/density.md
       - Box: charts/box.md
       - Violin: charts/violin.md
       - Ridgeline: charts/ridgeline.md
+      - Survival: charts/survival.md
   - Reference:
       - Quick Reference: reference/quick-reference.md
       - Data Sources: reference/data-sources.md
@@ -68,9 +91,12 @@ nav:
       - Drug Approvals & AE Summary: reference/drug-approvals-and-ae-summary.md
       - Dependencies: reference/dependencies.md
   - Blog:
-      - "Charts Your Agent Can Actually Read": blog/kuva-charting-guide.md
-      - "cBioPortal Study Analytics in BioMCP": blog/cbioportal-study-analytics.md
-      - "We Deleted 35 Tools and Our Agent Got Better": blog/we-deleted-35-tools.md
+      - blog/biomcp-charts.md
+      - blog/biomcp-pubmed-articles.md
+      - blog/skillbench-biomcp-skills.md
+      - blog/kuva-charting-guide.md
+      - blog/cbioportal-study-analytics.md
+      - blog/we-deleted-35-tools.md
   - Privacy Policy: policies.md
   - Troubleshooting: troubleshooting.md
 

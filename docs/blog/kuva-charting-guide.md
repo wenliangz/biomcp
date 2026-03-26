@@ -35,7 +35,7 @@ When the agent needs precision, SVG is the better output:
 
 From `height="405.9"` and the axis scale, the agent recovers the exact count: 3,157 missense mutations. No estimation. No OCR. The TP53 mutation bar chart is 4.9 KB as SVG versus ~175 KB as PNG — **36x smaller** with higher fidelity.
 
-## Eight chart types
+## Twelve chart types
 
 Add `--chart <type>` to any study command. BioMCP validates the combination — ask for a violin plot from a mutation query and it tells you what's valid instead of producing garbage.
 
@@ -90,6 +90,8 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations \
 
 3,157 missense mutations dominate TP53 in MSK-IMPACT, followed by 683 nonsense and 517 frameshift deletions. Same data, two renderings — SVG for sharing, terminal for exploration.
 
+For multi-gene co-occurrence, `--chart heatmap` renders the full NxN both-mutated matrix. `--chart waterfall` ranks mutated samples by mutation burden for a single queried gene, and `--chart scatter` plots paired expression values for two genes across shared samples.
+
 ## Themes and accessibility
 
 Four themes and twelve color palettes, including five designed for colorblind accessibility:
@@ -103,9 +105,9 @@ biomcp study query --study msk_impact_2017 --gene TP53 --type mutations \
 |--------|-------------------|
 | `light`, `dark`, `solarized`, `minimal` | `wong`, `okabe-ito`, `deuteranopia`, `protanopia`, `tritanopia` |
 
-## What's next
+## Sizing and export control
 
-BioMCP currently uses 8 of Kuva's 29 chart types. Heatmaps for co-occurrence matrices, scatter plots for two-gene expression comparisons, and waterfall plots for mutation burden are on the roadmap.
+Chart-capable study commands now expose `--cols`, `--rows`, `--width`, `--height`, and `--scale` so you can tune terminal size, SVG/PNG canvas dimensions, and PNG pixel density without leaving the CLI.
 
 ## Try it
 

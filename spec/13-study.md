@@ -253,6 +253,75 @@ test -n "$out"
 echo "$out" | mustmatch not like "# Study Co-occurrence"
 ```
 
+## Chart Flag: Custom Terminal Dimensions
+
+`--cols` and `--rows` should constrain terminal chart output when the resolved target is the terminal.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart bar --cols 40 --rows 12)"
+OUT="$out" python - <<'PY'
+import os
+import re
+
+text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", os.environ["OUT"])
+lines = text.splitlines()
+assert lines, text
+assert len(lines) <= 12, (len(lines), text)
+assert max(len(line) for line in lines) <= 40, text
+PY
+```
+
+## Chart Flag: Co-occurrence Heatmap
+
+`--chart heatmap --terminal` on co-occurrence should render chart output instead of the standard markdown table.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS,PIK3CA --chart heatmap --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Co-occurrence"
+```
+
+## Chart Flag: Co-occurrence Heatmap SVG Output
+
+`--chart heatmap -o file.svg` should write a valid SVG file through the CLI output path.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+tmpdir="$(mktemp -d)"
+out="$(biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS,PIK3CA --chart heatmap -o "$tmpdir/cooccurrence-heatmap.svg")"
+echo "$out" | mustmatch like "Wrote SVG chart to"
+test -s "$tmpdir/cooccurrence-heatmap.svg"
+grep -q "<svg" "$tmpdir/cooccurrence-heatmap.svg"
+rm -rf "$tmpdir"
+```
+
+## Chart Flag: Custom SVG Dimensions
+
+`--width` and `--height` should set explicit SVG canvas dimensions.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+tmpdir="$(mktemp -d)"
+out="$(biomcp study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type expression --chart histogram --width 1200 --height 600 -o "$tmpdir/erbb2-histogram.svg")"
+echo "$out" | mustmatch like "Wrote SVG chart to"
+grep -q 'width="1200' "$tmpdir/erbb2-histogram.svg"
+grep -q 'height="600' "$tmpdir/erbb2-histogram.svg"
+rm -rf "$tmpdir"
+```
+
+## Chart Flag: Heatmap Palette Rejection
+
+Heatmaps use a fixed continuous colormap in this release, so `--palette` should fail with the documented guidance instead of being ignored.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS,PIK3CA --chart heatmap --palette wong --terminal 2>&1 || true)"
+echo "$out" | mustmatch like "study co-occurrence --chart heatmap"
+echo "$out" | mustmatch like "fixed continuous colormap"
+```
+
 ## Chart Flag: Compare Violin Plot
 
 `--chart violin --terminal` on compare expression should produce terminal chart output.
@@ -262,6 +331,53 @@ echo "$out" | mustmatch not like "# Study Co-occurrence"
 out="$(biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2 --chart violin --terminal)"
 test -n "$out"
 echo "$out" | mustmatch not like "# Study Group Comparison"
+```
+
+## Chart Flag: Compare Scatter Plot
+
+`--chart scatter --terminal` on compare expression should render paired two-gene expression values instead of the standard markdown summary.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type expression --target ERBB2 --chart scatter --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Group Comparison"
+```
+
+## Chart Flag: Mutation Waterfall
+
+`--chart waterfall --terminal` on mutation queries should render ranked sample mutation counts instead of the standard markdown heading.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart waterfall --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Mutation Frequency"
+```
+
+## Chart Flag: Mutation Compare Stacked Bar
+
+`--chart stacked-bar --terminal` on mutation comparison should render chart output instead of the standard markdown summary.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type mutations --target PIK3CA --chart stacked-bar --terminal)"
+test -n "$out"
+echo "$out" | mustmatch not like "# Study Group Comparison"
+```
+
+## Chart Flag: Mutation Compare Stacked Bar SVG Output
+
+`--chart stacked-bar -o file.svg` should write a valid SVG file through the CLI output path.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+tmpdir="$(mktemp -d)"
+out="$(biomcp study compare --study brca_tcga_pan_can_atlas_2018 --gene TP53 --type mutations --target PIK3CA --chart stacked-bar -o "$tmpdir/pik3ca-by-tp53-stacked.svg")"
+echo "$out" | mustmatch like "Wrote SVG chart to"
+test -s "$tmpdir/pik3ca-by-tp53-stacked.svg"
+grep -q "<svg" "$tmpdir/pik3ca-by-tp53-stacked.svg"
+rm -rf "$tmpdir"
 ```
 
 ## Chart Flag: Survival Bar Chart
@@ -296,16 +412,60 @@ out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations -
 echo "$out" | mustmatch like "violin"
 echo "$out" | mustmatch like "bar"
 echo "$out" | mustmatch like "pie"
+echo "$out" | mustmatch like "waterfall"
+```
+
+## Chart Flag: Co-occurrence Invalid Chart Type Error
+
+Incompatible co-occurrence chart types should list the new heatmap option alongside the existing valid types.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS --chart violin --terminal 2>&1 || true)"
+echo "$out" | mustmatch like "violin"
+echo "$out" | mustmatch like "bar"
+echo "$out" | mustmatch like "pie"
+echo "$out" | mustmatch like "heatmap"
+```
+
+## Chart Flag: Mutation Compare Invalid Chart Type Error
+
+Incompatible mutation-comparison chart types should list both `bar` and `stacked-bar`.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study compare --study msk_impact_2017 --gene TP53 --type mutations --target KRAS --chart violin --terminal 2>&1 || true)"
+echo "$out" | mustmatch like "violin"
+echo "$out" | mustmatch like "bar"
+echo "$out" | mustmatch like "stacked-bar"
+```
+
+## Chart Flag: Expression Compare Invalid Chart Type Error
+
+Incompatible expression-comparison chart types should list `scatter` alongside the grouped distribution plots.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study compare --study msk_impact_2017 --gene TP53 --type expression --target ERBB2 --chart pie --terminal 2>&1 || true)"
+echo "$out" | mustmatch like "study compare --type expression"
+echo "$out" | mustmatch like "box"
+echo "$out" | mustmatch like "violin"
+echo "$out" | mustmatch like "ridgeline"
+echo "$out" | mustmatch like "scatter"
 ```
 
 ## Chart Subcommand: Documentation
 
-`biomcp chart` should show chart overview documentation. Specific chart pages should include the new survival chart topic.
+`biomcp chart` should show chart overview documentation. Specific chart pages should include the new heatmap and stacked-bar topics alongside survival.
 
 ```bash
 out="$(biomcp chart)"
 test -n "$out"
 echo "$out" | mustmatch like "bar"
+echo "$out" | mustmatch like "heatmap"
+echo "$out" | mustmatch like "stacked-bar"
+echo "$out" | mustmatch like "waterfall"
+echo "$out" | mustmatch like "scatter"
 echo "$out" | mustmatch like "survival"
 echo "$out" | mustmatch like "violin"
 ```
@@ -320,4 +480,32 @@ echo "$out" | mustmatch like "Bar"
 out="$(biomcp chart survival)"
 test -n "$out"
 echo "$out" | mustmatch like "Survival"
+```
+
+```bash
+out="$(biomcp chart heatmap)"
+test -n "$out"
+echo "$out" | mustmatch like "Heatmap"
+echo "$out" | mustmatch like "palette"
+```
+
+```bash
+out="$(biomcp chart stacked-bar)"
+test -n "$out"
+echo "$out" | mustmatch like "Stacked Bar"
+echo "$out" | mustmatch like "mutation rate"
+```
+
+```bash
+out="$(biomcp chart waterfall)"
+test -n "$out"
+echo "$out" | mustmatch like "Waterfall"
+echo "$out" | mustmatch like "mutation burden"
+```
+
+```bash
+out="$(biomcp chart scatter)"
+test -n "$out"
+echo "$out" | mustmatch like "Scatter"
+echo "$out" | mustmatch like "paired expression"
 ```

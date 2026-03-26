@@ -384,6 +384,56 @@ pub fn mutation_frequency(
     })
 }
 
+pub fn mutation_counts_by_sample(
+    study_dir: &Path,
+    gene: &str,
+) -> Result<Vec<(String, usize)>, BioMcpError> {
+    let gene = normalize_gene(gene)?;
+    let study_id = study_id_from_dir(study_dir);
+    let path = study_dir.join(MUTATIONS_FILE);
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+
+    let gene_idx = require_column(&header, "HUGO_SYMBOL", &path)?;
+    let sample_idx =
+        column_index(&header, &["TUMOR_SAMPLE_BARCODE", "SAMPLE_ID"]).ok_or_else(|| {
+            BioMcpError::SourceUnavailable {
+                source_name: SOURCE_NAME.to_string(),
+                reason: format!(
+                    "Missing SAMPLE_ID/Tumor_Sample_Barcode column in {}",
+                    path.display()
+                ),
+                suggestion: "Use a valid cBioPortal mutation file.".to_string(),
+            }
+        })?;
+
+    let mut sample_counts: HashMap<String, usize> = HashMap::new();
+    let mut saw_gene = false;
+
+    while let Some(row) = reader.next_row()? {
+        if !row_field(&row, gene_idx).eq_ignore_ascii_case(&gene) {
+            continue;
+        }
+
+        saw_gene = true;
+        let sample = row_field(&row, sample_idx);
+        if sample.is_empty() {
+            continue;
+        }
+        *sample_counts.entry(sample.to_string()).or_insert(0) += 1;
+    }
+
+    if !saw_gene {
+        return Err(BioMcpError::NotFound {
+            entity: "gene".to_string(),
+            id: gene,
+            suggestion: format!("Try a different gene symbol in study '{study_id}'."),
+        });
+    }
+
+    Ok(sorted_counts(sample_counts))
+}
+
 pub fn cna_distribution(
     study_dir: &Path,
     gene: &str,
@@ -945,6 +995,96 @@ pub fn expression_values_by_sample(
         id: gene,
         suggestion: format!("Try a different gene symbol in study '{study_id}'."),
     })
+}
+
+pub fn expression_pairs_by_sample(
+    study_dir: &Path,
+    gene_x: &str,
+    gene_y: &str,
+) -> Result<Vec<(f64, f64)>, BioMcpError> {
+    let gene_x = normalize_gene(gene_x)?;
+    let gene_y = normalize_gene(gene_y)?;
+    let same_gene = gene_x == gene_y;
+    let study_id = study_id_from_dir(study_dir);
+    let path = find_expression_file(study_dir).ok_or_else(|| BioMcpError::SourceUnavailable {
+        source_name: SOURCE_NAME.to_string(),
+        reason: format!(
+            "No supported expression matrix found under {}",
+            study_dir.display()
+        ),
+        suggestion: "Use a study with expression data or query type mutations/cna.".to_string(),
+    })?;
+
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+    let gene_idx = require_column(&header, "HUGO_SYMBOL", &path)?;
+    let sample_start = matrix_sample_start(&header, &reader.headers, &path)?;
+
+    let mut x_values: Option<Vec<Option<f64>>> = None;
+    let mut y_values: Option<Vec<Option<f64>>> = None;
+
+    while let Some(row) = reader.next_row()? {
+        let row_gene = row_field(&row, gene_idx);
+        if !row_gene.eq_ignore_ascii_case(&gene_x) && !row_gene.eq_ignore_ascii_case(&gene_y) {
+            continue;
+        }
+
+        let values = reader
+            .headers
+            .iter()
+            .skip(sample_start)
+            .enumerate()
+            .map(|(offset, _)| {
+                row.get(sample_start + offset)
+                    .map(String::as_str)
+                    .and_then(parse_f64)
+            })
+            .collect::<Vec<_>>();
+
+        if row_gene.eq_ignore_ascii_case(&gene_x) {
+            x_values = Some(values.clone());
+            if same_gene {
+                y_values = Some(values);
+                break;
+            }
+        }
+        if row_gene.eq_ignore_ascii_case(&gene_y) {
+            y_values = Some(values);
+        }
+        if x_values.is_some() && y_values.is_some() {
+            break;
+        }
+    }
+
+    let x_values = match x_values {
+        Some(values) => values,
+        None => {
+            return Err(BioMcpError::NotFound {
+                entity: "gene".to_string(),
+                id: gene_x,
+                suggestion: format!("Try a different gene symbol in study '{study_id}'."),
+            });
+        }
+    };
+    let y_values = match y_values {
+        Some(values) => values,
+        None => {
+            return Err(BioMcpError::NotFound {
+                entity: "gene".to_string(),
+                id: gene_y,
+                suggestion: format!("Try a different gene symbol in study '{study_id}'."),
+            });
+        }
+    };
+
+    Ok(x_values
+        .into_iter()
+        .zip(y_values)
+        .filter_map(|(x, y)| match (x, y) {
+            (Some(x), Some(y)) => Some((x, y)),
+            _ => None,
+        })
+        .collect())
 }
 
 pub fn mutation_count_in_samples(
@@ -2036,6 +2176,33 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
     }
 
     #[test]
+    fn mutation_counts_by_sample_returns_sorted_counts() {
+        let fixture = TestStudyDir::new("mutation-counts-by-sample");
+        let study_dir = fixture.study_path("mutation_counts_study");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\n\
+TP53\tS2\tMissense_Mutation\tp.R175H\n\
+TP53\tS1\tMissense_Mutation\tp.R248Q\n\
+TP53\tS1\tNonsense_Mutation\tp.R213*\n\
+TP53\tS3\tSplice_Site\tp.X1\n\
+EGFR\tS4\tMissense_Mutation\tp.L858R\n",
+        );
+
+        let counts =
+            mutation_counts_by_sample(&study_dir, "tp53").expect("mutation counts by sample");
+
+        assert_eq!(
+            counts,
+            vec![
+                ("S1".to_string(), 2),
+                ("S2".to_string(), 1),
+                ("S3".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
     fn cna_distribution_supports_header_with_entrez_column() {
         let fixture = TestStudyDir::new("cna-dist");
         let study_dir = fixture.study_path("cna_study");
@@ -2632,6 +2799,43 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
             (result.mann_whitney_p.expect("mann-whitney p-value") - 0.5402913746074199).abs()
                 < 1e-6
         );
+    }
+
+    #[test]
+    fn expression_pairs_by_sample_keeps_shared_numeric_samples_in_header_order() {
+        let fixture = TestStudyDir::new("expression-pairs-by-sample");
+        let study_dir = fixture.study_path("expression_pairs_study");
+        fixture.write_file(
+            &study_dir.join("data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt"),
+            "Hugo_Symbol\tEntrez_Gene_Id\tS3\tS1\tS2\tS4\n\
+TP53\t7157\t3.0\t1.0\tbad\t5.0\n\
+ERBB2\t2064\t30.0\t10.0\t20.0\tNA\n",
+        );
+
+        let pairs =
+            expression_pairs_by_sample(&study_dir, "TP53", "ERBB2").expect("expression pairs");
+
+        assert_eq!(pairs, vec![(3.0, 30.0), (1.0, 10.0)]);
+    }
+
+    #[test]
+    fn expression_pairs_by_sample_reports_first_missing_gene_in_argument_order() {
+        let fixture = TestStudyDir::new("expression-pairs-missing-gene");
+        let study_dir = fixture.study_path("expression_pairs_missing");
+        fixture.write_file(
+            &study_dir.join("data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt"),
+            "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\nERBB2\t2064\t2.0\t4.0\n",
+        );
+
+        let err = expression_pairs_by_sample(&study_dir, "TP53", "ESR1")
+            .expect_err("missing genes should fail");
+        match err {
+            BioMcpError::NotFound { entity, id, .. } => {
+                assert_eq!(entity, "gene");
+                assert_eq!(id, "TP53");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
