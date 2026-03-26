@@ -1,31 +1,32 @@
 # BioMCP
 
+One binary. One grammar. Evidence from the biomedical sources you already trust.
+
 ## Description
 
-BioMCP gives researchers, clinicians, and agents one command grammar across
-biomedical APIs that usually require separate search habits, identifiers, and
-output formats. It keeps results compact and evidence-oriented so you can move
-from discovery to detail without rewriting the workflow for each source. One
-command grammar, compact markdown output, 12 remote entities across 15+
-data sources, plus local study analytics.
+BioMCP cuts through the usual biomedical data maze: one query reaches the
+sources that normally live behind different APIs, identifiers, and search
+habits. Researchers, clinicians, and agents use the same command grammar to
+search, focus, and pivot without rebuilding the workflow for each source. You
+get compact, evidence-oriented results across live public data plus local study analytics.
 
 ## Features
 
-- **Federated article search:** `search article` fans out across PubTator3 and
-  Europe PMC, can also add a Semantic Scholar search leg when the filter set is
-  compatible, merges identifiers across PMID/PMCID/DOI, and ranks relevance
-  directness-first.
-- **Cross-entity pivots:** move directly from a gene, variant, drug, disease,
-  pathway, protein, or article into the next built-in view.
-- **Study analytics and charting:** downloaded studies support query, cohort,
-  survival, compare, and co-occurrence workflows with native terminal or SVG
-  charts.
-- **Citation graphs and article helpers:** `article citations`,
-  `article references`, `article recommendations`, and `article entities`
-  support literature navigation from a known paper.
-- **Gene-set enrichment and batch retrieval:** use `biomcp enrich` for
-  top-level g:Profiler enrichment and `biomcp batch` for up to 10 focused
-  `get` calls in one command.
+- **Search the literature:** `search article` fans out across PubTator3 and
+  Europe PMC, can add a Semantic Scholar leg when filters allow it, merges
+  PMID/PMCID/DOI identifiers, and ranks the most direct evidence first.
+- **Pivot without rework:** move from a gene, variant, drug, disease, pathway,
+  protein, or article straight into the next built-in view instead of
+  rebuilding filters by hand.
+- **Analyze studies locally:** `study` commands cover query, cohort, survival,
+  compare, and co-occurrence workflows with native terminal or SVG charts on
+  downloaded cBioPortal datasets.
+- **Follow the paper trail:** `article citations`, `article references`,
+  `article recommendations`, and `article entities` turn one known paper into a
+  broader evidence map.
+- **Enrich and batch:** use `biomcp enrich` for top-level g:Profiler
+  enrichment and `biomcp batch` for up to 10 focused `get` calls in one
+  command.
 
 ## Installation
 
