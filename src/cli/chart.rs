@@ -14,12 +14,14 @@ pub enum ChartCommand {
     Bar,
     StackedBar,
     Pie,
+    Waterfall,
     Heatmap,
     Histogram,
     Density,
     Box,
     Violin,
     Ridgeline,
+    Scatter,
     Survival,
 }
 
@@ -42,12 +44,14 @@ pub fn show(command: Option<&ChartCommand>) -> Result<String, BioMcpError> {
         Some(ChartCommand::Bar) => "bar.md",
         Some(ChartCommand::StackedBar) => "stacked-bar.md",
         Some(ChartCommand::Pie) => "pie.md",
+        Some(ChartCommand::Waterfall) => "waterfall.md",
         Some(ChartCommand::Heatmap) => "heatmap.md",
         Some(ChartCommand::Histogram) => "histogram.md",
         Some(ChartCommand::Density) => "density.md",
         Some(ChartCommand::Box) => "box.md",
         Some(ChartCommand::Violin) => "violin.md",
         Some(ChartCommand::Ridgeline) => "ridgeline.md",
+        Some(ChartCommand::Scatter) => "scatter.md",
         Some(ChartCommand::Survival) => "survival.md",
     };
     embedded_text(path)
@@ -69,5 +73,19 @@ mod tests {
         let doc = show(Some(&ChartCommand::StackedBar)).expect("stacked-bar doc should exist");
         assert!(doc.contains("# Stacked Bar Chart"));
         assert!(doc.contains("study compare --type mutations --chart stacked-bar"));
+    }
+
+    #[test]
+    fn show_returns_waterfall_doc() {
+        let doc = show(Some(&ChartCommand::Waterfall)).expect("waterfall doc should exist");
+        assert!(doc.contains("# Waterfall"));
+        assert!(doc.contains("study query --type mutations --chart waterfall"));
+    }
+
+    #[test]
+    fn show_returns_scatter_doc() {
+        let doc = show(Some(&ChartCommand::Scatter)).expect("scatter doc should exist");
+        assert!(doc.contains("# Scatter"));
+        assert!(doc.contains("study compare --type expression --chart scatter"));
     }
 }

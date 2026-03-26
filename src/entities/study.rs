@@ -376,6 +376,38 @@ pub async fn expression_values(study_id: &str, gene: &str) -> Result<Vec<f64>, B
     .await
 }
 
+pub async fn mutation_counts_by_sample(
+    study_id: &str,
+    gene: &str,
+) -> Result<Vec<(String, usize)>, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let gene = normalize_gene(gene)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        crate::sources::cbioportal_study::mutation_counts_by_sample(&study_dir, &gene)
+    })
+    .await
+}
+
+pub async fn expression_pairs_by_sample(
+    study_id: &str,
+    gene_x: &str,
+    gene_y: &str,
+) -> Result<Vec<(f64, f64)>, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let gene_x = normalize_gene(gene_x)?;
+    let gene_y = normalize_gene(gene_y)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        crate::sources::cbioportal_study::expression_pairs_by_sample(&study_dir, &gene_x, &gene_y)
+    })
+    .await
+}
+
 pub async fn compare_expression_values(
     study_id: &str,
     stratify_gene: &str,
@@ -1296,6 +1328,36 @@ mod tests {
             .await
             .expect("raw expression values should load");
         assert_eq!(values, vec![1.0, 2.0, 4.0]);
+    }
+
+    #[tokio::test]
+    async fn mutation_counts_by_sample_round_trips_source_result() {
+        let _guard = crate::test_support::env_lock().lock().await;
+        let fixture = TestStudyDir::new("mutation-counts-by-sample");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let counts = mutation_counts_by_sample("demo_study", "TP53")
+            .await
+            .expect("mutation sample counts should load");
+        assert_eq!(counts, vec![("S1".to_string(), 1), ("S2".to_string(), 1),]);
+    }
+
+    #[tokio::test]
+    async fn expression_pairs_by_sample_round_trips_source_result() {
+        let _guard = crate::test_support::env_lock().lock().await;
+        let fixture = TestStudyDir::new("expression-pairs-by-sample");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let pairs = expression_pairs_by_sample("demo_study", "TP53", "ERBB2")
+            .await
+            .expect("expression pairs should load");
+        assert_eq!(pairs, vec![(1.0, 2.0), (2.0, 4.0), (3.0, 1.0)]);
     }
 
     #[tokio::test]

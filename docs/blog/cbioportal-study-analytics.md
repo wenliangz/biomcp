@@ -129,7 +129,7 @@ Why a custom charting library instead of calling out to Python or R:
 - **SVG as structured data.** Kuva's SVG output includes exact numeric values in element attributes, making it parseable by AI agents without vision models.
 - **Validated chart types.** Each study command declares which chart types are valid for its data shape. Invalid combinations fail with a clear error message instead of producing garbage.
 
-The ten supported chart types: `bar`, `stacked-bar`, `pie`, `heatmap`, `histogram`, `density`, `box`, `violin`, `ridgeline`, and `survival`.
+The twelve supported chart types: `bar`, `stacked-bar`, `pie`, `waterfall`, `heatmap`, `histogram`, `density`, `box`, `violin`, `ridgeline`, `scatter`, and `survival`.
 
 ## Available studies
 
