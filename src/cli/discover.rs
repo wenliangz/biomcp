@@ -96,8 +96,18 @@ pub(crate) async fn resolve_query(
         }
     };
 
-    let (ols_docs, (umls_rows, umls_note), medline_topics) =
-        tokio::join!(ols_future, umls_future, medline_future);
+    // Alias fallback is advisory after a primary typed lookup miss. Bypass the
+    // shared HTTP cache so stale resolver hits cannot override the original
+    // not-found contract when OLS4 is degraded.
+    let (ols_docs, (umls_rows, umls_note), medline_topics) = match mode {
+        DiscoverMode::Command => tokio::join!(ols_future, umls_future, medline_future),
+        DiscoverMode::AliasFallback => {
+            crate::sources::with_no_cache(true, async {
+                tokio::join!(ols_future, umls_future, medline_future)
+            })
+            .await
+        }
+    };
 
     let ols_docs = ols_docs.map_err(|err| match err {
         BioMcpError::Api { api, message } if api == "ols4" => BioMcpError::Api {
