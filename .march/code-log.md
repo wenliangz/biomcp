@@ -2,80 +2,86 @@
 
 ## Summary
 
-Completed the remaining source SEO landing pages by:
-
-- adding 10 new source guides in `docs/sources/`
-- expanding the `Sources` nav in `mkdocs.yml`
-- updating `docs/sources/index.md` metadata and source table
-- extending `tests/test_source_pages_docs_contract.py` so the repo enforces the full 18-page source surface
+Rewrote the landing copy in `README.md` and `docs/index.md` to match the
+approved marketing voice while preserving the shipped docs contract, command
+examples, section order, and downstream public-doc assertions.
 
 ## Commands Run
 
 - `checkpoint status`
+- `checkpoint done 1`
+- `checkpoint note "..."`
+- `checkpoint done 2`
+- `checkpoint done 3`
+- `rg --files .march`
+- `ls -la`
+- `sed -n '1,220p' /home/ian/workspace/.agents/skills/checkpoint/SKILL.md`
+- `sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/testing-mindset/SKILL.md`
 - `sed -n '1,240p' .march/ticket.md`
-- `sed -n '1,260p' .march/design-draft.md`
-- `sed -n '1,520p' .march/design-final.md`
-- `sed -n '1,260p' tests/test_source_pages_docs_contract.py`
-- `sed -n '1,220p' docs/sources/index.md`
-- `sed -n '1,220p' docs/sources/pubmed.md`
-- `sed -n '1,220p' docs/sources/reactome.md`
-- `sed -n '1,220p' docs/sources/clinvar.md`
-- `sed -n '1,220p' docs/sources/semantic-scholar.md`
-- `rg -n "OpenTargets|ChEMBL|CIViC|OncoKB|cBioPortal|EMA|KEGG|PharmGKB|CPIC|Human Protein Atlas|Monarch" docs/user-guide docs/reference src/cli/list_reference.md src/cli/list.rs docs/troubleshooting.md`
-- `sed -n '1,260p' docs/user-guide/drug.md`
-- `sed -n '1,260p' docs/user-guide/gene.md`
-- `sed -n '1,260p' docs/user-guide/disease.md`
-- `sed -n '1,260p' docs/user-guide/variant.md`
-- `sed -n '1,260p' docs/user-guide/pgx.md`
-- `sed -n '1,220p' docs/user-guide/pathway.md`
-- `sed -n '1,220p' docs/user-guide/phenotype.md`
-- `sed -n '1,220p' docs/reference/civic-sections.md`
-- `sed -n '1,220p' docs/reference/data-sources.md`
-- `sed -n '320,390p' docs/user-guide/cli-reference.md`
-- `sed -n '1,140p' src/cli/list_reference.md`
-- `uv run --no-project --with pytest python -m pytest tests/test_source_pages_docs_contract.py -q --noconftest`
+- `sed -n '1,380p' .march/design-draft.md`
+- `sed -n '1,380p' .march/design-final.md`
+- `sed -n '1,260p' README.md`
+- `sed -n '1,260p' docs/index.md`
+- `sed -n '1,240p' tests/test_public_install_docs_contract.py`
+- `sed -n '1,240p' tests/test_public_search_all_docs_contract.py`
+- `sed -n '1,240p' tests/test_public_skill_docs_contract.py`
+- `sed -n '1,240p' tests/test_docs_changelog_refresh.py`
+- `sed -n '1,220p' /home/ian/workspace/marketing/.agents/product-marketing-context.md`
+- `sed -n '1,240p' /home/ian/workspace/marketing/biomcp/presentations/biomcp-introduction/biomcp-introduction.md`
+- `python3 - <<'PY' ...`
+  - ran the approved structural landing-copy proof from
+    `.march/design-final.md` before and after the rewrite
+- `uv run --no-project --with pytest python -m pytest tests/test_public_install_docs_contract.py tests/test_public_search_all_docs_contract.py tests/test_public_skill_docs_contract.py tests/test_citation_contract.py tests/test_source_licensing_docs_contract.py tests/test_directory_submission_contract.py tests/test_bioasq_benchmark_contract.py tests/test_docs_changelog_refresh.py -q --noconftest`
 - `uv run --no-project --with mkdocs-material --with pymdown-extensions mkdocs build --strict`
 - `make check`
 - `git status --short`
+- `git add README.md docs/index.md`
+- `git add -f .march/code-log.md`
+- `git diff --cached --stat`
+- `git diff --cached -- README.md docs/index.md .march/code-log.md`
+- `git check-ignore -v .march/code-log.md .march/checkpoint.json`
+- `git ls-files .march/code-log.md .march/checkpoint.json`
 
 ## Changes Made
 
-- Added:
-  - `docs/sources/chembl.md`
-  - `docs/sources/opentargets.md`
-  - `docs/sources/civic.md`
-  - `docs/sources/oncokb.md`
-  - `docs/sources/cbioportal.md`
-  - `docs/sources/ema.md`
-  - `docs/sources/kegg.md`
-  - `docs/sources/pharmgkb.md`
-  - `docs/sources/human-protein-atlas.md`
-  - `docs/sources/monarch-initiative.md`
-- Updated `docs/sources/index.md`:
-  - expanded the SEO description to list all 18 source guides
-  - appended the 10 new rows to the source table in the approved order
-- Updated `mkdocs.yml`:
-  - added the 10 new source pages to the `Sources` nav block
-- Updated `tests/test_source_pages_docs_contract.py`:
-  - added the 10 new `SOURCE_PAGE_SPECS`
-  - expanded the expected source file set
-  - expanded the expected `Sources` nav block
-  - updated the overview-page description assertion
+- Updated `README.md`:
+  - added a one-paragraph hero between `# BioMCP` and `## Description`
+  - rewrote the `## Description` block in the approved product-marketing voice
+  - rewrote the five `## Features` bullets as scannable capability copy
+  - left installation, quick start, command grammar, and later sections intact
+- Updated `docs/index.md`:
+  - replaced the opening intro block before `## Install`
+  - added a one-line lead sentence above the existing quick-start code block
+  - rewrote the six `## Feature highlights` bullets to mirror the README voice
+  - left install content, quick-start commands, command grammar, and later
+    sections intact
 
 ## Proof / Tests Added
 
-- Updated the existing repo-native proof in `tests/test_source_pages_docs_contract.py` to cover the new source pages and nav/overview contract.
+- No committed test files changed.
+- Used the approved structural landing-copy Python check from
+  `.march/design-final.md` as the proof-first gate.
+  - It failed before the rewrite because the README lacked the required hero
+    paragraph.
+  - It passed after the rewrite once the README description preserved the exact
+    `plus local study analytics` contract phrase.
 
 ## Verification
 
-- `uv run --no-project --with pytest python -m pytest tests/test_source_pages_docs_contract.py -q --noconftest`
-  - passed
+- Approved structural landing-copy proof: passed
+- Targeted public docs contract suite: passed
+  - 49 tests passed
 - `uv run --no-project --with mkdocs-material --with pymdown-extensions mkdocs build --strict`
   - passed
 - `make check`
   - passed
+  - includes `./bin/lint`, `cargo fmt --check`, `cargo clippy -- -D warnings`,
+    and `cargo test` (927 unit tests plus integration/doc tests)
 
 ## Deviations
 
 - No design deviations.
-- The focused docs-contract test was run with `--noconftest` in a no-project env because the repo `conftest.py` pulls unrelated runtime dependencies; the full repo gate was still validated with `make check`.
+- Operational note: concurrent `checkpoint` commands corrupted the ignored
+  `.march/checkpoint.json` state file, so I repaired that local step-tracking
+  file to continue the required checkpoint workflow. It is ignored by Git and
+  not part of the ticket diff.

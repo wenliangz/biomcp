@@ -1,6 +1,12 @@
 # BioMCP
 
-BioMCP gives researchers, clinicians, and agents one command grammar across biomedical APIs that normally require separate identifiers, search forms, and output conventions. It keeps results compact and evidence-oriented so you can move quickly from orientation to detail. When public APIs are not enough, the same binary also runs local study analytics on downloaded cBioPortal datasets.
+One binary. One grammar. Evidence from the biomedical sources you already trust.
+
+BioMCP replaces the usual routine of jumping between database sites, auth
+schemes, and API docs with one command surface for researchers, clinicians, and
+agents. Search, drill into detail, pivot to the next entity, and keep the
+output compact enough to stay useful. When public APIs are not enough, the same
+binary also runs local study analytics on downloaded cBioPortal datasets.
 
 ## Install
 
@@ -66,6 +72,8 @@ make install
 
 ## Quick start
 
+Install to first result in under 30 seconds:
+
 ```bash
 uv tool install biomcp-cli
 biomcp health --apis-only
@@ -89,12 +97,22 @@ search all [slot filters]    → counts-first cross-entity orientation
 
 ## Feature highlights
 
-- **Federated article search:** PubTator3 and Europe PMC run together for `search article`, then deduplicate by PMID.
-- **Free-text discovery:** `biomcp discover` resolves aliases, brands, symptoms, and pathways before you commit to a typed entity command.
-- **Cross-entity pivots:** move directly from a known entity into trials, articles, drugs, pathways, structures, or article graph helpers.
-- **Study analytics + charts:** `study` commands support local cohort analytics plus native terminal, SVG, and PNG chart output.
-- **Citation graph helpers:** `article citations`, `article references`, and `article recommendations` add literature navigation from a known paper with optional Semantic Scholar auth.
-- **Gene-set enrichment and batch retrieval:** `biomcp enrich` uses g:Profiler, and `biomcp batch` runs up to 10 focused `get` calls with shared JSON metadata.
+- **Search the literature:** `search article` fans out across PubTator3 and
+  Europe PMC, deduplicates identifiers, and can add a Semantic Scholar leg when
+  your filters support it.
+- **Resolve messy queries:** `biomcp discover` turns aliases, brands, symptoms,
+  and pathway names into the right entity before you commit to a typed command.
+- **Pivot across entities:** move from a known gene, variant, drug, disease,
+  pathway, protein, or article into trials, articles, drugs, pathways,
+  structures, or article graph helpers without rebuilding context.
+- **Analyze studies locally:** `study` commands cover cohort analytics and
+  native terminal, SVG, and PNG charts for downloaded cBioPortal-style
+  datasets.
+- **Follow the paper trail:** `article citations`, `article references`,
+  `article recommendations`, and `article entities` expand one paper into its
+  surrounding evidence with optional Semantic Scholar auth.
+- **Enrich and batch:** `biomcp enrich` uses g:Profiler, and `biomcp batch`
+  runs up to 10 focused `get` calls with shared JSON metadata.
 
 ## Entities and sources
 
