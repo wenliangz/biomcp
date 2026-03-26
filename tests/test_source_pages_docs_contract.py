@@ -6,6 +6,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 OVERVIEW_FILE = "index.md"
+SOURCE_PAGE_SECTION_HEADINGS = (
+    "## What BioMCP exposes",
+    "## Example commands",
+    "## API access",
+    "## Official source",
+    "## Related docs",
+)
 
 SOURCE_PAGE_SPECS = {
     "pubmed.md": {
@@ -214,6 +221,249 @@ SOURCE_PAGE_SPECS = {
             "biomcp article recommendations 22663011 --limit 3",
         ],
     },
+    "chembl.md": {
+        "title": "ChEMBL MCP Tool for Drug Target Enrichment | BioMCP",
+        "description": "Use BioMCP to pull ChEMBL drug-target activity and indication context for drug lookups without working directly with the ChEMBL API.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://www.ebi.ac.uk/chembl/",
+        "required_intro_phrases": [
+            "drug `targets` section",
+            "drug `indications` section",
+            "OpenTargets",
+            "activity and mechanism context",
+        ],
+        "exposes": [
+            "get drug <name> targets",
+            "get drug <name> indications",
+        ],
+        "example_commands": [
+            "biomcp get drug pembrolizumab targets",
+            "biomcp get drug pembrolizumab indications",
+            "biomcp get drug dabrafenib targets",
+        ],
+    },
+    "opentargets.md": {
+        "title": "OpenTargets MCP Tool for Target and Disease Context | BioMCP",
+        "description": "Use BioMCP to surface OpenTargets disease associations, drug-target context, and druggability signals in BioMCP gene, disease, and drug workflows.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://platform.opentargets.org/",
+        "required_intro_phrases": [
+            "gene `druggability` section",
+            "`get gene <symbol> diseases`",
+            "`get disease <id> genes`",
+            "OpenTargets scores",
+        ],
+        "exposes": [
+            "get gene <symbol> diseases",
+            "get gene <symbol> druggability",
+            "get drug <name> targets",
+            "get drug <name> indications",
+            "get disease <id> genes",
+            "get disease <id> prevalence",
+        ],
+        "example_commands": [
+            "biomcp get gene BRAF diseases",
+            "biomcp get gene BRAF druggability",
+            "biomcp get disease MONDO:0005105 genes",
+            "biomcp get disease MONDO:0005105 prevalence",
+            "biomcp get drug pembrolizumab targets",
+        ],
+    },
+    "civic.md": {
+        "title": "CIViC MCP Tool for Clinical Variant Evidence | BioMCP",
+        "description": "Use BioMCP to surface CIViC evidence, disease-associated variants, and therapy context across BioMCP variant, gene, drug, and disease workflows.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://civicdb.org/home",
+        "required_intro_phrases": [
+            "section-gated enrichment",
+            "`get variant <id> civic`",
+            "`get gene <symbol> civic`",
+            "`get disease <id> variants`",
+            "`get drug <name> civic`",
+        ],
+        "exposes": [
+            "get variant <id> civic",
+            "get gene <symbol> civic",
+            "get drug <name> civic",
+            "get disease <id> civic",
+            "get disease <id> variants",
+        ],
+        "example_commands": [
+            'biomcp get variant "BRAF V600E" civic',
+            "biomcp get gene BRAF civic",
+            "biomcp get drug vemurafenib civic",
+            "biomcp get disease MONDO:0005105 civic",
+            "biomcp get disease MONDO:0005105 variants",
+        ],
+    },
+    "oncokb.md": {
+        "title": "OncoKB MCP Tool for Oncology Variant Annotation | BioMCP",
+        "description": "Use BioMCP to run the explicit OncoKB variant helper for oncogenicity, evidence levels, and treatment implications on actionable variants.",
+        "api_access": "Requires `ONCOKB_TOKEN` for the production OncoKB API. Configure it with the [API Keys](../getting-started/api-keys.md) guide and register at [OncoKB](https://www.oncokb.org/account/register).",
+        "provider_key_url": "https://www.oncokb.org/account/register",
+        "official_url": "https://www.oncokb.org/",
+        "required_intro_phrases": [
+            "explicit helper",
+            "`variant oncokb`",
+            "`ONCOKB_TOKEN`",
+            "registration-gated",
+        ],
+        "exposes": [
+            "variant oncokb <id>",
+        ],
+        "example_commands": [
+            'biomcp variant oncokb "BRAF V600E"',
+            'biomcp variant oncokb "EGFR L858R"',
+            'biomcp variant oncokb "KRAS G12C"',
+        ],
+    },
+    "cbioportal.md": {
+        "title": "cBioPortal MCP Tool for Cohort Variant Context | BioMCP",
+        "description": "Use BioMCP to add cBioPortal cohort-frequency context to variants and download local study datasets for BioMCP study analytics.",
+        "api_access": "No BioMCP API key required. Local study analytics use downloaded datasets in the default study root or `BIOMCP_STUDY_DIR`.",
+        "official_url": "https://www.cbioportal.org/",
+        "required_intro_phrases": [
+            "variant `cbioportal` section",
+            "`study` is BioMCP's local cBioPortal analytics family",
+            "`study download`",
+            "`study query`",
+        ],
+        "exposes": [
+            "get variant <id> cbioportal",
+            "study download --list",
+            "study download <study_id>",
+            "study query --study <id> --gene <symbol> --type <mutations|cna|expression>",
+        ],
+        "example_commands": [
+            'biomcp get variant "BRAF V600E" cbioportal',
+            "biomcp study download --list",
+            "biomcp study download msk_impact_2017",
+            "biomcp study query --study msk_impact_2017 --gene TP53 --type mutations",
+        ],
+    },
+    "ema.md": {
+        "title": "EMA MCP Tool for EU Drug Regulatory Data | BioMCP",
+        "description": "Use BioMCP to search EMA-backed EU drug records in BioMCP and retrieve regulatory, safety, and shortage context through the local EMA batch.",
+        "api_access": "No BioMCP API key required. BioMCP auto-downloads the EMA human-medicines JSON batch into `BIOMCP_EMA_DIR` or the default data directory on first use.",
+        "official_url": "https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format",
+        "required_intro_phrases": [
+            "`BIOMCP_EMA_DIR`",
+            "auto-downloads the six EMA human-medicines JSON feeds",
+            "`biomcp ema sync`",
+            "`--region eu|all`",
+            "name/alias lookups",
+        ],
+        "exposes": [
+            "search drug <name> --region eu",
+            "search drug <name> --region all",
+            "get drug <name> regulatory --region eu|all",
+            "get drug <name> safety --region eu|all",
+            "get drug <name> shortage --region eu|all",
+        ],
+        "example_commands": [
+            "biomcp search drug Keytruda --region eu --limit 3",
+            "biomcp get drug Keytruda regulatory --region eu",
+            "biomcp get drug Ozempic safety --region eu",
+            "biomcp get drug carboplatin shortage --region eu",
+            "biomcp ema sync",
+        ],
+    },
+    "kegg.md": {
+        "title": "KEGG MCP Tool for Pathway Search | BioMCP",
+        "description": "Use BioMCP to search KEGG pathways, fetch KEGG pathway summaries, and expand to pathway genes without learning KEGG's flat-file API.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://www.kegg.jp/",
+        "required_intro_phrases": [
+            "multi-source across Reactome, KEGG, and WikiPathways",
+            "KEGG base cards stay summary-only unless you explicitly request `genes`",
+            "`events` and pathway `enrichment` are Reactome-only",
+            "3 requests / second",
+        ],
+        "exposes": [
+            "search pathway",
+            "get pathway <id>",
+            "get pathway <id> genes",
+            "get gene <symbol> pathways",
+        ],
+        "example_commands": [
+            'biomcp search pathway "MAPK signaling" --limit 5',
+            "biomcp get pathway hsa05200",
+            "biomcp get pathway hsa05200 genes",
+            "biomcp get gene BRAF pathways",
+        ],
+    },
+    "pharmgkb.md": {
+        "title": "PharmGKB and CPIC MCP Tool for Pharmacogenomics | BioMCP",
+        "description": "Use BioMCP to search CPIC-backed PGx guidance and add PharmGKB clinical annotations to gene-drug pharmacogenomic workflows.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://www.pharmgkb.org/",
+        "required_intro_phrases": [
+            "CPIC",
+            "PharmGKB",
+            "`get pgx <gene_or_drug>`",
+            "`annotations`",
+            "recommendations",
+        ],
+        "exposes": [
+            "search pgx",
+            "get pgx <gene_or_drug>",
+            "get pgx <gene_or_drug> recommendations",
+            "get pgx <gene_or_drug> frequencies",
+            "get pgx <gene_or_drug> guidelines",
+            "get pgx <gene_or_drug> annotations",
+        ],
+        "example_commands": [
+            "biomcp search pgx -g CYP2D6 --limit 5",
+            "biomcp get pgx CYP2D6",
+            "biomcp get pgx CYP2D6 recommendations",
+            "biomcp get pgx CYP2D6 annotations",
+            "biomcp get pgx codeine recommendations frequencies",
+        ],
+    },
+    "human-protein-atlas.md": {
+        "title": "Human Protein Atlas MCP Tool for Tissue Expression | BioMCP",
+        "description": "Use BioMCP to surface Human Protein Atlas tissue expression and localization data through the BioMCP gene hpa section.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://www.proteinatlas.org/",
+        "required_intro_phrases": [
+            "gene `hpa` section",
+            "tissue expression",
+            "subcellular localization",
+            "cancer expression",
+        ],
+        "exposes": [
+            "get gene <symbol> hpa",
+        ],
+        "example_commands": [
+            "biomcp get gene BRAF hpa",
+            "biomcp get gene EGFR hpa",
+            "biomcp get gene TP53 hpa",
+        ],
+    },
+    "monarch-initiative.md": {
+        "title": "Monarch Initiative MCP Tool for Phenotype and Disease Matching | BioMCP",
+        "description": "Use BioMCP to query Monarch-backed disease genes, phenotype matches, and model evidence in BioMCP disease and phenotype workflows.",
+        "api_access": "No BioMCP API key required.",
+        "official_url": "https://monarchinitiative.org/",
+        "required_intro_phrases": [
+            "disease `genes` section",
+            "disease `models` section",
+            "`search phenotype`",
+            "There is no `get phenotype` subcommand",
+        ],
+        "exposes": [
+            "get disease <id> genes",
+            "get disease <id> phenotypes",
+            "get disease <id> models",
+            "search phenotype",
+        ],
+        "example_commands": [
+            "biomcp get disease MONDO:0005105 genes",
+            "biomcp get disease MONDO:0005105 phenotypes",
+            "biomcp get disease MONDO:0005105 models",
+            'biomcp search phenotype "HP:0001250 HP:0001263" --limit 10',
+        ],
+    },
 }
 
 EXPECTED_SOURCE_FILES = [OVERVIEW_FILE, *SOURCE_PAGE_SPECS]
@@ -228,6 +478,16 @@ EXPECTED_NAV_BLOCK = """  - Sources:
       - gnomAD: sources/gnomad.md
       - Reactome: sources/reactome.md
       - Semantic Scholar: sources/semantic-scholar.md
+      - ChEMBL: sources/chembl.md
+      - OpenTargets: sources/opentargets.md
+      - CIViC: sources/civic.md
+      - OncoKB: sources/oncokb.md
+      - cBioPortal: sources/cbioportal.md
+      - EMA: sources/ema.md
+      - KEGG: sources/kegg.md
+      - PharmGKB / CPIC: sources/pharmgkb.md
+      - Human Protein Atlas: sources/human-protein-atlas.md
+      - Monarch Initiative: sources/monarch-initiative.md
 """
 
 
@@ -248,6 +508,8 @@ def _front_matter_value(text: str, field: str) -> str:
 def _markdown_section_block(text: str, heading: str, next_heading: str) -> str:
     start = text.index(heading)
     remainder = text[start + len(heading) :]
+    if not next_heading:
+        return remainder
     end = remainder.find(next_heading)
     if end == -1:
         return remainder
@@ -265,6 +527,26 @@ def _source_table_block(text: str) -> str:
         "## What BioMCP exposes\n",
         "\n## Example commands",
     )
+
+
+def _markdown_blocks(text: str) -> list[str]:
+    return [block.strip() for block in re.split(r"\n\s*\n", text.strip()) if block.strip()]
+
+
+def _example_blocks(text: str) -> list[tuple[str, str]]:
+    blocks = []
+    for chunk in text.split("```bash\n")[1:]:
+        command_block, remainder = chunk.split("\n```", 1)
+        description = next(
+            (line.strip() for line in remainder.splitlines() if line.strip()),
+            "",
+        )
+        blocks.append((command_block.strip(), description))
+    return blocks
+
+
+def _markdown_links(text: str) -> list[str]:
+    return re.findall(r"\[[^\]]+\]\(([^)#]+)\)", text)
 
 
 def test_docs_sources_directory_has_expected_file_set() -> None:
@@ -293,7 +575,7 @@ def test_sources_overview_page_has_required_metadata_and_links() -> None:
     )
     assert (
         _front_matter_value(overview, "description")
-        == "Explore BioMCP source guides for PubMed, ClinicalTrials.gov, ClinVar, OpenFDA, UniProt, gnomAD, Reactome, and Semantic Scholar."
+        == "Explore BioMCP source guides for PubMed, ClinicalTrials.gov, ClinVar, OpenFDA, UniProt, gnomAD, Reactome, Semantic Scholar, ChEMBL, OpenTargets, CIViC, OncoKB, cBioPortal, EMA, KEGG, PharmGKB / CPIC, Human Protein Atlas, and Monarch Initiative."
     )
 
     assert "# Biomedical Data Sources for AI Agents" in overview
@@ -316,26 +598,39 @@ def test_each_source_page_has_required_front_matter_headings_intro_and_examples(
         assert _front_matter_value(page, "title") == spec["title"]
         assert _front_matter_value(page, "description") == spec["description"]
 
-        for heading in (
-            "## What BioMCP exposes",
-            "## Example commands",
-            "## API access",
-            "## Official source",
-            "## Related docs",
-        ):
+        heading_positions = []
+        for heading in SOURCE_PAGE_SECTION_HEADINGS:
             assert heading in page, f"{filename} missing heading {heading!r}"
+            heading_positions.append(page.index(heading))
+        assert heading_positions == sorted(heading_positions), (
+            f"{filename} headings are out of order"
+        )
 
         intro = _source_intro_block(page)
+        assert len(_markdown_blocks(intro)) == 2, (
+            f"{filename} intro should be exactly two paragraphs"
+        )
         for phrase in spec["required_intro_phrases"]:
             assert phrase in intro, f"{filename} missing intro phrase {phrase!r}"
 
         examples = _markdown_section_block(page, "## Example commands\n", "\n## API access")
-        command_count = len(re.findall(r"(?m)^biomcp ", examples))
+        example_blocks = _example_blocks(examples)
+        command_count = len(example_blocks)
         assert command_count == len(spec["example_commands"])
         assert 3 <= command_count <= 5, f"{filename} has {command_count} example commands"
+        assert examples.count("```bash\n") == command_count
 
         for command in spec["example_commands"]:
             assert command in examples, f"{filename} missing example {command!r}"
+
+        for _, description in example_blocks:
+            assert description, f"{filename} has an example without a description"
+            assert not description.startswith(("```", "## ")), (
+                f"{filename} example is missing prose after a bash block"
+            )
+            assert description.endswith("."), (
+                f"{filename} example description should be a sentence"
+            )
 
 
 def test_each_source_page_includes_expected_surface_auth_and_official_link() -> None:
@@ -348,6 +643,22 @@ def test_each_source_page_includes_expected_surface_auth_and_official_link() -> 
 
         for command in spec["exposes"]:
             assert command in source_table, f"{filename} missing source surface {command!r}"
+
+
+def test_each_source_page_has_three_to_four_related_doc_links_that_resolve() -> None:
+    for filename in SOURCE_PAGE_SPECS:
+        page = _read_source_page(filename)
+        related_docs = _markdown_section_block(page, "## Related docs\n", "")
+        links = _markdown_links(related_docs)
+
+        assert 3 <= len(links) <= 4, f"{filename} should link 3-4 related docs"
+
+        page_dir = REPO_ROOT / "docs" / "sources"
+        for link in links:
+            assert "://" not in link, f"{filename} related docs should be internal links"
+            assert link.endswith(".md"), f"{filename} related docs should point to markdown"
+            resolved = (page_dir / link).resolve()
+            assert resolved.exists(), f"{filename} related doc does not exist: {link}"
 
 
 def test_optional_key_pages_link_api_keys_guide() -> None:

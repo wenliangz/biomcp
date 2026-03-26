@@ -1,6 +1,6 @@
 ---
 title: "Biomedical Data Sources for AI Agents | BioMCP"
-description: "Explore BioMCP source guides for PubMed, ClinicalTrials.gov, ClinVar, OpenFDA, UniProt, gnomAD, Reactome, and Semantic Scholar."
+description: "Explore BioMCP source guides for PubMed, ClinicalTrials.gov, ClinVar, OpenFDA, UniProt, gnomAD, Reactome, Semantic Scholar, ChEMBL, OpenTargets, CIViC, OncoKB, cBioPortal, EMA, KEGG, PharmGKB / CPIC, Human Protein Atlas, and Monarch Initiative."
 ---
 
 # Biomedical Data Sources for AI Agents
@@ -21,6 +21,16 @@ Use these pages when you already know the provider you trust, the keyword you ar
 | gnomAD | Population frequency and gene constraint context | [gnomAD](gnomad.md) |
 | Reactome | Pathway records, pathway genes, and contained events | [Reactome](reactome.md) |
 | Semantic Scholar | TLDRs, citation graphs, references, and recommendations | [Semantic Scholar](semantic-scholar.md) |
+| ChEMBL | Drug-target activity, mechanism context, and indication enrichment | [ChEMBL](chembl.md) |
+| OpenTargets | Target-disease scores, druggability, and disease-gene evidence | [OpenTargets](opentargets.md) |
+| CIViC | Clinical variant evidence, therapy context, and disease-associated variants | [CIViC](civic.md) |
+| OncoKB | Oncology actionability tiers and treatment implications for actionable variants | [OncoKB](oncokb.md) |
+| cBioPortal | Cancer cohort frequencies and local study analytics workflows | [cBioPortal](cbioportal.md) |
+| EMA | EU regulatory, safety, and shortage context for medicines | [EMA](ema.md) |
+| KEGG | KEGG pathway IDs, summary cards, and pathway genes | [KEGG](kegg.md) |
+| PharmGKB / CPIC | Pharmacogenomic recommendations, frequencies, and clinical annotations | [PharmGKB / CPIC](pharmgkb.md) |
+| Human Protein Atlas | Tissue expression, localization, and cancer-expression context | [Human Protein Atlas](human-protein-atlas.md) |
+| Monarch Initiative | Phenotype-to-disease matching, disease genes, and model evidence | [Monarch Initiative](monarch-initiative.md) |
 
 ## Reference and setup
 
