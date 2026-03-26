@@ -25,8 +25,9 @@ biomcp skill                  → show the embedded BioMCP agent guide
 biomcp skill install <dir>    → install the BioMCP guide into an agent directory
 biomcp skill list             → legacy alias; currently reports no embedded catalog
 biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`
-biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`
 ```
+
+Compatibility note: `biomcp serve-sse` remains available only as a hidden compatibility command that points users to `biomcp serve-http`.
 
 ## Progressive Disclosure Pattern
 

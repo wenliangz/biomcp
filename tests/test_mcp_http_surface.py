@@ -84,7 +84,7 @@ def test_http_routes_advertise_streamable_http_surface(http_server: str) -> None
     assert ready_payload == {"status": "ok"}
 
 
-def test_serve_http_help_names_streamable_http() -> None:
+def test_serve_http_help_matches_runtime_surface() -> None:
     binary = _require_release_binary()
     result = subprocess.run(
         [str(binary), "serve-http", "--help"],
@@ -97,10 +97,29 @@ def test_serve_http_help_names_streamable_http() -> None:
     assert result.returncode == 0
     assert "Streamable HTTP" in result.stdout
     assert "/mcp" in result.stdout
+    assert "--host <HOST>" in result.stdout
+    assert "--port <PORT>" in result.stdout
     assert "SSE transport" not in result.stdout
+    assert "--json" not in result.stdout
+    assert "--no-cache" not in result.stdout
 
 
-def test_serve_sse_help_is_visible_and_deprecated() -> None:
+def test_top_level_help_hides_serve_sse_but_lists_serve_http() -> None:
+    binary = _require_release_binary()
+    result = subprocess.run(
+        [str(binary), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "serve-http" in result.stdout
+    assert "serve-sse" not in result.stdout
+
+
+def test_serve_sse_help_is_still_callable_and_deprecated() -> None:
     binary = _require_release_binary()
     result = subprocess.run(
         [str(binary), "serve-sse", "--help"],
@@ -114,6 +133,9 @@ def test_serve_sse_help_is_visible_and_deprecated() -> None:
     assert "serve-sse" in result.stdout
     assert "removed" in result.stdout or "deprecated" in result.stdout
     assert "serve-http" in result.stdout
+    assert "/mcp" in result.stdout
+    assert "--json" not in result.stdout
+    assert "--no-cache" not in result.stdout
 
 
 def test_serve_sse_exits_non_zero_with_migration_message() -> None:

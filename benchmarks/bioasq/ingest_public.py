@@ -60,12 +60,49 @@ def resolve_repo_path(path_str: str) -> Path:
 
 
 def parse_args(argv: list[str], manifest: dict[str, Any]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    epilog_lines = [
+        "Examples:",
+        "  uv run --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026",
+        "  uv run --script benchmarks/bioasq/ingest_public.py --bundle mirage-yesno-2024",
+        "  uv run --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026 --force",
+        "",
+        "Bundle lanes:",
+        "  Public historical lane (runnable, no registration required):",
+    ]
+
+    for bundle in manifest["bundles"]:
+        if bundle["lane"] != "public_historical":
+            continue
+        epilog_lines.append(f"    {bundle['id']:<35} {bundle['label']}")
+
+    epilog_lines.extend(
+        [
+            "",
+            "  Official competition lane (metadata-only, registration-required):",
+        ]
+    )
+
+    for bundle in manifest["bundles"]:
+        if bundle["lane"] != "official_competition":
+            continue
+        epilog_lines.append(f"    {bundle['id']:<35} {bundle['label']}")
+        epilog_lines.append(
+            "                                       Participants-area workflow only; "
+            "see docs/reference/bioasq-benchmark.md"
+        )
+
+    parser = argparse.ArgumentParser(
+        prog="ingest_public.py",
+        description="Ingest a manifest-defined public BioASQ bundle.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="\n".join(epilog_lines),
+    )
     parser.add_argument(
         "--bundle",
         required=True,
+        metavar="BUNDLE",
         choices=[bundle["id"] for bundle in manifest["bundles"]],
-        help="Manifest-defined BioASQ bundle id to ingest.",
+        help="Bundle id to ingest (see lane table below).",
     )
     parser.add_argument(
         "--force",
