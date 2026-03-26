@@ -5,7 +5,7 @@ Drug commands connect mechanism and target context with trial and adverse-event 
 | Section | Command focus | Why it matters |
 |---|---|---|
 | EMA health readiness | `biomcp health` | Confirms the local EMA batch is surfaced as an operator-readable readiness row |
-| Drug search | `search drug pembrolizumab` | Confirms name-based lookup |
+| Drug search | `search drug pembrolizumab --region us` | Confirms stable U.S. name-based lookup |
 | Drug detail | `get drug pembrolizumab` | Confirms mechanism/target card |
 | Targets section | `get drug ... targets` | Confirms progressive disclosure |
 | Trial helper | `drug trials pembrolizumab` | Confirms intervention-based trial pivot |
@@ -26,12 +26,21 @@ echo "$out" | mustmatch like "| EMA local data ($BIOMCP_EMA_DIR) | configured |"
 
 ## Searching by Name
 
-Name-first search is the most common route when reviewing a therapy in context. The card should provide a consistent heading and compact table schema.
+Name-first search is the stable PR-gate coverage for generic U.S. lookup
+without the EMA local-data dependency. This section runs with
+`BIOMCP_EMA_DIR` unset and fresh XDG roots so a regression back to EMA
+auto-sync is visible immediately. The later EMA-seeded sections cover the
+default U.S.+EU no-flag path and the explicit EU/all-region variants.
 
 ```bash
-out="$(biomcp search drug pembrolizumab --limit 3)"
+tmp_data="$(mktemp -d)"
+tmp_cache="$(mktemp -d)"
+err="$(mktemp)"
+out="$(env -u BIOMCP_EMA_DIR XDG_DATA_HOME="$tmp_data" XDG_CACHE_HOME="$tmp_cache" biomcp search drug pembrolizumab --region us --limit 3 2>"$err")"
 echo "$out" | mustmatch like "# Drugs: pembrolizumab"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
+cat "$err" | mustmatch not like "Downloading EMA data"
+test ! -d "$tmp_data/biomcp/ema"
 ```
 
 ## Search Help Shows Region Defaults
