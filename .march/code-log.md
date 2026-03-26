@@ -6,57 +6,56 @@
 checkpoint status
 sed -n '1,220p' .march/ticket.md
 sed -n '1,260p' .march/design-draft.md
-sed -n '1,320p' .march/design-final.md
-sed -n '1,320p' src/cli/mod.rs
-sed -n '1,260p' benchmarks/bioasq/ingest_public.py
-sed -n '1,260p' spec/15-mcp-runtime.md
-sed -n '1,260p' docs/user-guide/cli-reference.md
-sed -n '1,260p' design/ux/cli-reference.md
-rg -n "serve-http|serve-sse|build_cli|parse_args|participants-area" src/cli/mod.rs benchmarks/bioasq/ingest_public.py tests spec docs design
-cargo test --lib serve_http_help_describes_streamable_http
-cargo fmt
-cargo test --lib help
-uv sync --extra dev --no-install-project
-cargo build --release --bin biomcp
-.venv/bin/pytest tests/test_mcp_http_surface.py -k "serve_http_help_matches_runtime_surface or top_level_help_hides_serve_sse_but_lists_serve_http or serve_sse_help_is_still_callable_and_deprecated or serve_sse_exits_non_zero_with_migration_message" -v
-.venv/bin/pytest tests/test_bioasq_ingest.py -k "help or official" -v
-.venv/bin/pytest tests/test_public_skill_docs_contract.py tests/test_upstream_planning_analysis_docs.py -k "public_skill_docs_match_current_cli_contract or technical_and_ux_docs_match_current_cli_and_workflow_contracts" -v
-PATH="$PWD/target/release:$PATH" .venv/bin/pytest spec/15-mcp-runtime.md -v
+sed -n '1,260p' .march/design-final.md
+rg -n "Semantic Scholar|OptionalAuthGet|optional_auth_get" src/cli/health.rs
+sed -n '80,280p' src/cli/health.rs
+sed -n '620,760p' src/cli/health.rs
+sed -n '1020,1585p' src/cli/health.rs
+cargo test optional_auth_get_reports_ --lib
+cargo fmt --all
+cargo test sources::semantic_scholar::tests --lib
+make check
 git status --short
-git ls-files --others --exclude-standard
+git add src/cli/health.rs src/sources/semantic_scholar.rs
+git add -f .march/code-log.md
+git diff --cached --stat
+git diff --cached
 ```
 
 ## What Changed
 
-- Added a canonical clap command builder and env-parse helper in `src/cli/mod.rs`, then switched `src/main.rs` to parse through that helper.
-- Hid the global query-only `json` and `no_cache` flags from the runtime help surfaces by cloning the root args onto `mcp`, `serve`, `serve-http`, and `serve-sse` in hidden form before clap builds the tree.
-- Marked `ServeSse` hidden from top-level help while preserving direct invocation and direct `--help`.
-- Reworked `benchmarks/bioasq/ingest_public.py` help to use `RawDescriptionHelpFormatter`, a concise description, runnable examples, and a `Bundle lanes` epilog that separates the Public historical lane from the Official competition lane.
-- Updated the operator-facing CLI reference and UX reference so `serve-sse` is documented as a hidden compatibility path instead of a primary top-level command.
+- Updated `src/cli/health.rs` to extend `ProbeKind::OptionalAuthGet` with an optional unauthenticated-429 status override.
+- Changed the Semantic Scholar health source descriptor to use the shorter affects text `Semantic Scholar features` and the new unauthenticated 429 guidance string.
+- Updated the optional-auth probe path so an unauthenticated Semantic Scholar `429` renders as:
+  - status: `unavailable (set S2_API_KEY for reliable access)`
+  - latency: plain `Nms`
+  - affects: omitted
+  - probe class: `Healthy`
+- Kept authenticated `429` responses on the existing generic error path, including the HTTP suffix and shortened affects text.
+- Reworked the Semantic Scholar health tests to anchor to the production descriptor instead of duplicating a handwritten test descriptor.
 
-## Tests And Proof
+## Tests And Proof Added/Updated
 
-- Rust unit help proof updated in `src/cli/mod.rs`:
-  - runtime commands do not advertise `--json` / `--no-cache`
-  - `serve-http --help` still advertises Streamable HTTP, `/mcp`, `--host`, and `--port`
-  - top-level help hides `serve-sse`
-  - direct `serve-sse --help` still shows migration guidance
-- Release-binary help proof updated in `tests/test_mcp_http_surface.py`
-- BioASQ help and official-lane rejection proof updated in `tests/test_bioasq_ingest.py`
-- Spec contract updated in `spec/15-mcp-runtime.md`
-- Doc-contract assertions updated in:
-  - `tests/test_public_skill_docs_contract.py`
-  - `tests/test_upstream_planning_analysis_docs.py`
+- Updated:
+  - `optional_auth_get_reports_unauthed_semantic_scholar_as_healthy`
+  - `optional_auth_get_reports_authed_semantic_scholar_as_configured`
+- Added:
+  - `optional_auth_get_reports_unauthenticated_429_as_unavailable`
+  - `optional_auth_get_reports_authenticated_429_as_error`
+- The new unauthenticated 429 proof asserts:
+  - `ProbeClass::Healthy`
+  - no `affects` field in JSON
+  - `healthy == 1`, `excluded == 0`
+  - markdown renders `-` in the `Affects` column when the table includes that column
 
 ## Verification Results
 
-- `cargo test --lib help`
-- `.venv/bin/pytest tests/test_mcp_http_surface.py -k "serve_http_help_matches_runtime_surface or top_level_help_hides_serve_sse_but_lists_serve_http or serve_sse_help_is_still_callable_and_deprecated or serve_sse_exits_non_zero_with_migration_message" -v`
-- `.venv/bin/pytest tests/test_bioasq_ingest.py -k "help or official" -v`
-- `.venv/bin/pytest tests/test_public_skill_docs_contract.py tests/test_upstream_planning_analysis_docs.py -k "public_skill_docs_match_current_cli_contract or technical_and_ux_docs_match_current_cli_and_workflow_contracts" -v`
-- `PATH="$PWD/target/release:$PATH" .venv/bin/pytest spec/15-mcp-runtime.md -v`
+- `cargo test optional_auth_get_reports_ --lib`
+- `cargo test sources::semantic_scholar::tests --lib`
+- `make check`
+
+All verification commands passed.
 
 ## Deviations
 
-- No design deviations in the implementation.
-- For local spec verification I prefixed `PATH` with `target/release` so `spec/15-mcp-runtime.md` exercised the freshly built `biomcp` binary rather than any other `biomcp` on the shell path.
+- Small test-only deviation from the design: `src/sources/semantic_scholar.rs` now wraps its mock-server tests with `with_no_cache(true)`. This was needed because `make check` exposed shared HTTP cache bleed between parallel Semantic Scholar tests. No production behavior changed outside `src/cli/health.rs`.

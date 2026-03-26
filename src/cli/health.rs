@@ -105,6 +105,7 @@ enum ProbeKind {
         header_value_prefix: &'static str,
         unauthenticated_ok_status: &'static str,
         authenticated_ok_status: &'static str,
+        unauthenticated_rate_limited_status: Option<&'static str>,
     },
     AuthQueryParam {
         url: &'static str,
@@ -234,9 +235,7 @@ const HEALTH_SOURCES: &[SourceDescriptor] = &[
     },
     SourceDescriptor {
         api: "Semantic Scholar",
-        affects: Some(
-            "article search fan-out, enrichment, citations, references, and recommendations",
-        ),
+        affects: Some("Semantic Scholar features"),
         probe: ProbeKind::OptionalAuthGet {
             url: "https://api.semanticscholar.org/graph/v1/paper/search?query=BRAF&fields=paperId,title&limit=1",
             env_var: "S2_API_KEY",
@@ -244,6 +243,9 @@ const HEALTH_SOURCES: &[SourceDescriptor] = &[
             header_value_prefix: "",
             unauthenticated_ok_status: "available (unauthenticated, shared rate limit)",
             authenticated_ok_status: "configured (authenticated)",
+            unauthenticated_rate_limited_status: Some(
+                "unavailable (set S2_API_KEY for reliable access)",
+            ),
         },
     },
     SourceDescriptor {
@@ -639,6 +641,7 @@ async fn check_optional_auth_get(
     header_value_prefix: &str,
     unauthenticated_ok_status: &str,
     authenticated_ok_status: &str,
+    unauthenticated_rate_limited_status: Option<&str>,
     affects: Option<&'static str>,
 ) -> ProbeOutcome {
     let key = configured_key(env_var);
@@ -655,6 +658,17 @@ async fn check_optional_auth_get(
         unauthenticated_ok_status
     };
     let start = Instant::now();
+    let error_outcome = |latency: String| {
+        outcome(
+            health_row(
+                api,
+                decorated_status("error", key_hint.as_deref()),
+                latency,
+                affects,
+            ),
+            ProbeClass::Error,
+        )
+    };
 
     match request.send().await {
         Ok(response) => {
@@ -670,27 +684,24 @@ async fn check_optional_auth_get(
                     ),
                     ProbeClass::Healthy,
                 )
-            } else {
+            } else if key_hint.is_none()
+                && status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                && let Some(status_message) = unauthenticated_rate_limited_status
+            {
                 outcome(
                     health_row(
                         api,
-                        decorated_status("error", key_hint.as_deref()),
-                        format!("{elapsed}ms (HTTP {})", status.as_u16()),
-                        affects,
+                        status_message.to_string(),
+                        format!("{elapsed}ms"),
+                        None,
                     ),
-                    ProbeClass::Error,
+                    ProbeClass::Healthy,
                 )
+            } else {
+                error_outcome(format!("{elapsed}ms (HTTP {})", status.as_u16()))
             }
         }
-        Err(err) => outcome(
-            health_row(
-                api,
-                decorated_status("error", key_hint.as_deref()),
-                transport_error_latency(start, &err),
-                affects,
-            ),
-            ProbeClass::Error,
-        ),
+        Err(err) => error_outcome(transport_error_latency(start, &err)),
     }
 }
 
@@ -869,6 +880,7 @@ async fn probe_source(client: reqwest::Client, source: &SourceDescriptor) -> Pro
             header_value_prefix,
             unauthenticated_ok_status,
             authenticated_ok_status,
+            unauthenticated_rate_limited_status,
         } => {
             check_optional_auth_get(
                 client,
@@ -879,6 +891,7 @@ async fn probe_source(client: reqwest::Client, source: &SourceDescriptor) -> Pro
                 header_value_prefix,
                 unauthenticated_ok_status,
                 authenticated_ok_status,
+                unauthenticated_rate_limited_status,
                 source.affects,
             )
             .await
@@ -1122,6 +1135,39 @@ mod tests {
     fn write_ema_files(root: &Path, files: &[&str]) {
         for file in files {
             std::fs::write(root.join(file), b"{}").expect("write EMA fixture file");
+        }
+    }
+
+    fn semantic_scholar_source(url: &'static str) -> SourceDescriptor {
+        let source = health_sources()
+            .iter()
+            .find(|source| source.api == "Semantic Scholar")
+            .expect("semantic scholar health source");
+        let ProbeKind::OptionalAuthGet {
+            env_var,
+            header_name,
+            header_value_prefix,
+            unauthenticated_ok_status,
+            authenticated_ok_status,
+            unauthenticated_rate_limited_status,
+            ..
+        } = source.probe
+        else {
+            panic!("semantic scholar should use optional auth get");
+        };
+
+        SourceDescriptor {
+            api: source.api,
+            affects: source.affects,
+            probe: ProbeKind::OptionalAuthGet {
+                url,
+                env_var,
+                header_name,
+                header_value_prefix,
+                unauthenticated_ok_status,
+                authenticated_ok_status,
+                unauthenticated_rate_limited_status,
+            },
         }
     }
 
@@ -1490,20 +1536,7 @@ mod tests {
         let _env = set_env_var("S2_API_KEY", None);
         let server = block_on(MockServer::start());
         let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
-        let source = SourceDescriptor {
-            api: "Semantic Scholar",
-            affects: Some(
-                "article search fan-out, enrichment, citations, references, and recommendations",
-            ),
-            probe: ProbeKind::OptionalAuthGet {
-                url,
-                env_var: "S2_API_KEY",
-                header_name: "x-api-key",
-                header_value_prefix: "",
-                unauthenticated_ok_status: "available (unauthenticated, shared rate limit)",
-                authenticated_ok_status: "configured (authenticated)",
-            },
-        };
+        let source = semantic_scholar_source(url);
 
         block_on(async {
             Mock::given(method("GET"))
@@ -1529,20 +1562,7 @@ mod tests {
         let _env = set_env_var("S2_API_KEY", Some("test-key-abc"));
         let server = block_on(MockServer::start());
         let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
-        let source = SourceDescriptor {
-            api: "Semantic Scholar",
-            affects: Some(
-                "article search fan-out, enrichment, citations, references, and recommendations",
-            ),
-            probe: ProbeKind::OptionalAuthGet {
-                url,
-                env_var: "S2_API_KEY",
-                header_name: "x-api-key",
-                header_value_prefix: "",
-                unauthenticated_ok_status: "available (unauthenticated, shared rate limit)",
-                authenticated_ok_status: "configured (authenticated)",
-            },
-        };
+        let source = semantic_scholar_source(url);
 
         block_on(async {
             Mock::given(method("GET"))
@@ -1557,6 +1577,123 @@ mod tests {
         let outcome = block_on(probe_source(reqwest::Client::new(), &source));
         assert_eq!(outcome.class, ProbeClass::Healthy);
         assert_eq!(outcome.row.status, "configured (authenticated)");
+    }
+
+    #[test]
+    fn optional_auth_get_reports_unauthenticated_429_as_unavailable() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", None);
+        let server = block_on(MockServer::start());
+        let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
+        let source = semantic_scholar_source(url);
+
+        block_on(async {
+            Mock::given(method("GET"))
+                .and(path("/health"))
+                .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+                .respond_with(ResponseTemplate::new(429))
+                .expect(1)
+                .mount(&server)
+                .await;
+        });
+
+        let outcome = block_on(probe_source(reqwest::Client::new(), &source));
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(
+            outcome.row.status,
+            "unavailable (set S2_API_KEY for reliable access)"
+        );
+        assert!(outcome.row.latency.ends_with("ms"));
+        assert!(!outcome.row.latency.contains("HTTP 429"));
+        assert_eq!(outcome.row.affects, None);
+
+        let report = report_from_outcomes(vec![outcome.clone()]);
+        assert_eq!(report.healthy, 1);
+        assert_eq!(report.excluded, 0);
+        assert_eq!(report.total, 1);
+        assert!(report.all_healthy());
+
+        let value = serde_json::to_value(&report).expect("serialize health report");
+        let rows = value["rows"].as_array().expect("rows array");
+        let row = rows.first().expect("semantic scholar row");
+        assert!(row.get("affects").is_none());
+
+        let md = report_from_outcomes(vec![
+            outcome.clone(),
+            ProbeOutcome {
+                row: HealthRow {
+                    api: "OpenFDA".into(),
+                    status: "error".into(),
+                    latency: "timeout".into(),
+                    affects: Some("adverse-event search".into()),
+                },
+                class: ProbeClass::Error,
+            },
+        ])
+        .to_markdown();
+        assert!(md.contains(&format!(
+            "| Semantic Scholar | {} | {} | - |",
+            outcome.row.status, outcome.row.latency
+        )));
+    }
+
+    #[test]
+    fn optional_auth_get_reports_unauthenticated_non_429_as_error() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", None);
+        let server = block_on(MockServer::start());
+        let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
+        let source = semantic_scholar_source(url);
+
+        block_on(async {
+            Mock::given(method("GET"))
+                .and(path("/health"))
+                .and(|request: &wiremock::Request| !request.headers.contains_key("x-api-key"))
+                .respond_with(ResponseTemplate::new(403))
+                .expect(1)
+                .mount(&server)
+                .await;
+        });
+
+        let outcome = block_on(probe_source(reqwest::Client::new(), &source));
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(outcome.row.status, "error");
+        assert!(outcome.row.latency.contains("HTTP 403"));
+        assert_eq!(
+            outcome.row.affects.as_deref(),
+            Some("Semantic Scholar features")
+        );
+    }
+
+    #[test]
+    fn optional_auth_get_reports_authenticated_429_as_error() {
+        let _lock = env_lock();
+        let _env = set_env_var("S2_API_KEY", Some("test-key-abc"));
+        let server = block_on(MockServer::start());
+        let url = Box::leak(format!("{}/health", server.uri()).into_boxed_str());
+        let source = semantic_scholar_source(url);
+
+        block_on(async {
+            Mock::given(method("GET"))
+                .and(path("/health"))
+                .and(header("x-api-key", "test-key-abc"))
+                .respond_with(ResponseTemplate::new(429))
+                .expect(1)
+                .mount(&server)
+                .await;
+        });
+
+        let outcome = block_on(probe_source(reqwest::Client::new(), &source));
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(
+            outcome.row.status,
+            format!("error (key: {})", masked_key_hint("test-key-abc"))
+        );
+        assert!(outcome.row.latency.contains("HTTP 429"));
+        assert_eq!(
+            outcome.row.affects.as_deref(),
+            Some("Semantic Scholar features")
+        );
     }
 
     #[test]
