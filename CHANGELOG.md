@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.19 — 2026-03-26
+
+### Improvements
+
+- Cleaned up Semantic Scholar health output so unauthenticated setups are
+  reported as optional/shared-pool usage instead of looking like a broken
+  configuration. (055)
+- Added six more built-in study chart types: pie, density, violin,
+  ridgeline, heatmap, and stacked bar. (041)
+- EMA-backed drug data now auto-downloads on first use and refreshes stale
+  local caches, so EU drug coverage no longer requires manual setup. (057)
+
+### CI
+
+- Moved EMA-backed specs out of the PR-blocking stable lane into the smoke
+  lane so CI keeps EMA coverage without destabilizing the release gate. (056)
+
+### Docs
+
+- Refreshed the README, docs index, and source landing pages with clearer
+  public-facing messaging.
+- Added three new blog posts covering agent skills, article search, and
+  built-in cancer genomics charts.
+
 ## 0.8.18 — 2026-03-25
 
 ### New sources

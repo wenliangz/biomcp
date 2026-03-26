@@ -91,9 +91,12 @@ nav:
       - Drug Approvals & AE Summary: reference/drug-approvals-and-ae-summary.md
       - Dependencies: reference/dependencies.md
   - Blog:
-      - "Charts Your Agent Can Actually Read": blog/kuva-charting-guide.md
-      - "cBioPortal Study Analytics in BioMCP": blog/cbioportal-study-analytics.md
-      - "We Deleted 35 Tools and Our Agent Got Better": blog/we-deleted-35-tools.md
+      - blog/biomcp-charts.md
+      - blog/biomcp-pubmed-articles.md
+      - blog/skillbench-biomcp-skills.md
+      - blog/kuva-charting-guide.md
+      - blog/cbioportal-study-analytics.md
+      - blog/we-deleted-35-tools.md
   - Privacy Policy: policies.md
   - Troubleshooting: troubleshooting.md
 
