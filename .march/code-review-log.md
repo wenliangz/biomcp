@@ -3,119 +3,115 @@
 ## Review Scope
 
 Reviewed `.march/ticket.md`, `.march/design-draft.md`, `.march/design-final.md`,
-`.march/code-log.md`, the staged implementation in
-`src/cli/health.rs`, and the spec updates in `spec/01-overview.md`.
+`.march/code-log.md`, and the staged changes in `src/mcp/shell.rs`, `build.rs`,
+`tests/test_mcp_contract.py`, `docs/reference/mcp-server.md`, and
+`spec/15-mcp-runtime.md`.
 
-Re-ran the relevant gates and direct CLI checks instead of relying on the
-existing code log.
+Re-ran the relevant local gates instead of relying on the existing code log:
+
+- `cargo test mcp_allowlist_blocks_mutating_commands`
+- `cargo build --quiet --bin biomcp`
+- `uv sync --extra dev --no-install-project`
+- `.venv/bin/python -m pytest tests/test_mcp_contract.py -q --mcp-cmd "./target/debug/biomcp serve" -k "description_matches_list_contract or mutating_study_download or charted_study_call_returns_text_then_svg_image"`
+- `PATH="$PWD/target/debug:$PATH" .venv/bin/python -m pytest spec/15-mcp-runtime.md --mustmatch-lang bash --mustmatch-timeout 60 -v`
+- `make check`
 
 ## Design Completeness Audit
 
-All final-design items marked as required were matched to the current code:
+Every required design item has a corresponding implementation change:
 
-- `HealthRow.status` remains the serialized JSON contract and markdown-only
-  decoration moved to `markdown_status()` used by
-  `HealthReport::to_markdown()`.
-- `HealthRow.key_configured: Option<bool>` exists with
-  `skip_serializing_if = "Option::is_none"`.
-- `health_row(...)` accepts `key_configured` and all helper call sites were
-  updated.
-- `masked_key_hint` and `decorated_status` were removed.
-- `excluded_outcome(...)` now emits `key_configured: Some(false)` for
-  env-gated excluded rows.
-- `send_request(...)` now carries raw `"ok"` / `"error"` statuses plus
-  `key_configured`.
-- Mandatory auth probes use `Some(true)` when configured and keep
-  `excluded (set ENV_VAR)` when missing.
-- `check_auth_query_param(...)` invalid-URL error path builds raw `"error"`
-  with `key_configured: Some(true)`.
-- Optional-auth Semantic Scholar behavior preserves its special authenticated
-  and unauthenticated success/rate-limit strings while using raw `"error"`
-  statuses for non-special failures.
-- Markdown decoration is narrow and explicit: only `"ok"` / `"error"` rows are
-  decorated from `key_configured`.
-- Contract/spec updates were made in `spec/01-overview.md` for JSON health
-  output and no-secret assertions.
+- Explicit `study` allowlist with exact `study download --list` handling:
+  implemented in `src/mcp/shell.rs::is_allowed_mcp_command()`.
+- Blanket `study` access removed; mutating or malformed `study download` forms
+  denied:
+  implemented in `src/mcp/shell.rs::is_allowed_mcp_command()`.
+- MCP description sanitized to advertise only MCP-safe study forms:
+  implemented in `build.rs` via targeted study-line rewriting.
+- MCP description contract updated:
+  implemented in `tests/test_mcp_contract.py::test_biomcp_description_matches_list_contract`.
+- End-to-end MCP rejection of `study download <study_id>`:
+  implemented in `tests/test_mcp_contract.py::test_mutating_study_download_is_rejected_in_mcp_mode`.
+- Reference docs updated with catalog-only exception and CLI-only install
+  guidance:
+  implemented in `docs/reference/mcp-server.md`.
+- Executable runtime spec for rejection path:
+  implemented in `spec/15-mcp-runtime.md`.
 
-No design item was missing a corresponding code or spec change.
+Documentation and contract updates were present alongside code changes; I did
+not find a design item with no matching code or doc change.
 
 ## Test-Design Traceability
 
-Every proof item and required test from the final design has matching coverage:
+The design proof matrix and acceptance criteria map to the following tests and
+spec coverage:
 
-- Remove masked-key test:
-  `key_gated_source_masks_present_key` is gone.
-- Auth-backed rows carry `key_configured`:
-  covered by `key_gated_source_is_excluded_when_env_missing`,
-  `empty_key_is_treated_as_missing`,
-  `optional_auth_get_reports_authed_semantic_scholar_as_configured`,
-  `optional_auth_get_reports_authenticated_429_as_error`,
-  `optional_auth_get_reports_unauthenticated_non_429_as_error`,
-  `optional_auth_get_reports_unauthenticated_429_as_unavailable`.
-- Markdown keyed error rendering:
-  `markdown_decorates_keyed_error_rows_without_changing_status`.
-- Markdown keyed success rendering:
-  `markdown_decorates_keyed_success_rows_without_changing_status`.
-- Excluded keyed-row JSON serialization:
-  `excluded_key_gated_row_serializes_key_configured_false`.
-- Public-row JSON omission:
-  `public_row_omits_key_configured_in_json`.
-- Raw keyed JSON status with boolean metadata:
-  `keyed_row_serializes_raw_status_with_key_configured_true`.
-- Semantic Scholar unauthenticated wording preserved with
-  `key_configured == Some(false)`:
-  `optional_auth_get_reports_unauthed_semantic_scholar_as_healthy`,
-  `optional_auth_get_reports_unauthenticated_429_as_unavailable`.
-- Outside-in spec coverage for `biomcp health --apis-only` and
-  `biomcp --json health --apis-only`:
-  `spec/01-overview.md`.
+- Deny `study download <study_id>`:
+  `src/mcp/shell.rs::mcp_allowlist_blocks_mutating_commands` and
+  `tests/test_mcp_contract.py::test_mutating_study_download_is_rejected_in_mcp_mode`.
+- Allow exact `study download --list`:
+  `src/mcp/shell.rs::mcp_allowlist_blocks_mutating_commands`.
+- Keep read-only study commands available through the MCP gate:
+  `src/mcp/shell.rs::mcp_allowlist_blocks_mutating_commands` plus the existing
+  positive integration coverage in
+  `tests/test_mcp_contract.py::test_charted_study_call_returns_text_then_svg_image`.
+- Hide install syntax from MCP `tools/list` while keeping `study download --list`:
+  `tests/test_mcp_contract.py::test_biomcp_description_matches_list_contract`.
+- Document and prove runtime rejection outside-in:
+  `spec/15-mcp-runtime.md`.
 
-I did not find any proof-matrix item without a matching test or spec assertion.
+### Issues Found During Traceability
 
-## Findings
+1. The unit proof initially covered `study list`, `study download --list`, and
+   one representative `study query`, but it did not cover every read-only
+   study subcommand enumerated in the final design acceptance criteria
+   (`filter`, `cohort`, `survival`, `compare`, `co-occurrence`).
+2. The MCP rejection message still mentioned `study` generically, which was
+   stale after narrowing the allowlist to specific MCP-safe study forms.
 
-No additional implementation defects were found in this review.
-
-The only artifact problem was that `.march/code-review-log.md` contained stale
-content from a different ticket. That artifact defect is corrected here.
+Both issues were fixed in this review.
 
 ## Fix Plan
 
-- No source-code fixes were required.
-- Replace the stale review artifact with a log for ticket 066.
+- Expand the allowlist unit proof in `src/mcp/shell.rs` to cover every
+  read-only study subcommand named in the design and one additional malformed
+  `study download` shape.
+- Update the MCP rejection message in `src/mcp/shell.rs` so it accurately
+  describes the allowed study surface after the security fix.
 
 ## Repair
 
-- Rewrote `.march/code-review-log.md` for this ticket.
-- No changes were needed in `src/cli/health.rs` or `spec/01-overview.md`
-  beyond the implementation already under review.
+Applied the following fixes in `src/mcp/shell.rs`:
+
+- Added positive allowlist assertions for:
+  `study filter`, `study cohort`, `study survival`, `study compare`,
+  and `study co-occurrence`.
+- Added a negative assertion for incomplete `study download`.
+- Updated the read-only rejection text to list the exact MCP-safe study
+  commands instead of implying that the entire `study` family is allowed.
+
+## Post-Fix Collateral Scan
+
+Checked the touched area after the fix:
+
+- No dead branches were introduced.
+- No unused imports or variables remained.
+- No resource cleanup paths changed.
+- The updated error message now matches the narrowed allowlist behavior.
+- No variable shadowing was introduced.
 
 ## Verification
 
-- `checkpoint status`
-- `cargo test health::tests`
-  - passed: `27 passed`
-- `uv sync --extra dev`
-  - passed
-- `XDG_CACHE_HOME="$(mktemp -d)" PATH="$PWD/target/release:$PATH" uv run --extra dev sh -c 'PATH="$PWD/target/release:$PATH" pytest spec/01-overview.md --mustmatch-lang bash --mustmatch-timeout 60 -v'`
-  - passed: `4 passed`
-- `make check`
-  - passed
-- `cargo build --release --locked`
-  - passed
-- `env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY ./target/release/biomcp health --apis-only`
-  - passed; output contained no key material
-- `env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY ./target/release/biomcp --json health --apis-only`
-  - passed; JSON status strings contained no key material and excluded auth
-    rows emitted `key_configured: false`
-- `env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY ./target/release/biomcp health`
-  - passed; full markdown output contained no key material
+- `cargo test mcp_allowlist_blocks_mutating_commands` passed.
+- Focused MCP contract tests passed.
+- `spec/15-mcp-runtime.md` passed under mustmatch.
+- `make check` passed.
 
 ## Residual Concerns
 
-- Live upstream health probes are network-dependent. Exact ok/error counts can
-  vary between runs, so verify should compare the no-secret contract and
-  `key_configured` semantics rather than expecting stable live counts.
+- The description rewrite in `build.rs` still depends on exact list-reference
+  line shapes. Current tests cover the emitted MCP description contract, so the
+  behavior is guarded, but future CLI reference edits should keep that coupling
+  in mind.
 
 ## Out-of-Scope Observations
 
@@ -125,4 +121,5 @@ No out-of-scope follow-up issue was needed from this review.
 
 | # | Category | Lintable | Description |
 |---|----------|----------|-------------|
-| 1 | stale-doc | no | `.march/code-review-log.md` contained stale review content from a different ticket and was replaced with the correct ticket-066 review log |
+| 1 | missing-test | no | Final design acceptance criteria required coverage for every read-only study subcommand, but the unit proof initially covered only `list`, `download --list`, and `query` |
+| 2 | stale-doc | no | The MCP rejection message still implied broad `study` access after the allowlist had been narrowed to specific MCP-safe study commands |

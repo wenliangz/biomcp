@@ -58,3 +58,20 @@ out="$( (printf '%s\n%s\n%s\n' \
 echo "$out" | mustmatch like '"name":"biomcp"'
 echo "$out" | mustmatch not like '"name":"shell"'
 ```
+
+## Read-only Study Boundary
+
+The stdio MCP server must reject mutating study installs before any
+download/install path runs. The exact `study download --list` catalog form
+remains part of the safe MCP contract, but this spec does not execute it
+because it depends on live remote network access.
+
+```bash
+out="$( (printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"spec","version":"0.1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"biomcp","arguments":{"command":"biomcp study download msk_impact_2017"}}}'; \
+  sleep 1) | biomcp serve 2>/dev/null)"
+echo "$out" | mustmatch like '"isError":true'
+echo "$out" | mustmatch like "BioMCP allows read-only commands only"
+```

@@ -48,15 +48,19 @@ assert "enable_resources()" in shell
 
 The runtime `biomcp` description is generated from
 `src/cli/list_reference.md`, but the build step emits an MCP-safe read-only
-subset. CLI-only packaging or mutating commands such as `skill install`,
-`ema sync`, `update`, and `uninstall` must not appear in the MCP tool
-description.
+subset. That sanitized description keeps the catalog-only
+`study download --list` form, but it must not advertise
+`study download <study_id>` or the combined CLI syntax
+`study download [--list] [<study_id>]`. CLI-only packaging or mutating
+commands such as `skill install`, `ema sync`, `update`, and `uninstall`
+must not appear in the MCP tool description.
 
 ```python
 from pathlib import Path
 
 repo_root = Path.cwd()
 build = (repo_root / "build.rs").read_text()
+tests = (repo_root / "tests/test_mcp_contract.py").read_text()
 
 assert "MCP_SHELL_INTRO" in build
 assert "read-only biomedical MCP tool" in build
@@ -65,6 +69,10 @@ assert "`skill install`" in build
 assert "`ema sync`" in build
 assert "`update [--check]`" in build
 assert "`uninstall`" in build
+assert "study download --list" in build
+assert "study download [--list] [<study_id>]" in build
+assert 'assert "study download --list" in description' in tests
+assert 'assert "study download [--list] [<study_id>]" not in description' in tests
 ```
 
 ## Tool Response Content
@@ -100,8 +108,12 @@ assert 'annotations(title = "BioMCP", read_only_hint = true)' in shell
 
 ## Read-only Allowlist
 
-The MCP `biomcp` tool accepts read-only CLI commands, including `discover`.
-Mutating commands remain blocked.
+The MCP `biomcp` tool accepts read-only CLI commands, including `discover`
+and the exact `study download --list` catalog lookup. Mutating commands
+remain blocked. In particular, `study download <study_id>` is rejected
+because installation performs network and filesystem writes into the local
+study directory; operators should run study installs directly via the CLI,
+outside MCP.
 
 ```python
 from pathlib import Path
@@ -110,11 +122,12 @@ repo_root = Path.cwd()
 shell = (repo_root / "src/mcp/shell.rs").read_text()
 tests = (repo_root / "tests/test_mcp_contract.py").read_text()
 assert '"discover" => true' in shell or '| "discover" => true' in shell
+assert '"study" => {' in shell
+assert '"download" => args.len() == 4 && args[3] == "--list"' in shell
 assert "discover/skill" in shell or "discover/skill)." in shell
-assert '"ema sync" not in description' in tests
-assert '"skill install" not in description' in tests
-assert '"update [--check]" not in description' in tests
-assert '"uninstall" not in description' in tests
+assert 'assert "study download --list" in description' in tests
+assert 'test_mutating_study_download_is_rejected_in_mcp_mode' in tests
+assert '"BioMCP allows read-only commands only" in result.content[0].text' in tests
 ```
 
 ## Resource Catalog
