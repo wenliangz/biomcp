@@ -2,6 +2,9 @@
 
 This demo reproduces a TrialGPT-style trial matching workflow with BioMCP trial search/get.
 
+**Prerequisites:** `uv tool install biomcp-cli`
+**Runtime:** A Pi-compatible CLI must be on `PATH` through `PI_CMD` (default `pi`). No environment variables are required for the default prompts.
+
 ## Scope
 - Find active BRAF V600E melanoma trials
 - Summarize key eligibility details

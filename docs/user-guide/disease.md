@@ -83,6 +83,14 @@ biomcp get disease MONDO:0005105 genes phenotypes variants models
 biomcp get disease MONDO:0005105 all
 ```
 
+## Helper commands
+
+```bash
+biomcp disease trials melanoma --limit 5
+biomcp disease drugs melanoma --limit 5
+biomcp disease articles "Lynch syndrome" --limit 5
+```
+
 ## Phenotype-to-disease search
 
 Use HPO term sets for ranked disease candidates:
@@ -114,7 +122,7 @@ biomcp --json get disease MONDO:0005105 all
 biomcp --json search phenotype "HP:0001250 HP:0001263"
 ```
 
-`biomcp --json get disease MONDO:0005105` now includes `top_gene_scores[]` with
+`biomcp --json get disease MONDO:0005105` includes `top_gene_scores[]` with
 overall OpenTargets scores and any available GWAS, rare-variant, or somatic subtype scores.
 
 ## Practical tips

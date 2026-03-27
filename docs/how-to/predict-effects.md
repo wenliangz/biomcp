@@ -1,4 +1,4 @@
-# How To: Predict Effects
+# How to: predict variant effects
 
 BioMCP can request functional-impact predictions through the variant `predict` section.
 

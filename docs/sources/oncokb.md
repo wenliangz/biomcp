@@ -7,7 +7,7 @@ description: "Use BioMCP to run the explicit OncoKB variant helper for oncogenic
 
 OncoKB matters when you need a focused oncology interpretation instead of general variant context. It is the source page to use when a workflow has already narrowed to an actionable somatic variant and you want evidence levels, oncogenicity framing, and therapy implications from a well-known cancer interpretation source.
 
-In BioMCP, OncoKB is an explicit helper rather than an automatic section on every variant lookup. Use the `variant oncokb` command when you want the registration-gated production source, and set `ONCOKB_TOKEN` when you need full OncoKB-backed output instead of treating it as optional enrichment.
+In BioMCP, OncoKB is an explicit helper rather than an automatic section on every variant lookup. Use the `variant oncokb` command when you want the registration-gated production source. That helper requires `ONCOKB_TOKEN`, and BioMCP keeps the upstream `TOKEN` naming because OncoKB uses the same term in its own registration flow.
 
 ## What BioMCP exposes
 

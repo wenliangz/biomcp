@@ -13,14 +13,14 @@ get compact, evidence-oriented results across live public data plus local study 
 ## Features
 
 - **Search the literature:** `search article` fans out across PubTator3 and
-  Europe PMC, can add a Semantic Scholar leg when filters allow it, merges
-  PMID/PMCID/DOI identifiers, and ranks the most direct evidence first.
+  Europe PMC, deduplicates PMID/PMCID/DOI identifiers, and can add a Semantic
+  Scholar leg when your filters support it.
 - **Pivot without rework:** move from a gene, variant, drug, disease, pathway,
   protein, or article straight into the next built-in view instead of
   rebuilding filters by hand.
-- **Analyze studies locally:** `study` commands cover query, cohort, survival,
-  compare, and co-occurrence workflows with native terminal or SVG charts on
-  downloaded cBioPortal datasets.
+- **Analyze studies locally:** `study` commands cover local query, cohort, survival,
+  compare, and co-occurrence workflows with native terminal, SVG, and PNG
+  charts for downloaded cBioPortal-style datasets.
 - **Follow the paper trail:** `article citations`, `article references`,
   `article recommendations`, and `article entities` turn one known paper into a
   broader evidence map.
@@ -47,10 +47,9 @@ curl -fsSL https://biomcp.org/install.sh | bash
 
 ### Claude Desktop extension (.mcpb)
 
-Before Anthropic directory approval, install the generated `.mcpb` package
-directly in Claude Desktop for reviewer or local verification. After approval,
-install BioMCP from the Anthropic Directory instead of handling the bundle
-manually.
+Install BioMCP from the Anthropic Directory in Claude Desktop when that path is
+available for your environment. For local/manual setups, use the JSON MCP
+config below.
 
 ### Install skills
 
@@ -116,6 +115,7 @@ biomcp get gene BRAF pathways hpa
 
 ```text
 search <entity> [filters]    → discovery
+discover <query>             → concept resolution before entity selection
 get <entity> <id> [sections] → focused detail
 <entity> <helper> <id>       → cross-entity pivots
 enrich <GENE1,GENE2,...>     → gene-set enrichment

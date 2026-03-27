@@ -28,18 +28,24 @@ With p-value threshold:
 biomcp search gwas -g TCF7L2 --p-value 5e-8 --limit 10
 ```
 
-### Search filters
+Key flags: `-g/--gene` for a gene symbol, `--trait` for phenotype text,
+`--region` for genomic intervals like `chr:start-end`, and `--p-value` for a
+significance threshold. Use `--limit` and `--offset` for bounded paging.
 
-| Flag | Description |
-|------|-------------|
-| `-g/--gene` | Gene symbol |
-| `--trait` | Trait or phenotype term |
-| `--region` | Genomic region (chr:start-end) |
-| `--p-value` | P-value significance threshold |
-| `-l/--limit` | Max results |
-| `--offset` | Pagination offset |
+## Get records
 
-GWAS is search-only. There is no `get` subcommand.
+GWAS is search-only. There is no `get gwas` subcommand.
+
+## Request sections
+
+GWAS search rows do not expose extra section names. Use `biomcp get variant
+<id> gwas` when you need GWAS evidence attached to a known variant card.
+
+## Helper commands
+
+GWAS is search-only. Start with `search gwas` for genes, traits, or regions,
+then pivot into `get variant <id> gwas` if a specific association needs deeper
+context.
 
 ## JSON mode
 

@@ -52,7 +52,7 @@ Structures:
 biomcp get protein P15056 structures
 ```
 
-## Helper command
+## Helper commands
 
 ```bash
 biomcp protein structures P15056
@@ -63,6 +63,12 @@ biomcp protein structures P15056
 ```bash
 biomcp --json get protein P15056 all
 ```
+
+## Practical tips
+
+- Use a UniProt accession when you need the most stable exact lookup.
+- Request only the section you need first, especially for `interactions` and `complexes`.
+- Use `protein structures` when the next step is a structure handoff rather than a full protein card.
 
 ## Related guides
 

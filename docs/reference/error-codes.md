@@ -39,10 +39,13 @@ execution failures:
 | Variable | Used by |
 |----------|---------|
 | `ALPHAGENOME_API_KEY` | Variant `predict` section |
+| `DISGENET_API_KEY` | Scored DisGeNET sections on `get gene` and `get disease` |
+| `NCBI_API_KEY` | Higher-throughput PubTator, PMC OA, and NCBI ID converter requests |
 | `S2_API_KEY` | Optional authenticated Semantic Scholar requests for article search/get/helpers |
 | `NCI_API_KEY` | Trial source `--source nci` |
 | `ONCOKB_TOKEN` | Production OncoKB enrichment |
 | `OPENFDA_API_KEY` | Optional OpenFDA quota stability |
+| `UMLS_API_KEY` | Optional `discover` clinical crosswalk enrichment |
 
 ## Not-found troubleshooting pattern
 

@@ -1,4 +1,4 @@
-# How To: Cross-Entity Pivots
+# How to: use cross-entity pivots
 
 Cross-entity pivot helpers let you move from one BioMCP entity to a related one
 without rebuilding the next query from scratch. The grammar is:

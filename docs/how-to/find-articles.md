@@ -1,4 +1,4 @@
-# How To: Find Articles
+# How to: find articles
 
 This guide shows practical literature-search patterns.
 
@@ -32,7 +32,7 @@ biomcp search article -g BRAF --since 2024-01-01 --limit 10
 biomcp search article -g BRAF --since 2024-01-01 --no-preprints --limit 10
 ```
 
-## Pull the full text section
+## Pull the full-text section
 
 ```bash
 biomcp get article 22663011 fulltext

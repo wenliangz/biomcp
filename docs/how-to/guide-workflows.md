@@ -1,4 +1,4 @@
-# Guide Workflows
+# How to: follow guide workflows
 
 BioMCP ships three deterministic investigation workflows in its embedded agent
 guide. This page publishes those workflows directly in the docs so you can

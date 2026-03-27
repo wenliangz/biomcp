@@ -23,7 +23,7 @@ Use [Source Licensing and Terms](source-licensing.md) for provider terms, reuse 
 | Article search & metadata | PubTator3 + Europe PMC + optional Semantic Scholar | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api`, `https://www.ebi.ac.uk/europepmc/webservices/rest`, `https://api.semanticscholar.org` | Optional (`S2_API_KEY`) | Federated search with identifier-aware merge and directness-first relevance ranking |
 | Article enrichment and graph helpers | Semantic Scholar | `https://api.semanticscholar.org` | Optional (`S2_API_KEY`) | Search-leg metadata, TLDR, influential citations, citation/reference graph, recommendations |
 | Article annotations | PubTator3 | `https://www.ncbi.nlm.nih.gov/research/pubtator3-api` | No | Entity annotations |
-| Article fulltext resolution | PMC OA + NCBI ID Converter | `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi`, `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles` | No | Full-text and PMID/PMCID/DOI bridging |
+| Article full-text resolution | PMC OA + NCBI ID Converter | `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi`, `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles` | No | Full-text and PMID/PMCID/DOI bridging |
 | Drug | MyChem.info | `https://mychem.info/v1` | No | Drug metadata, targets, synonyms, and default U.S. search/get normalization |
 | Drug EU regional context | EMA website JSON batch (local human-medicines download) | `https://www.ema.europa.eu/en/about-us/about-website/download-website-data-json-data-format` | No | Supports `search/get drug --region eu|all` for regulatory, safety, and shortage; auto-downloads into `BIOMCP_EMA_DIR` or the platform data directory on first use and `biomcp ema sync` force-refreshes the local files |
 | Drug section enrichments | ChEMBL + OpenTargets | `https://www.ebi.ac.uk/chembl/api/data`, `https://api.platform.opentargets.org/api/v4/graphql` | No | Target and indication expansion sections |
@@ -44,7 +44,7 @@ Use [Source Licensing and Terms](source-licensing.md) for provider terms, reuse 
 | Protein | UniProt + InterPro + STRING + ComplexPortal | `https://rest.uniprot.org`, `https://www.ebi.ac.uk/interpro/api`, `https://string-db.org/api`, `https://www.ebi.ac.uk/intact/complex-ws` | No | Protein cards, domains, interactions, structures, and human protein complex membership; structure IDs are surfaced from UniProt cross-references to PDB and AlphaFold DB |
 | Drug/device safety, labels, shortages, and approvals | OpenFDA | `https://api.fda.gov` | Optional (`OPENFDA_API_KEY`) | FAERS, MAUDE, recalls, drug labels, shortages, and Drugs@FDA-derived approvals |
 | Gene enrichment sections | Enrichr | `https://maayanlab.cloud/Enrichr` | No | Gene enrichment sections inside entity outputs use Enrichr; this is distinct from top-level `biomcp enrich` |
-| Cohort frequencies (best effort) | cBioPortal | `https://www.cbioportal.org/api` | No | Supplemental cancer frequency context |
+| Cohort frequencies (best-effort) | cBioPortal | `https://www.cbioportal.org/api` | No | Supplemental cancer frequency context |
 
 ## Global HTTP behavior
 
@@ -110,7 +110,8 @@ Article workflows compose multiple APIs for different tasks:
 4. Semantic Scholar for the optional search leg, TLDR, citation graph, influential citation counts, and recommendations
 5. NCBI ID converter + PMC OA for full-text resolution where available
 
-This means metadata, annotations, and fulltext may have different availability for the same PMID.
+This means metadata, annotations, and full text may have different availability
+for the same PMID.
 
 ## OpenFDA behavior
 

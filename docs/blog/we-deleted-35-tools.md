@@ -2,7 +2,7 @@
 
 *What rebuilding a biomedical data tool taught us about designing for AI agents.*
 
-**TL;DR:** We replaced 36 MCP tools with one CLI command and cut context window overhead by 95%. The agent got faster, cheaper, and more accurate. Here's what we changed and what's generalizable.
+**TL;DR:** We went from 36 MCP tools to one CLI command and cut context window overhead by 95%. The agent got faster, cheaper, and more accurate. Here's what we changed and what's generalizable.
 
 ![Redesigned for AI Agents](../assets/04-redesign-1280x720.png)
 
@@ -86,7 +86,7 @@ Every command also supports `--json` for agents that parse structured data. Same
 
 ### 3. Skills enabled
 
-Some questions need 4-6 commands across different entities — "What's the clinical significance of this variant and what are the treatment options?" BioMCP ships a single SKILL.md with 10+ multi-step investigation guides, exposed as MCP resources for agent discovery:
+Some questions need 4-6 commands across different entities — "What's the clinical significance of this variant and what are the treatment options?" BioMCP ships a single [skills/SKILL.md](../getting-started/skills.md) guide with 10+ multi-step investigation guides, exposed as MCP resources for agent discovery:
 
 ```
 01  variant-to-treatment    Variant → ClinVar → CIViC → Trials → Drugs
@@ -105,6 +105,8 @@ The rewrite to Rust wasn't about language preference. Agent sessions are interac
 A single Rust binary with async parallel API fan-out means a `search all` that hits 8 APIs completes in the time of the slowest single call, not the sum. No runtime, no virtual environment, no dependency conflicts — install and first query in under 60 seconds:
 
 ```bash
+uv tool install biomcp-cli
+# or install the binary directly:
 curl -fsSL https://biomcp.org/install.sh | bash
 ```
 
@@ -169,11 +171,13 @@ The common thread: **get out of the model's way.** The scaffolding that helped l
 
 ---
 
-## Try It
+## Try it
 
 Install BioMCP and run your first query in under a minute:
 
 ```bash
+uv tool install biomcp-cli
+# or:
 curl -fsSL https://biomcp.org/install.sh | bash
 biomcp get variant "BRAF V600E"
 ```

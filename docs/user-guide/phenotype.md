@@ -22,15 +22,23 @@ Multiple terms with limit:
 biomcp search phenotype "HP:0001250 HP:0001263" --limit 20
 ```
 
-### Search filters
+The positional `terms` argument accepts HPO IDs or keywords, space-separated or
+comma-separated. Use `--limit` and `--offset` when you need bounded paging.
 
-| Flag | Description |
-|------|-------------|
-| `terms` | Positional: HPO IDs or keywords (space/comma separated) |
-| `-l/--limit` | Max results |
-| `--offset` | Pagination offset |
+## Get records
 
-Phenotype is search-only. There is no `get` subcommand.
+Phenotype is search-only. There is no `get phenotype` subcommand.
+
+## Request sections
+
+Phenotype search rows do not expose extra section names. Use `search disease`
+or `get disease <id> phenotypes` when you want a normalized disease follow-up.
+
+## Helper commands
+
+Phenotype is search-only. Start with `search phenotype` for HPO term sets or
+keyword discovery, then switch to disease commands once you have the right
+normalized concept.
 
 ## JSON mode
 

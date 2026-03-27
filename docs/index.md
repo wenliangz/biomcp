@@ -98,16 +98,16 @@ search all [slot filters]    → counts-first cross-entity orientation
 ## Feature highlights
 
 - **Search the literature:** `search article` fans out across PubTator3 and
-  Europe PMC, deduplicates identifiers, and can add a Semantic Scholar leg when
-  your filters support it.
+  Europe PMC, deduplicates PMID/PMCID/DOI identifiers, and can add a Semantic
+  Scholar leg when your filters support it.
 - **Resolve messy queries:** `biomcp discover` turns aliases, brands, symptoms,
   and pathway names into the right entity before you commit to a typed command.
 - **Pivot across entities:** move from a known gene, variant, drug, disease,
   pathway, protein, or article into trials, articles, drugs, pathways,
   structures, or article graph helpers without rebuilding context.
-- **Analyze studies locally:** `study` commands cover cohort analytics and
-  native terminal, SVG, and PNG charts for downloaded cBioPortal-style
-  datasets.
+- **Analyze studies locally:** `study` commands cover local query, cohort, survival,
+  compare, and co-occurrence workflows with native terminal, SVG, and PNG
+  charts for downloaded cBioPortal-style datasets.
 - **Follow the paper trail:** `article citations`, `article references`,
   `article recommendations`, and `article entities` expand one paper into its
   surrounding evidence with optional Semantic Scholar auth.
@@ -177,6 +177,7 @@ export NCBI_API_KEY="..."        # PubTator, PMC OA, NCBI ID converter
 export S2_API_KEY="..."          # Optional Semantic Scholar auth; dedicated quota at 1 req/sec
 export OPENFDA_API_KEY="..."     # OpenFDA rate limits
 export NCI_API_KEY="..."         # NCI CTS trial search (--source nci)
+export DISGENET_API_KEY="..."    # Scored DisGeNET gene/disease sections
 export ONCOKB_TOKEN="..."        # OncoKB variant helper
 export UMLS_API_KEY="..."        # discover crosswalk enrichment
 export ALPHAGENOME_API_KEY="..." # AlphaGenome variant effect prediction

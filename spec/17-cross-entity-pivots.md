@@ -23,7 +23,7 @@ headings and command examples the ticket requires.
 ```bash
 root="$(git rev-parse --show-toplevel)"
 out="$(cat "$root/docs/how-to/cross-entity-pivots.md")"
-echo "$out" | mustmatch like "# How To: Cross-Entity Pivots"
+echo "$out" | mustmatch like "# How to: use cross-entity pivots"
 echo "$out" | mustmatch like "## When to use a pivot helper vs. a fresh search"
 echo "$out" | mustmatch like "already have a specific entity identifier or label"
 echo "$out" | mustmatch like "--status"

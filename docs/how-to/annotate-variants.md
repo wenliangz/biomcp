@@ -58,6 +58,6 @@ biomcp search variant -g BRCA1 --max-frequency 0.01 --min-cadd 20 --limit 10
 ## Optional enrichments
 
 - OncoKB (set `ONCOKB_TOKEN` for the production endpoint)
-- cBioPortal mutation summaries (best effort)
+- cBioPortal mutation summaries (best-effort)
 
 If these services are unavailable, BioMCP degrades gracefully and will still return core annotations.

@@ -91,7 +91,7 @@ See also: [Search All Workflow](../how-to/search-all-workflow.md)
 ### Gene
 
 ```bash
-biomcp search gene -q BRAF --limit 10 --offset 0
+biomcp search gene BRAF --limit 10 --offset 0
 ```
 
 ### Disease

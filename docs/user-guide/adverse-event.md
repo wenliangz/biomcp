@@ -81,13 +81,19 @@ biomcp get adverse-event 10222779 reactions outcomes
 biomcp get adverse-event 10222779 all
 ```
 
+## Helper commands
+
+There is no direct `adverse-event <helper>` family. Use
+`biomcp drug adverse-events <name>` when you want the inbound drug pivot into
+this safety surface.
+
 ## JSON mode
 
 ```bash
 biomcp --json get adverse-event 10222779
 ```
 
-## Practical guidance
+## Practical tips
 
 - Include drug generic names for better FAERS recall.
 - Treat counts as signal, not incidence estimates.
