@@ -13,6 +13,8 @@ pub struct HealthRow {
     pub latency: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub affects: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_configured: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -39,19 +41,18 @@ impl HealthReport {
             out.push_str("|-----|--------|---------|---------|\n");
             for row in &self.rows {
                 let affects = row.affects.as_deref().unwrap_or("-");
+                let status = markdown_status(row);
                 out.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
-                    row.api, row.status, row.latency, affects
+                    row.api, status, row.latency, affects
                 ));
             }
         } else {
             out.push_str("| API | Status | Latency |\n");
             out.push_str("|-----|--------|---------|\n");
             for row in &self.rows {
-                out.push_str(&format!(
-                    "| {} | {} | {} |\n",
-                    row.api, row.status, row.latency
-                ));
+                let status = markdown_status(row);
+                out.push_str(&format!("| {} | {} | {} |\n", row.api, status, row.latency));
             }
         }
 
@@ -60,6 +61,15 @@ impl HealthReport {
             self.healthy, errors, self.excluded
         ));
         out
+    }
+}
+
+fn markdown_status(row: &HealthRow) -> String {
+    match (row.status.as_str(), row.key_configured) {
+        ("ok", Some(true)) => "ok (key configured)".to_string(),
+        ("error", Some(true)) => "error (key configured)".to_string(),
+        ("error", Some(false)) => "error (key not configured)".to_string(),
+        _ => row.status.clone(),
     }
 }
 
@@ -466,22 +476,19 @@ fn health_row(
     status: String,
     latency: String,
     affects: Option<&'static str>,
+    key_configured: Option<bool>,
 ) -> HealthRow {
     HealthRow {
         api: api.to_string(),
         status,
         latency,
         affects: affects.map(str::to_string),
+        key_configured,
     }
 }
 
 fn outcome(row: HealthRow, class: ProbeClass) -> ProbeOutcome {
     ProbeOutcome { row, class }
-}
-
-fn masked_key_hint(value: &str) -> String {
-    let prefix: String = value.trim().chars().take(3).collect();
-    format!("{prefix}***")
 }
 
 fn configured_key(env_var: &str) -> Option<String> {
@@ -491,13 +498,6 @@ fn configured_key(env_var: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn decorated_status(base: &str, key_hint: Option<&str>) -> String {
-    match key_hint {
-        Some(key_hint) => format!("{base} (key: {key_hint})"),
-        None => base.to_string(),
-    }
-}
-
 fn excluded_outcome(api: &str, env_var: &str, affects: Option<&'static str>) -> ProbeOutcome {
     outcome(
         health_row(
@@ -505,6 +505,7 @@ fn excluded_outcome(api: &str, env_var: &str, affects: Option<&'static str>) -> 
             format!("excluded (set {env_var})"),
             "n/a".into(),
             affects,
+            Some(false),
         ),
         ProbeClass::Excluded,
     )
@@ -535,7 +536,7 @@ async fn send_request(
     api: &str,
     affects: Option<&'static str>,
     request: reqwest::RequestBuilder,
-    key_hint: Option<String>,
+    key_configured: Option<bool>,
 ) -> ProbeOutcome {
     let start = Instant::now();
     let response = request.send().await;
@@ -548,9 +549,10 @@ async fn send_request(
                 outcome(
                     health_row(
                         api,
-                        decorated_status("ok", key_hint.as_deref()),
+                        "ok".into(),
                         format!("{elapsed}ms"),
                         None,
+                        key_configured,
                     ),
                     ProbeClass::Healthy,
                 )
@@ -558,9 +560,10 @@ async fn send_request(
                 outcome(
                     health_row(
                         api,
-                        decorated_status("error", key_hint.as_deref()),
+                        "error".into(),
                         format!("{elapsed}ms (HTTP {})", status.as_u16()),
                         affects,
+                        key_configured,
                     ),
                     ProbeClass::Error,
                 )
@@ -569,9 +572,10 @@ async fn send_request(
         Err(err) => outcome(
             health_row(
                 api,
-                decorated_status("error", key_hint.as_deref()),
+                "error".into(),
                 transport_error_latency(start, &err),
                 affects,
+                key_configured,
             ),
             ProbeClass::Error,
         ),
@@ -619,14 +623,13 @@ async fn check_auth_get(
         return excluded_outcome(api, env_var, affects);
     };
 
-    let key_hint = masked_key_hint(&key);
     let header_value = format!("{header_value_prefix}{key}");
 
     send_request(
         api,
         affects,
         client.get(url).header(header_name, header_value),
-        Some(key_hint),
+        Some(true),
     )
     .await
 }
@@ -645,14 +648,14 @@ async fn check_optional_auth_get(
     affects: Option<&'static str>,
 ) -> ProbeOutcome {
     let key = configured_key(env_var);
-    let key_hint = key.as_deref().map(masked_key_hint);
+    let key_configured = Some(key.is_some());
     let request = match key {
         Some(key) => client
             .get(url)
             .header(header_name, format!("{header_value_prefix}{key}")),
         None => client.get(url),
     };
-    let success_status = if key_hint.is_some() {
+    let success_status = if key_configured == Some(true) {
         authenticated_ok_status
     } else {
         unauthenticated_ok_status
@@ -660,12 +663,7 @@ async fn check_optional_auth_get(
     let start = Instant::now();
     let error_outcome = |latency: String| {
         outcome(
-            health_row(
-                api,
-                decorated_status("error", key_hint.as_deref()),
-                latency,
-                affects,
-            ),
+            health_row(api, "error".into(), latency, affects, key_configured),
             ProbeClass::Error,
         )
     };
@@ -681,10 +679,11 @@ async fn check_optional_auth_get(
                         success_status.to_string(),
                         format!("{elapsed}ms"),
                         None,
+                        key_configured,
                     ),
                     ProbeClass::Healthy,
                 )
-            } else if key_hint.is_none()
+            } else if key_configured == Some(false)
                 && status == reqwest::StatusCode::TOO_MANY_REQUESTS
                 && let Some(status_message) = unauthenticated_rate_limited_status
             {
@@ -694,6 +693,7 @@ async fn check_optional_auth_get(
                         status_message.to_string(),
                         format!("{elapsed}ms"),
                         None,
+                        key_configured,
                     ),
                     ProbeClass::Healthy,
                 )
@@ -717,7 +717,6 @@ async fn check_auth_query_param(
         return excluded_outcome(api, env_var, affects);
     };
 
-    let key_hint = masked_key_hint(&key);
     let req = match reqwest::Url::parse(url) {
         Ok(mut parsed) => {
             parsed.query_pairs_mut().append_pair(param_name, &key);
@@ -727,16 +726,17 @@ async fn check_auth_query_param(
             return outcome(
                 health_row(
                     api,
-                    decorated_status("error", Some(&key_hint)),
+                    "error".into(),
                     format!("invalid url: {err}"),
                     affects,
+                    Some(true),
                 ),
                 ProbeClass::Error,
             );
         }
     };
 
-    send_request(api, affects, req, Some(key_hint)).await
+    send_request(api, affects, req, Some(true)).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -754,7 +754,6 @@ async fn check_auth_post_json(
         return excluded_outcome(api, env_var, affects);
     };
 
-    let key_hint = masked_key_hint(&key);
     let header_value = format!("{header_value_prefix}{key}");
 
     send_request(
@@ -765,7 +764,7 @@ async fn check_auth_post_json(
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .header(header_name, header_value)
             .body(payload.to_string()),
-        Some(key_hint),
+        Some(true),
     )
     .await
 }
@@ -775,29 +774,30 @@ async fn check_alphagenome_connect(
     env_var: &str,
     affects: Option<&'static str>,
 ) -> ProbeOutcome {
-    let Some(key) = configured_key(env_var) else {
+    let Some(_key) = configured_key(env_var) else {
         return excluded_outcome(api, env_var, affects);
     };
 
-    let key_hint = masked_key_hint(&key);
     let start = Instant::now();
 
     match crate::sources::alphagenome::AlphaGenomeClient::new().await {
         Ok(_) => outcome(
             health_row(
                 api,
-                decorated_status("ok", Some(&key_hint)),
+                "ok".into(),
                 format!("{}ms", start.elapsed().as_millis()),
                 None,
+                Some(true),
             ),
             ProbeClass::Healthy,
         ),
         Err(err) => outcome(
             health_row(
                 api,
-                decorated_status("error", Some(&key_hint)),
+                "error".into(),
                 api_error_latency(start, &err),
                 affects,
+                Some(true),
             ),
             ProbeClass::Error,
         ),
@@ -816,7 +816,7 @@ fn ema_local_data_outcome(root: &Path, env_configured: bool) -> ProbeOutcome {
             "available (default path)"
         };
         return outcome(
-            health_row(&api, status.to_string(), "n/a".into(), None),
+            health_row(&api, status.to_string(), "n/a".into(), None, None),
             ProbeClass::Healthy,
         );
     }
@@ -828,6 +828,7 @@ fn ema_local_data_outcome(root: &Path, env_configured: bool) -> ProbeOutcome {
                 "not configured".into(),
                 "n/a".into(),
                 Some(EMA_LOCAL_DATA_AFFECTS),
+                None,
             ),
             ProbeClass::Excluded,
         );
@@ -839,6 +840,7 @@ fn ema_local_data_outcome(root: &Path, env_configured: bool) -> ProbeOutcome {
             format!("error (missing: {})", missing.join(", ")),
             "n/a".into(),
             Some(EMA_LOCAL_DATA_AFFECTS),
+            None,
         ),
         ProbeClass::Error,
     )
@@ -982,6 +984,7 @@ async fn check_cache_dir() -> ProbeOutcome {
                 status: "ok".into(),
                 latency: format!("{}ms", start.elapsed().as_millis()),
                 affects: None,
+                key_configured: None,
             },
             ProbeClass::Healthy,
         ),
@@ -991,6 +994,7 @@ async fn check_cache_dir() -> ProbeOutcome {
                 status: "error".into(),
                 latency: format!("{:?}", err.kind()),
                 affects: Some("local cache-backed lookups and downloads".into()),
+                key_configured: None,
             },
             ProbeClass::Error,
         ),
@@ -1051,8 +1055,8 @@ mod tests {
 
     use super::{
         EMA_LOCAL_DATA_AFFECTS, HealthReport, HealthRow, ProbeClass, ProbeKind, ProbeOutcome,
-        SourceDescriptor, affects_for_api, ema_local_data_outcome, health_sources, masked_key_hint,
-        probe_source, report_from_outcomes,
+        SourceDescriptor, affects_for_api, ema_local_data_outcome, health_sources, probe_source,
+        report_from_outcomes,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -1183,12 +1187,14 @@ mod tests {
                     status: "ok".into(),
                     latency: "10ms".into(),
                     affects: None,
+                    key_configured: None,
                 },
                 HealthRow {
                     api: "OpenFDA".into(),
                     status: "error".into(),
                     latency: "timeout".into(),
                     affects: Some("adverse-event search".into()),
+                    key_configured: None,
                 },
             ],
         };
@@ -1209,18 +1215,62 @@ mod tests {
                     status: "ok".into(),
                     latency: "10ms".into(),
                     affects: None,
+                    key_configured: None,
                 },
                 HealthRow {
                     api: "MyVariant".into(),
                     status: "ok".into(),
                     latency: "11ms".into(),
                     affects: None,
+                    key_configured: None,
                 },
             ],
         };
         let md = report.to_markdown();
         assert!(md.contains("| API | Status | Latency |"));
         assert!(!md.contains("| API | Status | Latency | Affects |"));
+    }
+
+    #[test]
+    fn markdown_decorates_keyed_success_rows_without_changing_status() {
+        let report = HealthReport {
+            healthy: 1,
+            excluded: 0,
+            total: 1,
+            rows: vec![HealthRow {
+                api: "OncoKB".into(),
+                status: "ok".into(),
+                latency: "10ms".into(),
+                affects: None,
+                key_configured: Some(true),
+            }],
+        };
+
+        assert_eq!(report.rows[0].status, "ok");
+        let md = report.to_markdown();
+        assert!(md.contains("| OncoKB | ok (key configured) | 10ms |"));
+    }
+
+    #[test]
+    fn markdown_decorates_keyed_error_rows_without_changing_status() {
+        let report = HealthReport {
+            healthy: 0,
+            excluded: 0,
+            total: 1,
+            rows: vec![HealthRow {
+                api: "OncoKB".into(),
+                status: "error".into(),
+                latency: "10ms (HTTP 401)".into(),
+                affects: Some("variant oncokb command and variant evidence section".into()),
+                key_configured: Some(true),
+            }],
+        };
+
+        assert_eq!(report.rows[0].status, "error");
+        let md = report.to_markdown();
+        assert!(md.contains(
+            "| OncoKB | error (key configured) | 10ms (HTTP 401) | variant oncokb command and variant evidence section |",
+        ));
     }
 
     #[test]
@@ -1370,6 +1420,7 @@ mod tests {
         assert_eq!(row["status"], "available (default path)");
         assert_eq!(row["latency"], "n/a");
         assert!(row.get("affects").is_none());
+        assert!(row.get("key_configured").is_none());
     }
 
     #[test]
@@ -1390,6 +1441,7 @@ mod tests {
             )
         );
         assert_eq!(row["affects"], EMA_LOCAL_DATA_AFFECTS);
+        assert!(row.get("key_configured").is_none());
     }
 
     #[test]
@@ -1410,13 +1462,63 @@ mod tests {
             outcome.row.affects.as_deref(),
             Some("variant oncokb command and variant evidence section")
         );
+        assert_eq!(outcome.row.key_configured, Some(false));
     }
 
     #[test]
-    fn key_gated_source_masks_present_key() {
-        assert_eq!(masked_key_hint("OncokbTest"), "Onc***");
-        assert_eq!(masked_key_hint("abc"), "abc***");
-        assert_eq!(masked_key_hint("ab"), "ab***");
+    fn excluded_key_gated_row_serializes_key_configured_false() {
+        let report = report_from_outcomes(vec![ProbeOutcome {
+            row: HealthRow {
+                api: "OncoKB".into(),
+                status: "excluded (set ONCOKB_TOKEN)".into(),
+                latency: "n/a".into(),
+                affects: Some("variant oncokb command and variant evidence section".into()),
+                key_configured: Some(false),
+            },
+            class: ProbeClass::Excluded,
+        }]);
+
+        let value = serde_json::to_value(&report).expect("serialize health report");
+        let rows = value["rows"].as_array().expect("rows array");
+        let row = rows.first().expect("oncokb row");
+
+        assert_eq!(row["status"], "excluded (set ONCOKB_TOKEN)");
+        assert_eq!(row["key_configured"], false);
+    }
+
+    #[test]
+    fn public_row_omits_key_configured_in_json() {
+        let report = report_from_outcomes(vec![ProbeOutcome {
+            row: HealthRow {
+                api: "MyGene".into(),
+                status: "ok".into(),
+                latency: "10ms".into(),
+                affects: None,
+                key_configured: None,
+            },
+            class: ProbeClass::Healthy,
+        }]);
+
+        let value = serde_json::to_value(&report).expect("serialize health report");
+        let rows = value["rows"].as_array().expect("rows array");
+        let row = rows.first().expect("mygene row");
+
+        assert!(row.get("key_configured").is_none());
+    }
+
+    #[test]
+    fn keyed_row_serializes_raw_status_with_key_configured_true() {
+        let value = serde_json::to_value(HealthRow {
+            api: "OncoKB".into(),
+            status: "ok".into(),
+            latency: "10ms".into(),
+            affects: None,
+            key_configured: Some(true),
+        })
+        .expect("serialize keyed row");
+
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["key_configured"], true);
     }
 
     #[test]
@@ -1433,6 +1535,7 @@ mod tests {
         assert_eq!(outcome.class, ProbeClass::Excluded);
         assert_eq!(outcome.row.status, "excluded (set NCI_API_KEY)");
         assert_eq!(outcome.row.latency, "n/a");
+        assert_eq!(outcome.row.key_configured, Some(false));
     }
 
     #[test]
@@ -1457,12 +1560,14 @@ mod tests {
                     status: "ok".into(),
                     latency: "10ms".into(),
                     affects: None,
+                    key_configured: None,
                 },
                 HealthRow {
                     api: "OncoKB".into(),
                     status: "excluded (set ONCOKB_TOKEN)".into(),
                     latency: "n/a".into(),
                     affects: Some("variant oncokb command and variant evidence section".into()),
+                    key_configured: Some(false),
                 },
             ],
         };
@@ -1482,18 +1587,21 @@ mod tests {
                     status: "ok".into(),
                     latency: "10ms".into(),
                     affects: None,
+                    key_configured: None,
                 },
                 HealthRow {
                     api: "OpenFDA".into(),
                     status: "error".into(),
                     latency: "timeout".into(),
                     affects: Some("adverse-event search".into()),
+                    key_configured: None,
                 },
                 HealthRow {
                     api: "OncoKB".into(),
                     status: "excluded (set ONCOKB_TOKEN)".into(),
                     latency: "n/a".into(),
                     affects: Some("variant oncokb command and variant evidence section".into()),
+                    key_configured: Some(false),
                 },
             ],
         };
@@ -1511,6 +1619,7 @@ mod tests {
                     status: "available (unauthenticated, shared rate limit)".into(),
                     latency: "15ms".into(),
                     affects: None,
+                    key_configured: Some(false),
                 },
                 class: ProbeClass::Healthy,
             },
@@ -1520,6 +1629,7 @@ mod tests {
                     status: "excluded (set ONCOKB_TOKEN)".into(),
                     latency: "n/a".into(),
                     affects: Some("variant oncokb command and variant evidence section".into()),
+                    key_configured: Some(false),
                 },
                 class: ProbeClass::Excluded,
             },
@@ -1554,6 +1664,7 @@ mod tests {
             outcome.row.status,
             "available (unauthenticated, shared rate limit)"
         );
+        assert_eq!(outcome.row.key_configured, Some(false));
     }
 
     #[test]
@@ -1577,6 +1688,7 @@ mod tests {
         let outcome = block_on(probe_source(reqwest::Client::new(), &source));
         assert_eq!(outcome.class, ProbeClass::Healthy);
         assert_eq!(outcome.row.status, "configured (authenticated)");
+        assert_eq!(outcome.row.key_configured, Some(true));
     }
 
     #[test]
@@ -1606,6 +1718,7 @@ mod tests {
         assert!(outcome.row.latency.ends_with("ms"));
         assert!(!outcome.row.latency.contains("HTTP 429"));
         assert_eq!(outcome.row.affects, None);
+        assert_eq!(outcome.row.key_configured, Some(false));
 
         let report = report_from_outcomes(vec![outcome.clone()]);
         assert_eq!(report.healthy, 1);
@@ -1617,6 +1730,7 @@ mod tests {
         let rows = value["rows"].as_array().expect("rows array");
         let row = rows.first().expect("semantic scholar row");
         assert!(row.get("affects").is_none());
+        assert_eq!(row["key_configured"], false);
 
         let md = report_from_outcomes(vec![
             outcome.clone(),
@@ -1626,6 +1740,7 @@ mod tests {
                     status: "error".into(),
                     latency: "timeout".into(),
                     affects: Some("adverse-event search".into()),
+                    key_configured: None,
                 },
                 class: ProbeClass::Error,
             },
@@ -1663,6 +1778,7 @@ mod tests {
             outcome.row.affects.as_deref(),
             Some("Semantic Scholar features")
         );
+        assert_eq!(outcome.row.key_configured, Some(false));
     }
 
     #[test]
@@ -1685,15 +1801,13 @@ mod tests {
 
         let outcome = block_on(probe_source(reqwest::Client::new(), &source));
         assert_eq!(outcome.class, ProbeClass::Error);
-        assert_eq!(
-            outcome.row.status,
-            format!("error (key: {})", masked_key_hint("test-key-abc"))
-        );
+        assert_eq!(outcome.row.status, "error");
         assert!(outcome.row.latency.contains("HTTP 429"));
         assert_eq!(
             outcome.row.affects.as_deref(),
             Some("Semantic Scholar features")
         );
+        assert_eq!(outcome.row.key_configured, Some(true));
     }
 
     #[test]
