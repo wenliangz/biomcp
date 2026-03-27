@@ -24,11 +24,18 @@ echo "$out" | mustmatch '/[0-9]+\.[0-9]+\.[0-9]+/'
 The API-only health command reports one row per live upstream provider plus explicit excluded rows for key-gated sources. Full `biomcp health` adds local readiness rows such as EMA local data and cache dir. We assert on the API-only table header and the explicit status summary here because those are stable formatting markers for the upstream inventory contract.
 
 ```bash
-out="$(biomcp health --apis-only)"
+out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY biomcp health --apis-only)"
 echo "$out" | mustmatch like "| API | Status | Latency |"
 echo "$out" | mustmatch not like "EMA local data ("
 echo "$out" | mustmatch not like "Cache dir ("
+echo "$out" | mustmatch not like "(key:"
 echo "$out" | mustmatch like "Status:"
+
+json_out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY biomcp --json health --apis-only)"
+echo "$json_out" | jq -e 'all(.rows[]; (.status | type) == "string")' > /dev/null
+echo "$json_out" | jq -e 'all(.rows[]; ((.status | contains("(key:")) | not))' > /dev/null
+echo "$json_out" | jq -e 'any(.rows[]; .api == "OncoKB" and .status == "excluded (set ONCOKB_TOKEN)" and .key_configured == false)' > /dev/null
+echo "$json_out" | jq -e 'any(.rows[]; .api == "MyGene" and ((has("key_configured")) | not))' > /dev/null
 ```
 
 ## Command Reference

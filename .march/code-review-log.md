@@ -2,78 +2,127 @@
 
 ## Review Scope
 
-Reviewed the resumed worktree against `.march/design-final.md`, the ticket
-checklist, the staged docs/spec/test diff, and the required proof matrix.
+Reviewed `.march/ticket.md`, `.march/design-draft.md`, `.march/design-final.md`,
+`.march/code-log.md`, the staged implementation in
+`src/cli/health.rs`, and the spec updates in `spec/01-overview.md`.
+
+Re-ran the relevant gates and direct CLI checks instead of relying on the
+existing code log.
+
+## Design Completeness Audit
+
+All final-design items marked as required were matched to the current code:
+
+- `HealthRow.status` remains the serialized JSON contract and markdown-only
+  decoration moved to `markdown_status()` used by
+  `HealthReport::to_markdown()`.
+- `HealthRow.key_configured: Option<bool>` exists with
+  `skip_serializing_if = "Option::is_none"`.
+- `health_row(...)` accepts `key_configured` and all helper call sites were
+  updated.
+- `masked_key_hint` and `decorated_status` were removed.
+- `excluded_outcome(...)` now emits `key_configured: Some(false)` for
+  env-gated excluded rows.
+- `send_request(...)` now carries raw `"ok"` / `"error"` statuses plus
+  `key_configured`.
+- Mandatory auth probes use `Some(true)` when configured and keep
+  `excluded (set ENV_VAR)` when missing.
+- `check_auth_query_param(...)` invalid-URL error path builds raw `"error"`
+  with `key_configured: Some(true)`.
+- Optional-auth Semantic Scholar behavior preserves its special authenticated
+  and unauthenticated success/rate-limit strings while using raw `"error"`
+  statuses for non-special failures.
+- Markdown decoration is narrow and explicit: only `"ok"` / `"error"` rows are
+  decorated from `key_configured`.
+- Contract/spec updates were made in `spec/01-overview.md` for JSON health
+  output and no-secret assertions.
+
+No design item was missing a corresponding code or spec change.
+
+## Test-Design Traceability
+
+Every proof item and required test from the final design has matching coverage:
+
+- Remove masked-key test:
+  `key_gated_source_masks_present_key` is gone.
+- Auth-backed rows carry `key_configured`:
+  covered by `key_gated_source_is_excluded_when_env_missing`,
+  `empty_key_is_treated_as_missing`,
+  `optional_auth_get_reports_authed_semantic_scholar_as_configured`,
+  `optional_auth_get_reports_authenticated_429_as_error`,
+  `optional_auth_get_reports_unauthenticated_non_429_as_error`,
+  `optional_auth_get_reports_unauthenticated_429_as_unavailable`.
+- Markdown keyed error rendering:
+  `markdown_decorates_keyed_error_rows_without_changing_status`.
+- Markdown keyed success rendering:
+  `markdown_decorates_keyed_success_rows_without_changing_status`.
+- Excluded keyed-row JSON serialization:
+  `excluded_key_gated_row_serializes_key_configured_false`.
+- Public-row JSON omission:
+  `public_row_omits_key_configured_in_json`.
+- Raw keyed JSON status with boolean metadata:
+  `keyed_row_serializes_raw_status_with_key_configured_true`.
+- Semantic Scholar unauthenticated wording preserved with
+  `key_configured == Some(false)`:
+  `optional_auth_get_reports_unauthed_semantic_scholar_as_healthy`,
+  `optional_auth_get_reports_unauthenticated_429_as_unavailable`.
+- Outside-in spec coverage for `biomcp health --apis-only` and
+  `biomcp --json health --apis-only`:
+  `spec/01-overview.md`.
+
+I did not find any proof-matrix item without a matching test or spec assertion.
 
 ## Findings
 
-1. `README.md`
-   - The Claude Desktop note still used stale direct-bundle language.
-   - Approved behavior: Anthropic Directory when available, JSON MCP config for
-     local/manual setups.
-   - Repair: updated the README wording to the approved stable phrasing.
+No additional implementation defects were found in this review.
 
-2. `tests/test_documentation_consistency_audit_contract.py`
-   - The new ticket-specific docs-contract suite did not lock the repaired
-     README Claude Desktop wording.
-   - Repair: added assertions for the README and matching
-     `docs/getting-started/claude-desktop.md` guidance.
-
-3. `tests/test_public_skill_docs_contract.py`
-   - The staged change retargeted the chart-blog contract from
-     `docs/blog/biomcp-kuva-charts.md` to `docs/blog/kuva-charting-guide.md`.
-   - That weakened the approved "do not delete either chart blog" proof path.
-   - Repair: restored the existing contract to keep asserting against
-     `docs/blog/biomcp-kuva-charts.md`.
-
-4. `docs/blog/biomcp-pubmed-articles.md`,
-   `docs/blog/skillbench-biomcp-skills.md`
-   - The staged intro rewrites were outside the approved scope. The final
-     design explicitly said not to do a separate blog-opening rewrite pass.
-   - Repair: reverted both intro rewrites.
-
-5. `docs/user-guide/gene.md`
-   - `## Error handling expectations` was placed after `## JSON mode`.
-   - That drifted from the approved entity-guide structure, which keeps extra
-     sections before `## JSON mode`.
-   - Repair: moved the error-handling section above `## JSON mode`.
+The only artifact problem was that `.march/code-review-log.md` contained stale
+content from a different ticket. That artifact defect is corrected here.
 
 ## Fix Plan
 
-1. Repair the README Claude Desktop copy so it matches the approved stable
-   install guidance.
-2. Add docs-contract regression coverage for that README/Claude Desktop wording.
-3. Restore the public-skill blog contract to the approved
-   `docs/blog/biomcp-kuva-charts.md` surface.
-4. Revert the out-of-scope blog intro rewrites.
-5. Move the gene guide's extra error-handling section back before `## JSON mode`.
+- No source-code fixes were required.
+- Replace the stale review artifact with a log for ticket 066.
 
-## Repair Status
+## Repair
 
-All five implementation findings were fixed in the worktree before final
-staging. A follow-up critique found one artifact defect in this log: the
-verification section had collapsed the regular docs-contract pytest run and the
-mustmatch spec run into one command that was not actually how verification was
-executed. This log now records the commands separately.
+- Rewrote `.march/code-review-log.md` for this ticket.
+- No changes were needed in `src/cli/health.rs` or `spec/01-overview.md`
+  beyond the implementation already under review.
 
 ## Verification
 
-- `uv run --extra dev pytest tests/test_documentation_consistency_audit_contract.py tests/test_public_search_all_docs_contract.py tests/test_source_pages_docs_contract.py tests/test_source_licensing_docs_contract.py tests/test_directory_submission_contract.py tests/test_public_skill_docs_contract.py tests/test_docs_changelog_refresh.py -q`
-  - passed: `50 passed`
-- `PATH="$(pwd)/target/release:$PATH" uv run --extra dev pytest spec/17-cross-entity-pivots.md spec/17-guide-workflows.md --mustmatch-lang bash --mustmatch-timeout 60 -q`
-  - passed: `23 passed, 1 skipped`
-- `uv run mkdocs build --strict`
+- `checkpoint status`
+- `cargo test health::tests`
+  - passed: `27 passed`
+- `uv sync --extra dev`
   - passed
+- `XDG_CACHE_HOME="$(mktemp -d)" PATH="$PWD/target/release:$PATH" uv run --extra dev sh -c 'PATH="$PWD/target/release:$PATH" pytest spec/01-overview.md --mustmatch-lang bash --mustmatch-timeout 60 -v'`
+  - passed: `4 passed`
 - `make check`
   - passed
+- `cargo build --release --locked`
+  - passed
+- `env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY ./target/release/biomcp health --apis-only`
+  - passed; output contained no key material
+- `env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY ./target/release/biomcp --json health --apis-only`
+  - passed; JSON status strings contained no key material and excluded auth
+    rows emitted `key_configured: false`
+- `env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY ./target/release/biomcp health`
+  - passed; full markdown output contained no key material
 
 ## Residual Concerns
 
-- `uv run mkdocs build --strict` still prints the existing informational nav
-  note for `docs/blog/biomcp-kuva-charts.md`, `docs/charts/scatter.md`, and
-  `docs/charts/waterfall.md`, plus the upstream Material/MkDocs 2.0 advisory.
-  The build passes, and nav work stayed out of scope by design.
+- Live upstream health probes are network-dependent. Exact ok/error counts can
+  vary between runs, so verify should compare the no-secret contract and
+  `key_configured` semantics rather than expecting stable live counts.
 
 ## Out-of-Scope Observations
 
-No additional out-of-scope follow-up issues were found for this ticket.
+No out-of-scope follow-up issue was needed from this review.
+
+## Defect Register
+
+| # | Category | Lintable | Description |
+|---|----------|----------|-------------|
+| 1 | stale-doc | no | `.march/code-review-log.md` contained stale review content from a different ticket and was replaced with the correct ticket-066 review log |
