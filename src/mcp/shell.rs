@@ -59,8 +59,17 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
 
     match cmd.as_str() {
         "search" | "get" | "variant" | "drug" | "disease" | "article" | "gene" | "pathway"
-        | "protein" | "study" | "list" | "version" | "health" | "batch" | "enrich" | "discover" => {
-            true
+        | "protein" | "list" | "version" | "health" | "batch" | "enrich" | "discover" => true,
+        "study" => {
+            let Some(sub) = args.get(2).map(|s| s.trim().to_ascii_lowercase()) else {
+                return false;
+            };
+            match sub.as_str() {
+                "list" | "query" | "filter" | "cohort" | "survival" | "compare"
+                | "co-occurrence" => true,
+                "download" => args.len() == 4 && args[3] == "--list",
+                _ => false,
+            }
         }
         "skill" => {
             // Allow read-only skill commands: list, show, numeric lookup
@@ -106,7 +115,7 @@ impl BioMcpServer {
 
         if !is_allowed_mcp_command(&args) {
             return Ok(Self::tool_error(
-                "Error: BioMCP allows read-only commands only (search/get/helpers/study/list/version/health/batch/enrich/discover/skill)."
+                "Error: BioMCP allows read-only commands only. Allowed families are search/get/helpers/list/version/health/batch/enrich/discover/skill plus MCP-safe study commands (`study list`, `study download --list`, `study query`, `study filter`, `study cohort`, `study survival`, `study compare`, `study co-occurrence`)."
                     .to_string(),
             ));
         }
@@ -360,6 +369,66 @@ mod tests {
         ]));
         assert!(is_allowed_mcp_command(&[
             "biomcp".into(),
+            "study".into(),
+            "download".into(),
+            "--list".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "query".into(),
+            "--study".into(),
+            "msk_impact_2017".into(),
+            "--gene".into(),
+            "TP53".into(),
+            "--type".into(),
+            "mutations".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "filter".into(),
+            "--study".into(),
+            "msk_impact_2017".into(),
+            "--gene".into(),
+            "TP53".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "cohort".into(),
+            "--study".into(),
+            "msk_impact_2017".into(),
+            "--cohort".into(),
+            "tp53".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "survival".into(),
+            "--study".into(),
+            "msk_impact_2017".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "compare".into(),
+            "--study".into(),
+            "msk_impact_2017".into(),
+            "--gene".into(),
+            "TP53".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "co-occurrence".into(),
+            "--study".into(),
+            "msk_impact_2017".into(),
+            "--gene".into(),
+            "TP53".into()
+        ]));
+        assert!(is_allowed_mcp_command(&[
+            "biomcp".into(),
             "discover".into(),
             "BRCA1".into()
         ]));
@@ -378,6 +447,24 @@ mod tests {
             "biomcp".into(),
             "ema".into(),
             "sync".into()
+        ]));
+        assert!(!is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "download".into(),
+            "msk_impact_2017".into()
+        ]));
+        assert!(!is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "download".into(),
+            "--list".into(),
+            "msk_impact_2017".into()
+        ]));
+        assert!(!is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "study".into(),
+            "download".into()
         ]));
     }
 

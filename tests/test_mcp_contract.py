@@ -79,6 +79,9 @@ async def test_biomcp_description_matches_list_contract(
         assert "biomcp list" in description
         assert "ema sync" not in description
         assert "skill install" not in description
+        assert "study download --list" in description
+        assert "study download <study_id>" not in description
+        assert "study download [--list] [<study_id>]" not in description
         assert "update [--check]" not in description
         assert "uninstall" not in description
 
@@ -131,6 +134,22 @@ async def test_invalid_resource_uri_returns_mcp_error(
 
         assert exc_info.value.error.code == -32002
         assert "Unknown resource:" in exc_info.value.error.message
+
+
+@pytest.mark.asyncio
+async def test_mutating_study_download_is_rejected_in_mcp_mode(
+    mcp_session_factory,
+) -> None:
+    async with mcp_session_factory() as (session, _initialize_result):
+        result = await session.call_tool(
+            "biomcp",
+            arguments={"command": "biomcp study download msk_impact_2017"},
+        )
+
+    assert _is_error(result) is True
+    assert result.content
+    assert isinstance(result.content[0], types.TextContent)
+    assert "BioMCP allows read-only commands only" in result.content[0].text
 
 
 @pytest.mark.asyncio

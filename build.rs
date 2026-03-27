@@ -11,6 +11,10 @@ const BLOCKED_MCP_DESCRIPTION_TERMS: &[&str] = &[
     "`update [--check]`",
     "`uninstall`",
 ];
+const STUDY_PATTERN_LINE: &str = "- `study list|download|query|co-occurrence|cohort|survival|compare` - local cBioPortal study analytics";
+const MCP_SAFE_STUDY_PATTERN_LINE: &str = "- `study list|download --list|query|filter|co-occurrence|cohort|survival|compare` - local cBioPortal study analytics";
+const STUDY_DOWNLOAD_LINE: &str = "- `study download [--list] [<study_id>]`";
+const MCP_SAFE_STUDY_DOWNLOAD_LINE: &str = "- `study download --list`";
 
 fn command_output(command: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(command).args(args).output().ok()?;
@@ -32,10 +36,23 @@ fn is_blocked_mcp_description_line(line: &str) -> bool {
         .any(|term| line.contains(term))
 }
 
+fn mcp_safe_description_line(line: &str) -> Option<String> {
+    if is_blocked_mcp_description_line(line) {
+        return None;
+    }
+
+    let rewritten = match line {
+        STUDY_PATTERN_LINE => MCP_SAFE_STUDY_PATTERN_LINE,
+        STUDY_DOWNLOAD_LINE => MCP_SAFE_STUDY_DOWNLOAD_LINE,
+        _ => line,
+    };
+    Some(rewritten.to_string())
+}
+
 fn mcp_safe_list_reference(list_reference: &str) -> String {
     list_reference
         .lines()
-        .filter(|line| !is_blocked_mcp_description_line(line))
+        .filter_map(mcp_safe_description_line)
         .collect::<Vec<_>>()
         .join("\n")
 }
