@@ -100,6 +100,21 @@ echo "$ae_json" | mustmatch like '"label": "OpenFDA"'
 echo "$ae_json" | mustmatch like '"next_commands": ['
 ```
 
+## Batch JSON Metadata Contract
+
+Batch JSON output should keep the array root while adding the same per-item
+metadata contract as single-entity `get --json`.
+
+```bash
+batch_json="$(biomcp --json batch gene BRAF,TP53)"
+echo "$batch_json" | jq -e 'type == "array" and length == 2' > /dev/null
+echo "$batch_json" | jq -e '.[0].symbol == "BRAF"' > /dev/null
+echo "$batch_json" | jq -e '.[1].symbol == "TP53"' > /dev/null
+echo "$batch_json" | jq -e 'all(.[]; (._meta.evidence_urls | type) == "array" and (._meta.evidence_urls | length) > 0)' > /dev/null
+echo "$batch_json" | jq -e 'all(.[]; (._meta.next_commands | type) == "array" and (._meta.next_commands | length) > 0)' > /dev/null
+echo "$batch_json" | jq -e 'any(.[]; (._meta.section_sources | type) == "array" and (._meta.section_sources | length) > 0)' > /dev/null
+```
+
 ## JSON Metadata for Repaired Gaps
 
 The repaired gaps must also surface through `_meta.evidence_urls` in JSON mode

@@ -3011,6 +3011,14 @@ fn trial_locations_json(
     .map_err(Into::into)
 }
 
+fn render_batch_json<T, F>(results: &[T], wrap: F) -> Result<String, crate::error::BioMcpError>
+where
+    F: Fn(&T) -> Result<serde_json::Value, crate::error::BioMcpError>,
+{
+    let items = results.iter().map(wrap).collect::<Result<Vec<_>, _>>()?;
+    crate::render::json::to_pretty(&items)
+}
+
 fn paginate_trial_locations(
     trial: &mut crate::entities::trial::Trial,
     offset: usize,
@@ -5042,7 +5050,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::gene::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::gene_evidence_urls(item),
+                                    crate::render::markdown::related_gene(item),
+                                    crate::render::provenance::gene_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: gene ({})\n\n", results.len()));
@@ -5064,7 +5079,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::variant::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::variant_evidence_urls(item),
+                                    crate::render::markdown::related_variant(item),
+                                    crate::render::provenance::variant_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: variant ({})\n\n", results.len()));
@@ -5086,7 +5108,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::article::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::article_evidence_urls(item),
+                                    crate::render::markdown::related_article(item),
+                                    crate::render::provenance::article_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: article ({})\n\n", results.len()));
@@ -5109,7 +5138,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         });
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::trial_evidence_urls(item),
+                                    crate::render::markdown::related_trial(item),
+                                    crate::render::provenance::trial_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: trial ({})\n\n", results.len()));
@@ -5131,7 +5167,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::drug::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::drug_evidence_urls(item),
+                                    crate::render::markdown::related_drug(item),
+                                    crate::render::provenance::drug_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: drug ({})\n\n", results.len()));
@@ -5153,7 +5196,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::disease::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::disease_evidence_urls(item),
+                                    crate::render::markdown::related_disease(item),
+                                    crate::render::provenance::disease_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: disease ({})\n\n", results.len()));
@@ -5175,7 +5225,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::pgx::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::pgx_evidence_urls(item),
+                                    crate::render::markdown::related_pgx(item),
+                                    crate::render::provenance::pgx_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: pgx ({})\n\n", results.len()));
@@ -5197,7 +5254,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::pathway::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::pathway_evidence_urls(item),
+                                    crate::render::markdown::related_pathway(item),
+                                    crate::render::provenance::pathway_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: pathway ({})\n\n", results.len()));
@@ -5219,7 +5283,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             .map(|id| crate::entities::protein::get(id, &batch_sections));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| {
+                                crate::render::json::to_entity_json_value(
+                                    item,
+                                    crate::render::markdown::protein_evidence_urls(item),
+                                    crate::render::markdown::related_protein(item, &batch_sections),
+                                    crate::render::provenance::protein_section_sources(item),
+                                )
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: protein ({})\n\n", results.len()));
@@ -5245,7 +5316,28 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         let futs = parsed_ids.iter().map(|id| crate::entities::adverse_event::get(id));
                         let results = try_join_all(futs).await?;
                         if cli.json {
-                            Ok(crate::render::json::to_pretty(&results)?)
+                            Ok(render_batch_json(&results, |item| match item {
+                                crate::entities::adverse_event::AdverseEventReport::Faers(report) => {
+                                    crate::render::json::to_entity_json_value(
+                                        item,
+                                        crate::render::markdown::adverse_event_evidence_urls(report),
+                                        crate::render::markdown::related_adverse_event(report),
+                                        crate::render::provenance::adverse_event_report_section_sources(
+                                            item,
+                                        ),
+                                    )
+                                }
+                                crate::entities::adverse_event::AdverseEventReport::Device(report) => {
+                                    crate::render::json::to_entity_json_value(
+                                        item,
+                                        crate::render::markdown::device_event_evidence_urls(report),
+                                        crate::render::markdown::related_device_event(report),
+                                        crate::render::provenance::adverse_event_report_section_sources(
+                                            item,
+                                        ),
+                                    )
+                                }
+                            })?)
                         } else {
                             let mut out = String::new();
                             out.push_str(&format!("# Batch: adverse-event ({})\n\n", results.len()));
@@ -9887,6 +9979,67 @@ mod tests {
         assert!(outcome.text.contains("# TP53"));
     }
 
+    #[test]
+    fn batch_gene_json_includes_meta_per_item() {
+        std::thread::Builder::new()
+            .name("batch-gene-json-test".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime")
+                    .block_on(async {
+                        let _guard = lock_env().await;
+                        let mygene = MockServer::start().await;
+                        let _mygene_base = set_env_var(
+                            "BIOMCP_MYGENE_BASE",
+                            Some(&format!("{}/v3", mygene.uri())),
+                        );
+
+                        mount_gene_lookup_hit(&mygene, "BRAF", "B-Raf proto-oncogene", "673").await;
+                        mount_gene_lookup_hit(&mygene, "TP53", "tumor protein p53", "7157").await;
+
+                        let output = execute(vec![
+                            "biomcp".to_string(),
+                            "--json".to_string(),
+                            "batch".to_string(),
+                            "gene".to_string(),
+                            "BRAF,TP53".to_string(),
+                        ])
+                        .await
+                        .expect("batch outcome");
+                        let value: serde_json::Value =
+                            serde_json::from_str(&output).expect("valid batch json");
+                        let items = value.as_array().expect("batch root should stay an array");
+                        assert_eq!(items.len(), 2, "json={value}");
+                        assert_eq!(items[0]["symbol"], "BRAF", "json={value}");
+                        assert_eq!(items[1]["symbol"], "TP53", "json={value}");
+                        assert!(
+                            items.iter().all(|item| item["_meta"]["evidence_urls"]
+                                .as_array()
+                                .is_some_and(|urls| !urls.is_empty())),
+                            "each batch item should include non-empty _meta.evidence_urls: {value}"
+                        );
+                        assert!(
+                            items.iter().all(|item| item["_meta"]["next_commands"]
+                                .as_array()
+                                .is_some_and(|cmds| !cmds.is_empty())),
+                            "each batch item should include non-empty _meta.next_commands: {value}"
+                        );
+                        assert!(
+                            items.iter().any(|item| item["_meta"]["section_sources"]
+                                .as_array()
+                                .is_some_and(|sources| !sources.is_empty())),
+                            "at least one batch item should include non-empty _meta.section_sources: {value}"
+                        );
+                    });
+            })
+            .expect("spawn")
+            .join()
+            .expect("thread should complete");
+    }
+
     #[tokio::test]
     async fn ambiguous_gene_miss_points_to_discover() {
         let _guard = lock_env().await;
@@ -10257,6 +10410,55 @@ mod next_commands_json_property {
     }
 
     #[test]
+    fn batch_protein_json_omits_requested_section_from_next_commands() {
+        let protein = Protein {
+            accession: "P00533".to_string(),
+            entry_id: Some("EGFR_HUMAN".to_string()),
+            name: "Epidermal growth factor receptor".to_string(),
+            gene_symbol: Some("EGFR".to_string()),
+            organism: None,
+            length: None,
+            function: None,
+            structures: Vec::new(),
+            structure_count: None,
+            domains: Vec::new(),
+            interactions: Vec::new(),
+            complexes: Vec::new(),
+        };
+        let requested_sections = ["complexes".to_string()];
+        let json = super::render_batch_json(std::slice::from_ref(&protein), |item| {
+            crate::render::json::to_entity_json_value(
+                item,
+                crate::render::markdown::protein_evidence_urls(item),
+                crate::render::markdown::related_protein(item, &requested_sections),
+                crate::render::provenance::protein_section_sources(item),
+            )
+        })
+        .expect("batch json");
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        let commands = value[0]["_meta"]["next_commands"]
+            .as_array()
+            .expect("next_commands array")
+            .iter()
+            .map(|cmd| cmd.as_str().expect("command string"))
+            .collect::<Vec<_>>();
+
+        assert!(
+            !commands.contains(&"biomcp get protein P00533 complexes"),
+            "requested section should not be suggested again: {value}"
+        );
+        assert!(
+            commands.contains(&"biomcp get protein P00533 structures"),
+            "expected structures follow-up: {value}"
+        );
+        assert!(
+            commands.contains(&"biomcp get gene EGFR"),
+            "expected linked gene follow-up: {value}"
+        );
+    }
+
+    #[test]
     fn article_json_next_commands_parse() {
         let article = Article {
             pmid: Some("22663011".to_string()),
@@ -10530,6 +10732,76 @@ mod next_commands_json_property {
             crate::render::markdown::protein_evidence_urls(&protein),
             section_next_commands,
             crate::render::provenance::protein_section_sources(&protein),
+        );
+    }
+
+    #[test]
+    fn batch_adverse_event_json_uses_variant_specific_meta() {
+        let faers = AdverseEvent {
+            report_id: "1001".to_string(),
+            drug: "osimertinib".to_string(),
+            reactions: Vec::new(),
+            outcomes: Vec::new(),
+            patient: None,
+            concomitant_medications: Vec::new(),
+            reporter_type: None,
+            reporter_country: None,
+            indication: None,
+            serious: true,
+            date: None,
+        };
+        let device = DeviceEvent {
+            report_id: "MDR-123".to_string(),
+            report_number: None,
+            device: "HeartValve".to_string(),
+            manufacturer: None,
+            event_type: None,
+            date: None,
+            description: None,
+        };
+        let reports = vec![
+            AdverseEventReport::Faers(faers),
+            AdverseEventReport::Device(device),
+        ];
+
+        let json = super::render_batch_json(&reports, |item| match item {
+            AdverseEventReport::Faers(report) => crate::render::json::to_entity_json_value(
+                item,
+                crate::render::markdown::adverse_event_evidence_urls(report),
+                crate::render::markdown::related_adverse_event(report),
+                crate::render::provenance::adverse_event_report_section_sources(item),
+            ),
+            AdverseEventReport::Device(report) => crate::render::json::to_entity_json_value(
+                item,
+                crate::render::markdown::device_event_evidence_urls(report),
+                crate::render::markdown::related_device_event(report),
+                crate::render::provenance::adverse_event_report_section_sources(item),
+            ),
+        })
+        .expect("batch json");
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        let items = value.as_array().expect("batch array");
+        assert_eq!(items.len(), 2, "json={value}");
+        assert_eq!(items[0]["_meta"]["evidence_urls"][0]["label"], "OpenFDA");
+        assert_eq!(items[1]["_meta"]["evidence_urls"][0]["label"], "OpenFDA");
+        assert!(
+            items[0]["_meta"]["evidence_urls"][0]["url"]
+                .as_str()
+                .is_some_and(|url| url.contains("/drug/event.json")),
+            "faers report should use drug event evidence url: {value}"
+        );
+        assert!(
+            items[1]["_meta"]["evidence_urls"][0]["url"]
+                .as_str()
+                .is_some_and(|url| url.contains("/device/event.json")),
+            "device report should use device event evidence url: {value}"
+        );
+        assert!(
+            items.iter().all(|item| item["_meta"]["next_commands"]
+                .as_array()
+                .is_some_and(|cmds| !cmds.is_empty())),
+            "each report should retain next commands: {value}"
         );
     }
 
