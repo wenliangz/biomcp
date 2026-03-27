@@ -103,7 +103,13 @@ Multiple sections can be chained:
 biomcp get gene BRAF pathways diseases
 ```
 
-## Gene helper commands
+All supported sections:
+
+```bash
+biomcp get gene BRAF all
+```
+
+## Helper commands
 
 ```bash
 biomcp gene trials BRAF --limit 5
@@ -133,6 +139,11 @@ biomcp search article -g BRAF -d melanoma --limit 5
 biomcp search variant -g BRAF --limit 5
 ```
 
+## Error handling expectations
+
+If a section name is unsupported, BioMCP returns an explicit unknown-section message
+with hints about valid section names.
+
 ## JSON mode
 
 Use JSON for pipelines or agent post-processing.
@@ -141,13 +152,8 @@ Use JSON for pipelines or agent post-processing.
 biomcp --json get gene BRAF
 ```
 
-`biomcp --json get gene BRAF druggability` now includes DGIdb interaction fields plus
+`biomcp --json get gene BRAF druggability` includes DGIdb interaction fields plus
 OpenTargets `tractability[]` modality summaries and `safety_liabilities[]` event summaries.
-
-## Error handling expectations
-
-If a section name is unsupported, BioMCP returns an explicit unknown-section message
-with hints about valid section names.
 
 ## Practical tips
 

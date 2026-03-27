@@ -18,7 +18,7 @@ def test_bioasq_module_readme_exists_and_uses_uv_run_script() -> None:
     readme = _read("benchmarks/bioasq/README.md")
 
     assert "# BioASQ Benchmark Module" in readme
-    assert "uv run --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026" in readme
+    assert "uv run --quiet --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026" in readme
     assert "datasets/raw/" in readme
     assert "datasets/normalized/" in readme
     assert "annotations/" in readme

@@ -2,6 +2,9 @@
 
 This demo reproduces a GeneAgent-style chain from variant findings to pathway and drug context.
 
+**Prerequisites:** `uv tool install biomcp-cli`
+**Runtime:** A Pi-compatible CLI must be on `PATH` through `PI_CMD` (default `pi`). No environment variables are required for the default prompts.
+
 ## Scope
 - Variant significance summary
 - Pathway grounding (e.g., MAPK/RAS)
@@ -23,4 +26,4 @@ This demo reproduces a GeneAgent-style chain from variant findings to pathway an
 ./score.sh output.md
 ```
 
-The score checks for expected pathway + therapy anchors.
+The score checks for expected pathway names and drug/therapy references.

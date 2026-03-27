@@ -1,6 +1,8 @@
 # Source Contract Checks
 
-This folder is the current BioMCP operator command layer for source-facing contract probes, smoke helpers, and paper-style demo flows.
+This folder contains lightweight commands for checking upstream source
+behavior, running a small set of smoke probes, and replaying the paper-style
+demo flows that still matter operationally.
 
 Each source-facing contract probe has three checks:
 

@@ -4,7 +4,8 @@ This folder contains supporting paper-demo assets (`prompt.md`, `run.sh`, `score
 
 ## Canonical Workflows
 
-For project 116, the canonical workflow interface is embedded skills, not this examples folder.
+For day-to-day agent use, the canonical workflow interface is the embedded
+skills, not this examples folder.
 
 Use:
 

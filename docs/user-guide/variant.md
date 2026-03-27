@@ -14,6 +14,43 @@ BioMCP supports multiple input forms:
 These exact formats are accepted by `biomcp get variant` and the exact-ID
 helper commands.
 
+## Search variants
+
+By gene and protein change:
+
+```bash
+biomcp search variant -g BRAF --hgvsp V600E --limit 5
+biomcp search variant -g BRAF --hgvsp p.Val600Glu --limit 5
+biomcp search variant BRAF p.Val600Glu --limit 5
+```
+
+By residue alias shorthand:
+
+```bash
+biomcp search variant "PTPN22 620W" --limit 5
+```
+
+By protein shorthand when gene context is already supplied:
+
+```bash
+biomcp search variant -g PTPN22 R620W --limit 5
+```
+
+Standalone protein shorthand like `R620W` returns variant-specific recovery
+guidance instead of falling back to gene or condition discovery.
+
+By significance:
+
+```bash
+biomcp search variant -g BRCA1 --significance pathogenic --limit 5
+```
+
+With population and score filters:
+
+```bash
+biomcp search variant -g BRCA1 --max-frequency 0.01 --min-cadd 20 --limit 5
+```
+
 ## Get a variant record
 
 ```bash
@@ -115,43 +152,6 @@ biomcp variant articles "BRAF V600E" # search PubMed for this variant
 biomcp variant oncokb "BRAF V600E"   # OncoKB lookup (requires ONCOKB_TOKEN)
 ```
 
-## Search variants
-
-By gene and protein change:
-
-```bash
-biomcp search variant -g BRAF --hgvsp V600E --limit 5
-biomcp search variant -g BRAF --hgvsp p.Val600Glu --limit 5
-biomcp search variant BRAF p.Val600Glu --limit 5
-```
-
-By residue alias shorthand:
-
-```bash
-biomcp search variant "PTPN22 620W" --limit 5
-```
-
-By protein shorthand when gene context is already supplied:
-
-```bash
-biomcp search variant -g PTPN22 R620W --limit 5
-```
-
-Standalone protein shorthand like `R620W` returns variant-specific recovery
-guidance instead of falling back to gene or condition discovery.
-
-By significance:
-
-```bash
-biomcp search variant -g BRCA1 --significance pathogenic --limit 5
-```
-
-With population and score filters:
-
-```bash
-biomcp search variant -g BRCA1 --max-frequency 0.01 --min-cadd 20 --limit 5
-```
-
 ## Search GWAS associations
 
 By gene:
@@ -185,6 +185,12 @@ biomcp --json get variant "BRAF V600E"
 biomcp --json get variant rs7903146 gwas
 biomcp --json search gwas --trait "type 2 diabetes"
 ```
+
+## Practical tips
+
+- Use `search variant` first for shorthand or ambiguous inputs.
+- Start with the base card, then add source sections such as `clinvar`, `civic`, or `population` only when needed.
+- Use `all` when you need a one-shot export for review or downstream comparison.
 
 ## Related guides
 

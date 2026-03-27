@@ -2,6 +2,9 @@
 
 This demo reproduces a GeneGPT-style genomics QA workflow using BioMCP + Pi.
 
+**Prerequisites:** `uv tool install biomcp-cli`
+**Runtime:** A Pi-compatible CLI must be on `PATH` through `PI_CMD` (default `pi`). No environment variables are required for the default prompts.
+
 ## Scope
 - Alias to canonical symbol resolution
 - Gene location lookup
@@ -24,4 +27,5 @@ This demo reproduces a GeneGPT-style genomics QA workflow using BioMCP + Pi.
 ./score.sh output.md
 ```
 
-The score checks for expected GeneGPT-style anchor facts.
+The score checks for canonical symbol resolution, mapped variant identity, and
+therapy context.

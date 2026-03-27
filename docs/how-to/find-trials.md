@@ -14,7 +14,7 @@ Add intervention:
 biomcp search trial -c melanoma -i pembrolizumab --status recruiting --limit 10
 ```
 
-## Biomarker-aware filters (best effort)
+## Biomarker-aware filters (best-effort)
 
 ```bash
 biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 10

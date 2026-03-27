@@ -22,19 +22,21 @@ With evidence and CPIC level filters:
 biomcp search pgx -g CYP2D6 --cpic-level A --evidence --limit 10
 ```
 
-### Search filters
+Key flags: `-g/--gene` for the gene symbol, `-d/--drug` for the therapy,
+`--cpic-level` for CPIC levels `A|B|C|D`, `--pgx-testing` for testing-related
+guidance, and `--evidence` when you want evidence summaries alongside the main
+results. Use `--limit` and `--offset` for bounded paging.
 
-| Flag | Description |
-|------|-------------|
-| `-g/--gene` | Gene symbol |
-| `-d/--drug` | Drug name |
-| `--cpic-level` | CPIC level (A, B, C, D) |
-| `--pgx-testing` | Filter by PGx testing recommendation |
-| `--evidence` | Include evidence summaries |
-| `-l/--limit` | Max results |
-| `--offset` | Pagination offset |
+## Get PGX records
 
-## Get PGX sections
+```bash
+biomcp get pgx CYP2D6
+```
+
+The base PGX card summarizes affected drugs and the guideline context tied to
+the gene or drug you queried.
+
+## Request PGX sections
 
 Retrieve detailed PGX data for a gene-drug pair by section.
 
@@ -78,12 +80,24 @@ biomcp get pgx CYP2D6 all
 | `annotations` | PharmGKB clinical annotations |
 | `all` | All sections combined |
 
+## Helper commands
+
+PGX does not expose a separate helper family. Start with `search pgx` when you
+need to find the right anchor, then switch to `get pgx <gene_or_drug>` for the
+base card or section-level follow-up.
+
 ## JSON mode
 
 ```bash
 biomcp --json search pgx -g CYP2D6
 biomcp --json get pgx CYP2D6 recommendations
 ```
+
+## Practical tips
+
+- Start with `search pgx` when you only know the gene or drug and need the matching guideline rows first.
+- Use section-specific `get pgx` calls when you need only recommendations, frequencies, guidelines, or annotations.
+- Keep CPIC level filters tight when you want high-confidence dosing guidance.
 
 ## Related guides
 

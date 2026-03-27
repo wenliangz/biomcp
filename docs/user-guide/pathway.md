@@ -1,6 +1,14 @@
 # Pathway
 
-Use pathway commands to move from pathway names/IDs to genes, events, enrichment, and drug pivots. Search returns source-labelled Reactome and KEGG rows, and exact title matches are shown first across sources. KEGG base cards stay summary-only unless you explicitly request `genes`. `events` and pathway `enrichment` are Reactome-only. `all` means all sections available for the resolved pathway source.
+Use pathway commands to move from pathway names or IDs to genes, events, enrichment, and drug pivots.
+
+Key boundaries:
+
+- Search is multi-source across Reactome, KEGG, and WikiPathways.
+- Exact title matches surface first across sources.
+- KEGG base cards stay summary-only unless you explicitly request `genes`.
+- `events` and pathway `enrichment` are Reactome-only.
+- `all` means all sections available for the resolved pathway source.
 
 ## Search pathways
 
@@ -62,6 +70,12 @@ biomcp pathway trials R-HSA-5673001
 biomcp --json get pathway R-HSA-5673001 genes
 biomcp --json get pathway hsa05200 genes
 ```
+
+## Practical tips
+
+- Use `search pathway` when you know the label but not the stable ID.
+- Reach for Reactome IDs when you need `events` or pathway `enrichment`.
+- Use the helper commands when the next step is drug, article, or trial context rather than more pathway detail.
 
 ## Related guides
 

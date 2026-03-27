@@ -14,7 +14,7 @@ discipline section that tells readers how to keep claims traceable.
 
 ```bash
 doc="$(cat "$(git rev-parse --show-toplevel)/docs/how-to/guide-workflows.md")"
-echo "$doc" | mustmatch like "# Guide Workflows"
+echo "$doc" | mustmatch like "# How to: follow guide workflows"
 echo "$doc" | mustmatch like "## Variant Pathogenicity Workflow"
 echo "$doc" | mustmatch like "## Drug Safety Workflow"
 echo "$doc" | mustmatch like "## Broad Gene-Disease Workflow"

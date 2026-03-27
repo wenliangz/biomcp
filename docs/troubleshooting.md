@@ -159,7 +159,7 @@ Capture one failing command with full stderr and include:
 ## 13) EU drug data not available
 
 EU drug regulatory, safety, and shortage sections depend on the local EMA
-human-medicines JSON batch. BioMCP now auto-downloads that data on first use,
+human-medicines JSON batch. BioMCP auto-downloads that data on first use,
 but full `biomcp health` is still the right readiness view when you need to
 debug the local EMA state:
 

@@ -44,7 +44,7 @@ biomcp get drug pembrolizumab
 ```
 
 Default output provides concise identity and mechanism context. Approval-bearing
-JSON now includes additive `approval_date_raw`, `approval_date_display`, and
+JSON includes additive `approval_date_raw`, `approval_date_display`, and
 `approval_summary` fields, while markdown renders the human-friendly display
 date in the base card.
 
@@ -100,7 +100,7 @@ biomcp get drug dabrafenib approvals
 
 EU regional commands read EMA local data from `BIOMCP_EMA_DIR` first, then the
 platform data directory (`~/.local/share/biomcp/ema` on typical Linux systems).
-On first use, BioMCP now auto-downloads the six EMA human-medicines JSON feeds
+On first use, BioMCP auto-downloads the six EMA human-medicines JSON feeds
 into that root and refreshes stale files after 72 hours. Use `biomcp ema sync`
 to force a refresh at any time.
 
@@ -133,7 +133,7 @@ EMA row meanings:
 - `not configured`: no EMA batch is installed at the default path yet
 - `error (missing: ...)`: the EMA directory exists but is missing one or more required files
 
-## Cross-entity helpers
+## Helper commands
 
 Trial pivot:
 

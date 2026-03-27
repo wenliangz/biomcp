@@ -70,7 +70,7 @@ After the orientation pass, move to the entity that best matches your question:
 biomcp search trial -c melanoma --biomarker BRAF --status recruiting --limit 5
 
 # Article follow-up after orientation reveals literature volume
-biomcp search article -g BRAF -d melanoma --date-from 2024-01-01 --limit 5
+biomcp search article -g BRAF -d melanoma --since 2024-01-01 --limit 5
 
 # Helper pivots when you already know the anchor entity
 biomcp gene trials BRAF

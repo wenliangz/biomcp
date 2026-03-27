@@ -100,7 +100,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 
 ### CIViC
 
-- BioMCP surfaces: `get gene <symbol> civic; get disease <id> variants`
+- BioMCP surfaces: `get variant <id> civic; get gene <symbol> civic; get drug <name> civic; get disease <id> civic; get disease <id> variants`
 - Integration mode: `direct_api`
 - BioMCP auth: `none`
 - Provider access / registration: open public API

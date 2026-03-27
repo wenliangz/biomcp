@@ -1,4 +1,4 @@
-# Reproduce Paper Workflows
+# How to: reproduce paper workflows
 
 BioMCP paper-style workflows are best reproduced with direct CLI commands. If
 you want the agent-facing guide first, run `biomcp skill` or install it into

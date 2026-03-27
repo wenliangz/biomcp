@@ -1,4 +1,4 @@
-# Skill Validation Guide
+# How to: validate skill runs
 
 This guide defines how to evaluate whether a BioMCP skill run is complete and trustworthy. Validation is checklist-driven and attached directly to each skill markdown file.
 

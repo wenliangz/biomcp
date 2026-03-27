@@ -100,6 +100,13 @@ All sections where supported:
 biomcp get trial NCT02576665 all
 ```
 
+## Helper commands
+
+There is no direct `trial <helper>` family. Use inbound pivots such as
+`biomcp gene trials <gene>`, `biomcp variant trials <id>`,
+`biomcp drug trials <name>`, or `biomcp disease trials <name>` when the anchor
+entity is already known.
+
 ## Downloaded text and cache
 
 Large text blocks (for example, eligibility text) are cached in the BioMCP download area.
@@ -111,7 +118,7 @@ This keeps repeated lookups responsive.
 biomcp --json get trial NCT02576665
 ```
 
-## Trial matching tips
+## Practical tips
 
 - Start broad on condition, then add intervention and biomarker filters.
 - Keep limits low while tuning search criteria.

@@ -1,9 +1,9 @@
 # Discover
 
-`biomcp discover <query>` is the free-text entrypoint for concept resolution.
-Use it when you know the biomedical phrase but do not yet know whether the next
-step should be `get gene`, `search disease`, `search pathway`, or another typed
-command.
+Use `biomcp discover` to resolve free-text biomedical phrases into the right
+BioMCP follow-up commands. Run it when you know the phrase but do not yet know
+whether the next step should be `get gene`, `search disease`, `search pathway`,
+or another typed command.
 
 Use `search all` after you already have typed slots such as `--gene`,
 `--disease`, `--drug`, `--variant`, or `--keyword`. `discover` resolves free
@@ -45,3 +45,9 @@ JSON preserves the same concepts and adds:
 - MedlinePlus is best-effort and only shown for disease or symptom flows.
 - Queries are sent to third-party biomedical APIs. Do not send PHI or other
   patient-identifying text.
+
+## Related guides
+
+- [Search All Workflow](../how-to/search-all-workflow.md)
+- [Disease](disease.md)
+- [Gene](gene.md)

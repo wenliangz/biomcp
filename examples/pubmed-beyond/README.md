@@ -2,6 +2,9 @@
 
 This demo reproduces a literature-intelligence workflow inspired by PubMed & Beyond.
 
+**Prerequisites:** `uv tool install biomcp-cli`
+**Runtime:** A Pi-compatible CLI must be on `PATH` through `PI_CMD` (default `pi`). No environment variables are required for the default prompts.
+
 ## Scope
 - Retrieve representative BRAF/melanoma literature
 - Extract evidence points for BRAF V600E clinical relevance
@@ -22,4 +25,5 @@ This demo reproduces a literature-intelligence workflow inspired by PubMed & Bey
 ./score.sh output.md
 ```
 
-The score checks for expected literature + clinical evidence anchors.
+The score checks for literature evidence, BRAF V600E clinical relevance, and a
+treatment or resistance angle from the retrieved articles.

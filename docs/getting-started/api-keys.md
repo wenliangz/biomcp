@@ -20,14 +20,15 @@ biomcp get variant "chr7:g.140453136A>T" predict
 
 ### `ONCOKB_TOKEN`
 
-Used for production OncoKB enrichment.
-If omitted, BioMCP uses the public/demo path when possible.
+Used for the production `biomcp variant oncokb ...` helper.
+BioMCP keeps `ONCOKB_TOKEN` because OncoKB itself calls the credential a
+token.
 
 Register at: <https://www.oncokb.org/account/register>
 
 ```bash
 export ONCOKB_TOKEN="..."
-biomcp get variant "BRAF V600E"
+biomcp variant oncokb "BRAF V600E"
 ```
 
 ### `NCI_API_KEY`

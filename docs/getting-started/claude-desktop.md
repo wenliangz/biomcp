@@ -1,6 +1,8 @@
 # Claude Desktop (MCP) Setup
 
-BioMCP can run as an MCP server over stdio.
+BioMCP can run as an MCP server over stdio. If your Claude Desktop build
+offers the Anthropic Directory, install BioMCP there first. Use the JSON config
+below when you want a local/manual setup.
 
 ## Add BioMCP server config
 

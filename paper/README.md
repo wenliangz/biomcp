@@ -1,7 +1,7 @@
 # Paper Package
 
 This directory holds the repo-facing paper package for BioMCP. It documents the
-reviewer-visible file layout, the placeholder archive schemas committed now, and
+reviewer-visible file layout, the committed placeholder archive schemas, and
 the reproduction scripts operators can run from this repository.
 
 ## Layout
@@ -15,7 +15,7 @@ paper/
 ```
 
 - `paper/data/` currently contains placeholder schemas for archived release
-  payloads. These files are committed stubs now and are replaced with the final
+  payloads. These files are committed stubs and are replaced with the final
   release pack before publication.
 - `paper/supplementary/` contains reviewer-facing stub tables that describe the
   expected columns for the paper appendix.
@@ -78,6 +78,6 @@ bash paper/scripts/run-normalization.sh
 ./paper/scripts/measure-tokens.py
 ```
 
-Today, only `run-traceability-audit.sh` is runnable immediately. The other two
-shell scripts are wired for the archived release pack and will tell the
-operator to replace the stubs in `paper/data/` before continuing.
+Only `run-traceability-audit.sh` is runnable immediately. The other two shell
+scripts are wired for the archived release pack and will tell the operator to
+replace the stubs in `paper/data/` before continuing.

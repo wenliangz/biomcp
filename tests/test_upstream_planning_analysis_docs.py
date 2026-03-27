@@ -613,8 +613,8 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "Semantic Scholar article enrichment/navigation" in technical
     assert "No `RUN.md` or staging-demo runbook exists" not in technical
 
-    assert "current BioMCP operator command layer" in scripts_readme
-    assert "source-facing contract probes" in scripts_readme
+    assert "lightweight commands for checking upstream source" in scripts_readme
+    assert "source-facing contract probe" in scripts_readme
     assert "091 expansion scope" not in scripts_readme
 
     assert "# BioMCP Source Contract Probes" in source_contracts

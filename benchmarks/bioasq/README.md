@@ -19,8 +19,8 @@ public benchmark inputs from.
 ## Run the public ingester
 
 ```bash
-uv run --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026
-uv run --script benchmarks/bioasq/ingest_public.py --bundle mirage-yesno-2024
+uv run --quiet --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026
+uv run --quiet --script benchmarks/bioasq/ingest_public.py --bundle mirage-yesno-2024
 ```
 
 Add `--force` when you want to overwrite an existing raw or normalized output
