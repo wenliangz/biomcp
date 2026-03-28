@@ -9,7 +9,7 @@ Article commands provide literature retrieval and annotation-focused enrichment 
 | PubTator source search | `search article --source pubtator` | Confirms default filtering still allows source-specific PubTator results |
 | Federated source preservation | `--json search article -q ...` | Confirms default filtering still preserves non-EuropePMC matches |
 | Article detail | `get article 22663011` | Confirms canonical article card output |
-| Annotation section | `get article ... annotations` | Confirms PubTator integration |
+| Annotation section | `get article ... annotations` | Confirms PubTator integration and extraction guidance |
 | Entity helper | `article entities 22663011` | Confirms entity extraction pivot |
 | Batch helper | `article batch 22663011 24200969` | Confirms compact multi-article fetch |
 | Semantic Scholar detail | `get article 22663011 tldr` | Confirms optional-key enrichment section |
@@ -143,11 +143,13 @@ echo "$out" | mustmatch like "Journal:"
 
 ## Article Annotations
 
-Annotation output summarizes entity classes detected by PubTator. The assertions target section heading and gene summary marker.
+Annotation output summarizes entity classes detected by PubTator. The section should also explain that these are normalized entity mentions suitable for standardized extraction.
 
 ```bash
 out="$(biomcp get article 22663011 annotations)"
 echo "$out" | mustmatch like "## PubTator Annotations"
+echo "$out" | mustmatch like "normalized entity mentions"
+echo "$out" | mustmatch like "standardized extraction"
 echo "$out" | mustmatch like "Genes:"
 ```
 

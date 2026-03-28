@@ -74,8 +74,13 @@ pub(crate) enum DiscoverType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum DiscoverIntent {
-    General,
     TrialSearch,
+    DrugSafety,
+    TreatmentSearch,
+    SymptomSearch,
+    GeneDiseaseOrientation,
+    GeneFunction,
+    General,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -233,7 +238,6 @@ pub(crate) fn build_result(
     notes: Vec<String>,
 ) -> DiscoverResult {
     let normalized_query = normalize_query(query);
-    let intent = detect_intent(&normalized_query);
 
     let mut concepts = Vec::new();
     for doc in ols_docs {
@@ -262,6 +266,7 @@ pub(crate) fn build_result(
 
     concepts.sort_by(|left, right| compare_concepts(left, right, query));
     let ambiguous = is_ambiguous(&concepts);
+    let intent = detect_intent(&normalized_query, &concepts);
     let plain_language = select_plain_language(&concepts, medline_topics, intent);
     let next_commands = generate_commands(query, &concepts, ambiguous, intent);
 
@@ -750,18 +755,88 @@ fn heuristic_type(label: &str, query: &str) -> DiscoverType {
     }
 }
 
-fn detect_intent(normalized_query: &str) -> DiscoverIntent {
-    let has_trial_token = normalized_query.split_whitespace().any(|token| {
-        matches!(
-            token,
-            "trial" | "trials" | "study" | "studies" | "recruiting" | "recruitment"
-        )
-    });
-    if has_trial_token {
-        DiscoverIntent::TrialSearch
-    } else {
-        DiscoverIntent::General
+fn detect_intent(normalized_query: &str, concepts: &[DiscoverConcept]) -> DiscoverIntent {
+    if contains_any_phrase(
+        normalized_query,
+        &[
+            "trial",
+            "trials",
+            "study",
+            "studies",
+            "recruiting",
+            "recruitment",
+        ],
+    ) {
+        return DiscoverIntent::TrialSearch;
     }
+    if contains_any_phrase(
+        normalized_query,
+        &[
+            "side effect",
+            "side effects",
+            "adverse event",
+            "adverse events",
+            "adverse effect",
+            "adverse effects",
+            "toxicity",
+            "toxicities",
+            "safety",
+            "warning",
+            "warnings",
+        ],
+    ) && top_concept_of_type(concepts, DiscoverType::Drug).is_some()
+    {
+        return DiscoverIntent::DrugSafety;
+    }
+    if contains_any_phrase(
+        normalized_query,
+        &[
+            "treat",
+            "treats",
+            "treated",
+            "treatment",
+            "therapy",
+            "therapies",
+            "drug for",
+            "drugs for",
+            "medication",
+            "medications",
+        ],
+    ) && top_concept_of_type(concepts, DiscoverType::Disease).is_some()
+    {
+        return DiscoverIntent::TreatmentSearch;
+    }
+    if contains_any_phrase(
+        normalized_query,
+        &[
+            "symptom",
+            "symptoms",
+            "sign",
+            "signs",
+            "phenotype",
+            "phenotypes",
+            "clinical feature",
+            "clinical features",
+        ],
+    ) || matches!(
+        concepts.first().map(|concept| concept.primary_type),
+        Some(DiscoverType::Symptom)
+    ) {
+        return DiscoverIntent::SymptomSearch;
+    }
+    if top_concept_of_type(concepts, DiscoverType::Gene).is_some()
+        && top_concept_of_type(concepts, DiscoverType::Disease).is_some()
+    {
+        return DiscoverIntent::GeneDiseaseOrientation;
+    }
+    if contains_any_phrase(
+        normalized_query,
+        &["what does", "function", "role", "activity", "what is"],
+    ) && top_concept_of_type(concepts, DiscoverType::Gene).is_some()
+    {
+        return DiscoverIntent::GeneFunction;
+    }
+    DiscoverIntent::General
 }
 
 fn select_plain_language(
@@ -836,21 +911,95 @@ fn generate_commands(
         return commands;
     };
 
-    if intent == DiscoverIntent::TrialSearch {
-        if matches!(
-            top.primary_type,
-            DiscoverType::Disease | DiscoverType::Symptom
-        ) {
-            commands.push(format!(
-                "biomcp search trial -c \"{}\" --limit 5",
-                top.label
-            ));
-            commands.push(format!(
-                "biomcp search article -k \"{}\" --limit 5",
-                top.label
-            ));
+    match intent {
+        DiscoverIntent::TrialSearch => {
+            if matches!(
+                top.primary_type,
+                DiscoverType::Disease | DiscoverType::Symptom
+            ) {
+                commands.push(format!(
+                    "biomcp search trial -c \"{}\" --limit 5",
+                    top.label
+                ));
+                commands.push(format!(
+                    "biomcp search article -k \"{}\" --limit 5",
+                    top.label
+                ));
+            }
+            return dedupe_strings(commands);
         }
-        return commands;
+        DiscoverIntent::DrugSafety => {
+            if let Some(drug) = top_concept_of_type(concepts, DiscoverType::Drug) {
+                let drug_name = drug.label.to_ascii_lowercase();
+                commands.push(format!("biomcp drug adverse-events {drug_name}"));
+                commands.push(format!("biomcp get drug {drug_name} safety"));
+                commands.push(format!(
+                    "biomcp search article --drug {} --type review --limit 5",
+                    quote_query_term(&drug.label)
+                ));
+            }
+        }
+        DiscoverIntent::TreatmentSearch => {
+            if let Some(disease) = top_concept_of_type(concepts, DiscoverType::Disease) {
+                commands.push(format!(
+                    "biomcp search drug --indication {} --limit 5",
+                    quote_query_term(&disease.label)
+                ));
+                commands.push(format!(
+                    "biomcp search article -d {} --type review --limit 5",
+                    quote_query_term(&disease.label)
+                ));
+            }
+        }
+        DiscoverIntent::SymptomSearch => {
+            if let Some(disease) = top_concept_of_type(concepts, DiscoverType::Disease) {
+                if let Some(disease_ref) = disease_command_ref(disease) {
+                    commands.push(format!("biomcp get disease {disease_ref} phenotypes"));
+                }
+                commands.push(format!(
+                    "biomcp search article -d {} --type review --limit 5",
+                    quote_query_term(&disease.label)
+                ));
+            } else {
+                commands.push(format!(
+                    "biomcp search disease -q {} --limit 10",
+                    quote_query_term(query.trim())
+                ));
+                commands.push(format!(
+                    "biomcp search trial -c {} --limit 5",
+                    quote_query_term(query.trim())
+                ));
+                commands.push(format!(
+                    "biomcp search article -k {} --limit 5",
+                    quote_query_term(query.trim())
+                ));
+            }
+            return dedupe_strings(commands);
+        }
+        DiscoverIntent::GeneDiseaseOrientation => {
+            if let (Some(gene), Some(disease)) = (
+                top_concept_of_type(concepts, DiscoverType::Gene),
+                top_concept_of_type(concepts, DiscoverType::Disease),
+            ) {
+                commands.push(format!(
+                    "biomcp search all --gene {} --disease \"{}\"",
+                    gene.label, disease.label
+                ));
+                commands.push(format!("biomcp get gene {}", gene.label));
+                if let Some(disease_ref) = disease_command_ref(disease) {
+                    commands.push(format!("biomcp get disease {disease_ref}"));
+                }
+                return dedupe_strings(commands);
+            }
+        }
+        DiscoverIntent::GeneFunction => {
+            if let Some(gene) = top_concept_of_type(concepts, DiscoverType::Gene) {
+                commands.push(format!("biomcp get gene {}", gene.label));
+                commands.push(format!("biomcp search article -g {} --limit 5", gene.label));
+                return dedupe_strings(commands);
+            }
+        }
+        DiscoverIntent::General => {}
     }
 
     match top.primary_type {
@@ -908,13 +1057,72 @@ fn generate_commands(
         }
         DiscoverType::Unknown => {
             commands.push(format!(
-                "biomcp search article -k \"{}\" --limit 5",
-                query.trim()
+                "biomcp search article -k {} --limit 5",
+                quote_query_term(query.trim())
             ));
         }
     }
 
     dedupe_strings(commands)
+}
+
+fn contains_any_phrase(normalized_query: &str, phrases: &[&str]) -> bool {
+    phrases
+        .iter()
+        .any(|phrase| normalized_query.contains(&normalize_query(phrase)))
+}
+
+fn top_concept_of_type(
+    concepts: &[DiscoverConcept],
+    kind: DiscoverType,
+) -> Option<&DiscoverConcept> {
+    concepts.iter().find(|concept| concept.primary_type == kind)
+}
+
+fn disease_command_ref(concept: &DiscoverConcept) -> Option<String> {
+    concept
+        .primary_id
+        .as_deref()
+        .filter(|value| {
+            value.starts_with("MONDO:")
+                || value.starts_with("DOID:")
+                || value.starts_with("ORDO:")
+                || value.starts_with("ICD10CM:")
+        })
+        .map(ToString::to_string)
+        .or_else(|| {
+            let label = quote_query_term(&concept.label);
+            (!label.is_empty()).then_some(label)
+        })
+}
+
+fn quote_query_term(value: &str) -> String {
+    quote_arg(value).if_empty_then(format!("\"{}\"", value.trim()))
+}
+
+trait StringExt {
+    fn if_empty_then(self, fallback: String) -> String;
+}
+
+impl StringExt for String {
+    fn if_empty_then(self, fallback: String) -> String {
+        if self.trim().is_empty() {
+            fallback
+        } else {
+            self
+        }
+    }
+}
+
+fn quote_arg(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else if trimmed.contains(char::is_whitespace) || trimmed.contains('"') {
+        format!("\"{}\"", trimmed.replace('"', "\\\""))
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn looks_like_gene_query(query: &str) -> bool {
@@ -1018,6 +1226,58 @@ mod tests {
     use crate::sources::ols4::OlsDoc;
     use crate::sources::umls::{UmlsConcept, UmlsXref};
 
+    fn hgnc_doc(label: &str, obo_id: &str, exact_synonyms: &[&str]) -> OlsDoc {
+        OlsDoc {
+            iri: format!(
+                "http://example.org/{}",
+                obo_id.replace(':', "/").to_ascii_lowercase()
+            ),
+            ontology_name: "hgnc".to_string(),
+            ontology_prefix: "hgnc".to_string(),
+            short_form: Some(obo_id.to_ascii_lowercase()),
+            obo_id: Some(obo_id.to_string()),
+            label: label.to_string(),
+            description: Vec::new(),
+            exact_synonyms: exact_synonyms
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            is_defining_ontology: true,
+            doc_type: Some("class".to_string()),
+        }
+    }
+
+    fn disease_umls(cui: &str, name: &str, xrefs: &[(&str, &str, &str)]) -> UmlsConcept {
+        UmlsConcept {
+            cui: cui.to_string(),
+            name: name.to_string(),
+            semantic_types: vec!["Disease or Syndrome".to_string()],
+            xrefs: xrefs
+                .iter()
+                .map(|(vocab, id, label)| UmlsXref {
+                    vocab: (*vocab).to_string(),
+                    id: (*id).to_string(),
+                    label: (*label).to_string(),
+                })
+                .collect(),
+            uri: format!("https://example.org/{cui}"),
+        }
+    }
+
+    fn drug_umls(cui: &str, name: &str) -> UmlsConcept {
+        UmlsConcept {
+            cui: cui.to_string(),
+            name: name.to_string(),
+            semantic_types: vec!["Clinical Drug".to_string()],
+            xrefs: vec![UmlsXref {
+                vocab: "RXNORM".to_string(),
+                id: "1547545".to_string(),
+                label: name.to_string(),
+            }],
+            uri: format!("https://example.org/{cui}"),
+        }
+    }
+
     #[test]
     fn symptom_queries_keep_search_suggestions_and_plain_language() {
         let result = build_result(
@@ -1042,7 +1302,7 @@ mod tests {
             Vec::new(),
         );
 
-        assert_eq!(result.intent, DiscoverIntent::General);
+        assert_eq!(result.intent, DiscoverIntent::SymptomSearch);
         assert_eq!(result.concepts[0].primary_type, DiscoverType::Symptom);
         assert!(result.plain_language.is_some());
         assert!(
@@ -1104,6 +1364,107 @@ mod tests {
             result.next_commands[0],
             "biomcp search trial -c \"Breast Cancer\" --limit 5"
         );
+    }
+
+    #[test]
+    fn treatment_queries_prefer_structured_indication_search() {
+        let result = build_result(
+            "what drugs treat myasthenia gravis",
+            &[],
+            &[disease_umls(
+                "C0026896",
+                "Myasthenia gravis",
+                &[("MONDO", "0007192", "Myasthenia gravis")],
+            )],
+            &[],
+            Vec::new(),
+        );
+
+        assert_eq!(result.intent, DiscoverIntent::TreatmentSearch);
+        assert_eq!(
+            result.next_commands[0],
+            "biomcp search drug --indication \"Myasthenia gravis\" --limit 5"
+        );
+    }
+
+    #[test]
+    fn symptom_queries_about_disease_prefer_phenotype_section() {
+        let result = build_result(
+            "symptoms of Marfan syndrome",
+            &[],
+            &[disease_umls(
+                "C0024796",
+                "Marfan syndrome",
+                &[("MONDO", "0007947", "Marfan syndrome")],
+            )],
+            &[],
+            Vec::new(),
+        );
+
+        assert_eq!(result.intent, DiscoverIntent::SymptomSearch);
+        assert_eq!(
+            result.next_commands[0],
+            "biomcp get disease MONDO:0007947 phenotypes"
+        );
+    }
+
+    #[test]
+    fn drug_safety_queries_beat_treatment_language() {
+        let result = build_result(
+            "pembrolizumab safety in melanoma",
+            &[],
+            &[
+                drug_umls("C3277863", "pembrolizumab"),
+                disease_umls("C0025202", "melanoma", &[("MONDO", "0005105", "melanoma")]),
+            ],
+            &[],
+            Vec::new(),
+        );
+
+        assert_eq!(result.intent, DiscoverIntent::DrugSafety);
+        assert_eq!(
+            result.next_commands[0],
+            "biomcp drug adverse-events pembrolizumab"
+        );
+        assert_eq!(
+            result.next_commands[1],
+            "biomcp get drug pembrolizumab safety"
+        );
+    }
+
+    #[test]
+    fn gene_disease_queries_prefer_search_all_orientation() {
+        let result = build_result(
+            "BRAF melanoma",
+            &[hgnc_doc("BRAF", "HGNC:1097", &[])],
+            &[disease_umls(
+                "C0025202",
+                "melanoma",
+                &[("MONDO", "0005105", "melanoma")],
+            )],
+            &[],
+            Vec::new(),
+        );
+
+        assert_eq!(result.intent, DiscoverIntent::GeneDiseaseOrientation);
+        assert_eq!(
+            result.next_commands[0],
+            "biomcp search all --gene BRAF --disease \"melanoma\""
+        );
+    }
+
+    #[test]
+    fn gene_function_queries_prefer_get_gene() {
+        let result = build_result(
+            "what does OPA1 do",
+            &[hgnc_doc("OPA1", "HGNC:8141", &[])],
+            &[],
+            &[],
+            Vec::new(),
+        );
+
+        assert_eq!(result.intent, DiscoverIntent::GeneFunction);
+        assert_eq!(result.next_commands[0], "biomcp get gene OPA1");
     }
 
     #[test]

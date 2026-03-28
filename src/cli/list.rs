@@ -55,12 +55,23 @@ fn list_discover() -> String {
 
 - `discover <query>` - resolve free-text biomedical text into typed concepts and suggested BioMCP follow-up commands
 - `--json discover <query>` - emit structured concepts plus discover-specific `_meta` metadata for agents
+
+## When to use this surface
+
+- Use `discover` when you only have free text and need BioMCP to pick the next typed command.
+- Prefer the first suggested command when the query clearly implies treatment, symptoms, safety, trials, or gene+disease orientation.
 "#
     .to_string()
 }
 
 fn list_gene() -> String {
     r#"# gene
+
+## When to use this surface
+
+- Use `get gene <symbol>` for the default card when you need the canonical summary first.
+- Add `protein`, `hpa`, `expression`, or `diseases` when you need deeper function, localization, tissue, or disease context.
+- Use `gene articles <symbol>` or `search article -g <symbol>` when you need literature tied to one gene.
 
 ## Commands
 
@@ -179,6 +190,14 @@ Supported formats:
 fn list_article() -> String {
     r#"# article
 
+## When to use this surface
+
+- Use keyword search to scan a topic before you know the entities.
+- Add `-g/--gene` when you already know the molecular anchor.
+- Prefer `--type review` for synthesis questions, broad mechanism questions, or list-style answers.
+- Refine the query before paginating when the first page is noisy; paginate when the first page is relevant.
+- Use `article citations <id>`, `article references <id>`, and `article recommendations <id>` to deepen one strong paper into a multi-hop evidence trail.
+
 ## Commands
 
 - `get article <id>` - get by PMID/PMCID/DOI
@@ -266,6 +285,12 @@ fn list_trial() -> String {
 fn list_drug() -> String {
     r#"# drug
 
+## When to use this surface
+
+- Use the positional name lookup when you already know the drug or brand name.
+- Use `--indication`, `--target`, or `--mechanism` when the question is structured.
+- Use `get drug <name>` for label, regulatory, safety, target, or indication detail after you have the normalized drug name.
+
 ## Commands
 
 - `get drug <name>` - get by name (MyChem.info aggregation)
@@ -293,6 +318,12 @@ fn list_drug() -> String {
 - `search drug --interactions <drug>` - unavailable from current public data sources
 - `search drug ... --limit <N> --offset <N>`
 
+## When to use this surface
+
+- Use the positional name lookup when you already know the drug or brand name.
+- Use `--indication`, `--target`, or `--mechanism` when the question is structured.
+- Start with `get drug <name>` after a name match, and switch to review literature when the structured card is sparse.
+
 ## Helpers
 
 - `drug trials <name>`
@@ -311,6 +342,12 @@ fn list_drug() -> String {
 
 fn list_disease() -> String {
     r#"# disease
+
+## When to use this surface
+
+- Use `get disease <name_or_id>` when you want the normalized disease card with genes, pathways, and phenotypes.
+- Use `get disease <name_or_id> phenotypes` for symptom-style questions.
+- Use `search article -d <disease>` when you need broader review literature or want to supplement sparse structured data.
 
 ## Commands
 
@@ -332,6 +369,12 @@ fn list_disease() -> String {
 - `search disease -q <query> --phenotype <HP:...>`
 - `search disease -q <query> --onset <period>`
 - `search disease ... --limit <N> --offset <N>`
+
+## When to use this surface
+
+- Use `get disease <name_or_id>` when you want the normalized disease card, genes, or phenotype-backed sections.
+- Use `get disease <name_or_id> phenotypes` for symptom questions.
+- Use `search article -d <disease>` when you need broader review literature or want to supplement sparse structured disease data.
 
 ## Helpers
 
@@ -436,9 +479,19 @@ fn list_gwas() -> String {
 fn list_batch() -> String {
     r#"# batch
 
+## When to use this surface
+
+- Use batch when you already have a short list of IDs and want the same `get` call repeated consistently.
+- Batch is better than sequential `get` calls when you are comparing a few entities side by side.
+
 ## Command
 
 - `batch <entity> <id1,id2,...>` - parallel `get` operations for up to 10 IDs
+
+## When to use this surface
+
+- Use batch when you already have a short list of IDs and need the same sections for each one.
+- Prefer batch over manual repetition when comparing a handful of genes, drugs, trials, or diseases.
 
 ## Options
 
@@ -460,9 +513,19 @@ fn list_batch() -> String {
 fn list_enrich() -> String {
     r#"# enrich
 
+## When to use this surface
+
+- Use enrich when you already have a gene set and need pathways, GO terms, or broader functional categories.
+- Start using enrichment once you have 3 or more genes; smaller lists are often better handled by direct `get gene` review.
+
 ## Command
 
 - `enrich <GENE1,GENE2,...>` - gene-set enrichment using g:Profiler
+
+## When to use this surface
+
+- Use enrich when you already have a gene set and want shared pathways, GO terms, or functional categories.
+- Prefer enrich over repeated single-gene ontology lookups once you have 3 or more genes.
 
 ## Options
 
@@ -671,13 +734,16 @@ mod tests {
     use super::{list_drug, list_gene, render};
 
     #[test]
-    fn list_root_includes_quickstart_and_skills_tip() {
+    fn list_root_includes_routing_table_and_quickstart() {
         let out = render(None).expect("list root should render");
         assert!(out.contains("## Quickstart"));
+        assert!(out.contains("## When to Use What"));
+        assert!(out.contains("search all --gene BRAF --disease melanoma"));
+        assert!(out.contains("discover \"<free text>\""));
+        assert!(out.contains("article citations <id>"));
+        assert!(out.contains("enrich <GENE1,GENE2,...>"));
         assert!(out.contains("`skill install` - install BioMCP skill guidance to your agent"));
         assert!(out.contains("`discover <query>`"));
-        assert!(!out.contains("`skill list`"));
-        assert!(!out.contains("Run `biomcp skill list` to browse all skills."));
     }
 
     #[test]
@@ -710,7 +776,9 @@ mod tests {
     #[test]
     fn list_skill_alias_routes_to_skill_listing() {
         let out = render(Some("skill")).expect("list skill should render");
-        assert!(out.contains("No skills found"));
+        assert!(out.contains("# BioMCP Worked Examples"));
+        assert!(out.contains("01 treatment-lookup"));
+        assert!(out.contains("04 article-follow-up"));
     }
 
     #[test]
@@ -718,10 +786,14 @@ mod tests {
         let batch = render(Some("batch")).expect("list batch should render");
         assert!(batch.contains("# batch"));
         assert!(batch.contains("batch <entity> <id1,id2,...>"));
+        assert!(batch.contains("## When to use this surface"));
+        assert!(batch.contains("Use batch when you already have a short list of IDs"));
 
         let enrich = render(Some("enrich")).expect("list enrich should render");
         assert!(enrich.contains("# enrich"));
         assert!(enrich.contains("enrich <GENE1,GENE2,...>"));
+        assert!(enrich.contains("## When to use this surface"));
+        assert!(enrich.contains("Use enrich when you already have a gene set"));
     }
 
     #[test]
@@ -749,6 +821,9 @@ mod tests {
     #[test]
     fn list_gene_mentions_new_gene_sections() {
         let out = list_gene();
+        assert!(out.contains("## When to use this surface"));
+        assert!(out.contains("Use `get gene <symbol>` for the default card"));
+        assert!(out.contains("protein`, `hpa`, `expression`, or `diseases`"));
         assert!(out.contains("get gene <symbol> expression"));
         assert!(out.contains("get gene <symbol> hpa"));
         assert!(out.contains("get gene <symbol> druggability"));
@@ -760,6 +835,13 @@ mod tests {
     #[test]
     fn list_drug_describes_omitted_region_behavior() {
         let out = list_drug();
+        assert!(out.contains("## When to use this surface"));
+        assert!(out.contains(
+            "Use the positional name lookup when you already know the drug or brand name."
+        ));
+        assert!(out.contains(
+            "Use `--indication`, `--target`, or `--mechanism` when the question is structured."
+        ));
         assert!(out.contains(
             "Omitting `--region` searches both U.S. and EU data for plain name/alias lookups."
         ));
@@ -774,6 +856,13 @@ mod tests {
     #[test]
     fn list_disease_mentions_disgenet_section() {
         let out = render(Some("disease")).expect("list disease should render");
+        assert!(out.contains("## When to use this surface"));
+        assert!(
+            out.contains(
+                "Use `get disease <name_or_id>` when you want the normalized disease card"
+            )
+        );
+        assert!(out.contains("Use `search article -d <disease>` when you need broader review"));
         assert!(out.contains("get disease <name_or_id> disgenet"));
     }
 
@@ -783,6 +872,14 @@ mod tests {
         assert!(trial.contains("--biomarker <text>"));
 
         let article = render(Some("article")).expect("list article should render");
+        assert!(article.contains("## When to use this surface"));
+        assert!(
+            article.contains("Use keyword search to scan a topic before you know the entities.")
+        );
+        assert!(article.contains("Add `-g/--gene` when you already know the molecular anchor."));
+        assert!(article.contains("Prefer `--type review`"));
+        assert!(article.contains("article citations <id>"));
+        assert!(article.contains("article recommendations <id>"));
         assert!(article.contains("--date-from <YYYY|YYYY-MM|YYYY-MM-DD>"));
         assert!(article.contains("--date-to <YYYY|YYYY-MM|YYYY-MM-DD>"));
         assert!(article.contains("--since <YYYY|YYYY-MM|YYYY-MM-DD>"));

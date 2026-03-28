@@ -8,6 +8,7 @@ BioMCP is a single-binary CLI for querying biomedical sources with one command g
 | Health check | `biomcp health --apis-only` | Confirms per-source connectivity and excluded key-gated sources |
 | Command reference | `biomcp list` | Confirms core entities are discoverable |
 | Entity help | `biomcp list gene` | Confirms contextual filter/helper guidance |
+| Article routing | `biomcp list article` | Confirms topic-vs-review-vs-follow-up guidance |
 
 ## Version
 
@@ -40,11 +41,18 @@ echo "$json_out" | jq -e 'any(.rows[]; .api == "MyGene" and ((has("key_configure
 
 ## Command Reference
 
-The command index is the human entry point for discovery. This check asserts that the reference heading renders and that representative entities remain listed.
+The command index is the human entry point for discovery. It should now open with a routing table that teaches which command to start with before the grammar reference.
 
 ```bash
 out="$(biomcp list)"
 echo "$out" | mustmatch like "# BioMCP Command Reference"
+echo "$out" | mustmatch like "## When to Use What"
+echo "$out" | mustmatch like "search drug --indication \"<disease>\""
+echo "$out" | mustmatch like "discover \"<free text>\""
+echo "$out" | mustmatch like "search all --gene BRAF --disease melanoma"
+echo "$out" | mustmatch like "article citations <id>"
+echo "$out" | mustmatch like "batch <entity> <id1,id2,...>"
+echo "$out" | mustmatch like "enrich <GENE1,GENE2,...>"
 echo "$out" | mustmatch like "- `discover <query>`"
 echo "$out" | mustmatch like "- `ema sync`"
 echo "$out" | mustmatch like "- variant"
@@ -59,4 +67,19 @@ Entity-specific help should expose both filter syntax and cross-entity helpers. 
 out="$(biomcp list gene)"
 echo "$out" | mustmatch like "## Search filters"
 echo "$out" | mustmatch like "## Helpers"
+echo "$out" | mustmatch like "## When to use this surface"
+echo "$out" | mustmatch like "Use `get gene <symbol>` for the default card"
+```
+
+## Article Routing Help
+
+`biomcp list article` should explain when to start with keyword search, when to pin the search to a known gene, when review articles are better than more pagination, and how to follow a paper into citations or recommendations.
+
+```bash
+out="$(biomcp list article)"
+echo "$out" | mustmatch like "## When to use this surface"
+echo "$out" | mustmatch like "Use keyword search to scan a topic before you know the entities."
+echo "$out" | mustmatch like "Prefer `--type review`"
+echo "$out" | mustmatch like "article citations <id>"
+echo "$out" | mustmatch like "article recommendations <id>"
 ```

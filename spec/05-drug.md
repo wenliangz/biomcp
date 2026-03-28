@@ -6,7 +6,9 @@ Drug commands connect mechanism and target context with trial and adverse-event 
 |---|---|---|
 | EMA health readiness | `biomcp health` | Confirms the local EMA batch is surfaced as an operator-readable readiness row |
 | Drug search | `search drug pembrolizumab --region us` | Confirms stable U.S. name-based lookup |
+| Indication miss framing | `search drug --indication "Marfan syndrome"` | Confirms zero structured hits are explained as regulatory evidence |
 | Drug detail | `get drug pembrolizumab` | Confirms mechanism/target card |
+| Sparse drug guidance | `get drug orteronel` | Confirms article-search follow-up for investigational cards |
 | Targets section | `get drug ... targets` | Confirms progressive disclosure |
 | Trial helper | `drug trials pembrolizumab` | Confirms intervention-based trial pivot |
 | Adverse-event helper | `drug adverse-events pembrolizumab` | Confirms safety signal pivot |
@@ -50,9 +52,24 @@ the structured-filter exception explicit.
 
 ```bash
 out="$(biomcp search drug --help)"
+echo "$out" | mustmatch like "When to use:"
+echo "$out" | mustmatch like "when you know the drug or brand name"
+echo "$out" | mustmatch like "--indication, --target, or --mechanism"
 echo "$out" | mustmatch '/\[default: all\]/'
 echo "$out" | mustmatch like "Omitting --region on a plain name/alias search checks both U.S. and EU data."
 echo "$out" | mustmatch like "If you omit --region while using structured filters such as --target or --indication, BioMCP stays on the U.S. MyChem path."
+```
+
+## Structured Indication Misses Are Informative
+
+When a structured indication query finds no U.S. regulatory match, the output should frame that absence as evidence about the regulatory surface rather than a generic failure.
+
+```bash
+out="$(biomcp search drug --indication 'Marfan syndrome' --region us --limit 3)"
+echo "$out" | mustmatch like "U.S. regulatory data"
+echo "$out" | mustmatch like "This absence is informative"
+echo "$out" | mustmatch like 'biomcp search article -k "Marfan syndrome treatment" --type review --limit 5'
+echo "$out" | mustmatch not like "No drugs found"
 ```
 
 ## Getting Drug Details
@@ -64,6 +81,16 @@ out="$(biomcp get drug pembrolizumab)"
 echo "$out" | mustmatch like "# pembrolizumab"
 echo "$out" | mustmatch like "DrugBank ID: DB09037"
 echo "$out" | mustmatch like "## Targets"
+```
+
+## Sparse Drug Cards Suggest Literature Follow-Up
+
+Investigational or sparse label cards should point the user to review literature for indication context instead of pretending the structured card is complete.
+
+```bash
+out="$(biomcp get drug orteronel)"
+echo "$out" | mustmatch like "biomcp search article --drug orteronel --type review --limit 5"
+echo "$out" | mustmatch like "indication context"
 ```
 
 ## Drug Indications

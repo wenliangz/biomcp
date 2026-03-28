@@ -495,6 +495,8 @@ EXAMPLES:
     },
     /// Resolve free-text biomedical text into typed concepts and suggested commands
     #[command(after_help = "\
+When to use: use discover when you only have free text and need BioMCP to pick the next typed command.
+
 EXAMPLES:
   biomcp discover ERBB1
   biomcp discover Keytruda
@@ -715,6 +717,8 @@ See also: biomcp list gwas")]
     },
     /// Search articles by gene, disease, drug, keyword, or author (PubTator3 + Europe PMC, optional Semantic Scholar)
     #[command(after_help = "\
+When to use: use keyword search to scan a topic before you know the entities. Add -g/--gene when you already know the molecular anchor. Prefer --type review for synthesis questions.
+
 EXAMPLES:
   biomcp search article \"BRAF resistance\"
   biomcp search article -q \"immunotherapy resistance\" --limit 5
@@ -1026,6 +1030,8 @@ See also: biomcp list variant")]
     },
     /// Search drugs by name, target, indication, or mechanism (MyChem.info)
     #[command(after_help = "\
+When to use: use this when you know the drug or brand name, or switch to --indication, --target, or --mechanism for structured drug discovery.
+
 EXAMPLES:
   biomcp search drug pembrolizumab
   biomcp search drug Keytruda --limit 5
@@ -1235,6 +1241,8 @@ See also: biomcp list adverse-event")]
 pub enum GetEntity {
     /// Get gene by symbol
     #[command(after_help = "\
+When to use: use this for the default card, then add protein, hpa, expression, or diseases when you need a deeper section.
+
 EXAMPLES:
   biomcp get gene BRAF
   biomcp get gene BRAF pathways
@@ -1265,6 +1273,8 @@ See also: biomcp list article")]
     },
     /// Get disease by name or ID (e.g., MONDO:0005105)
     #[command(after_help = "\
+When to use: use this for the normalized disease card, then pivot to search article -d when you need broader review literature.
+
 EXAMPLES:
   biomcp get disease melanoma
   biomcp get disease MONDO:0005105 genes
@@ -7100,10 +7110,9 @@ mod tests {
 
         assert!(help.contains("biomcp skill            # show skill overview"));
         assert!(help.contains("biomcp skill install    # install skill to your agent config"));
-        assert!(!help.contains("biomcp skill list"));
+        assert!(help.contains("Commands:\n  list"));
         assert!(!help.contains("biomcp skill 03"));
         assert!(!help.contains("variant-to-treatment"));
-        assert!(!help.contains("Commands:\n  list"));
     }
 
     #[test]
@@ -7239,6 +7248,42 @@ mod tests {
         assert!(!help.contains("serve-sse"));
     }
 
+    #[test]
+    fn search_article_help_includes_when_to_use_guidance() {
+        let help = render_article_search_long_help();
+
+        assert!(help.contains("When to use:"));
+        assert!(help.contains("keyword search to scan a topic"));
+        assert!(help.contains("Prefer --type review"));
+    }
+
+    #[test]
+    fn get_gene_help_includes_when_to_use_guidance() {
+        let help = render_gene_get_long_help();
+
+        assert!(help.contains("When to use:"));
+        assert!(help.contains("default card"));
+        assert!(help.contains("protein, hpa, expression, or diseases"));
+    }
+
+    #[test]
+    fn get_disease_help_includes_when_to_use_guidance() {
+        let help = render_disease_get_long_help();
+
+        assert!(help.contains("When to use:"));
+        assert!(help.contains("normalized disease card"));
+        assert!(help.contains("search article -d"));
+    }
+
+    #[test]
+    fn discover_help_includes_when_to_use_guidance() {
+        let help = render_discover_long_help();
+
+        assert!(help.contains("When to use:"));
+        assert!(help.contains("only have free text"));
+        assert!(help.contains("pick the next typed command"));
+    }
+
     fn render_trial_search_long_help() -> String {
         let mut command = Cli::command();
         let search = command
@@ -7251,6 +7296,18 @@ mod tests {
         trial
             .write_long_help(&mut help)
             .expect("trial help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_discover_long_help() -> String {
+        let mut command = Cli::command();
+        let discover = command
+            .find_subcommand_mut("discover")
+            .expect("discover subcommand should exist");
+        let mut help = Vec::new();
+        discover
+            .write_long_help(&mut help)
+            .expect("discover help should render");
         String::from_utf8(help).expect("help should be utf-8")
     }
 
@@ -7292,6 +7349,35 @@ mod tests {
         article
             .write_long_help(&mut help)
             .expect("article help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_gene_get_long_help() -> String {
+        let mut command = Cli::command();
+        let get = command
+            .find_subcommand_mut("get")
+            .expect("get subcommand should exist");
+        let gene = get
+            .find_subcommand_mut("gene")
+            .expect("gene get subcommand should exist");
+        let mut help = Vec::new();
+        gene.write_long_help(&mut help)
+            .expect("gene help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_disease_get_long_help() -> String {
+        let mut command = Cli::command();
+        let get = command
+            .find_subcommand_mut("get")
+            .expect("get subcommand should exist");
+        let disease = get
+            .find_subcommand_mut("disease")
+            .expect("disease get subcommand should exist");
+        let mut help = Vec::new();
+        disease
+            .write_long_help(&mut help)
+            .expect("disease help should render");
         String::from_utf8(help).expect("help should be utf-8")
     }
 
@@ -7696,6 +7782,9 @@ mod tests {
             .expect("search drug help should render");
         let long_help = String::from_utf8(long_help).expect("utf8 help");
 
+        assert!(long_help.contains("When to use:"));
+        assert!(long_help.contains("when you know the drug or brand name"));
+        assert!(long_help.contains("--indication, --target, or --mechanism"));
         assert!(long_help.contains("[default: all]"));
         assert!(long_help.contains(
             "Omitting --region on a plain name/alias search checks both U.S. and EU data."
@@ -10335,17 +10424,23 @@ mod next_commands_validity {
         assert_parses(r#"biomcp search gene -q "ERBB1" --limit 10"#);
         // drug
         assert_parses(r#"biomcp get drug "pembrolizumab""#);
+        assert_parses(r#"biomcp drug adverse-events pembrolizumab"#);
+        assert_parses(r#"biomcp get drug pembrolizumab safety"#);
+        assert_parses(r#"biomcp search drug --indication "Myasthenia gravis" --limit 5"#);
         // disease — unambiguous helpers and ambiguous fallback
         assert_parses(r#"biomcp get disease "cystic fibrosis""#);
         assert_parses(r#"biomcp disease trials "cystic fibrosis""#);
         assert_parses(r#"biomcp search article -k "cystic fibrosis" --limit 5"#);
         assert_parses(r#"biomcp search disease -q "diabetes" --limit 10"#);
+        assert_parses(r#"biomcp get disease MONDO:0007947 phenotypes"#);
         // symptom
         assert_parses(r#"biomcp search disease -q "chest pain" --limit 10"#);
         assert_parses(r#"biomcp search trial -c "chest pain" --limit 5"#);
         assert_parses(r#"biomcp search article -k "chest pain" --limit 5"#);
         // pathway
         assert_parses(r#"biomcp search pathway -q "MAPK signaling" --limit 5"#);
+        // gene+disease orientation
+        assert_parses(r#"biomcp search all --gene BRAF --disease "melanoma""#);
         // variant with and without gene inference
         assert_parses(r#"biomcp get variant "BRAF V600E""#);
         assert_parses(r#"biomcp search article -k "V600E" --limit 5"#);

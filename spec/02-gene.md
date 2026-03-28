@@ -7,8 +7,9 @@ Genes are a primary anchor in BioMCP and frequently drive downstream trial, arti
 | Symbol search | `search gene BRAF` | Confirms canonical gene lookup |
 | Table structure | `search gene BRAF` | Confirms stable result schema |
 | Detail card | `get gene BRAF` | Confirms rich per-gene card output |
+| Guidance | `get gene OPA1` | Confirms alias explainer and localization follow-up hints |
 | Section expansion | `get gene BRAF pathways` | Confirms progressive disclosure |
-| HPA section | `get gene BRAF hpa` | Confirms protein tissue-expression contract |
+| HPA section | `get gene DIO1 hpa` | Confirms protein tissue-expression contract |
 | Druggability section | `get gene EGFR druggability` | Confirms combined DGIdb/OpenTargets contract |
 | Trial helper | `gene trials BRAF` | Confirms cross-entity trial pivot |
 | Article helper | `gene articles BRAF` | Confirms cross-entity literature pivot |
@@ -44,6 +45,18 @@ echo "$out" | mustmatch like "# BRAF ("
 echo "$out" | mustmatch like "Entrez ID: 673"
 ```
 
+## Gene Card Guidance
+
+The base gene card should explain what aliases are for and, when the summary implies localization or structure follow-up, surface executable deepen commands instead of generic guesses.
+
+```bash
+out="$(biomcp get gene OPA1)"
+echo "$out" | mustmatch like "Aliases are alternate names used in literature and databases"
+echo "$out" | mustmatch like "biomcp get gene OPA1 protein"
+echo "$out" | mustmatch like "biomcp get gene OPA1 hpa"
+echo "$out" | mustmatch like "localization"
+```
+
 ## Progressive Disclosure
 
 Section-specific retrieval keeps the output focused while preserving access to deeper context. The pathways section should expose a labeled subsection and pathway table columns.
@@ -71,14 +84,20 @@ echo "$out" | mustmatch like "LOEUF:"
 
 ## Human Protein Atlas Section
 
-The HPA section should expose protein tissue expression, localization context, and stable HPA labels without dumping the raw upstream record.
+The HPA section should expose protein tissue expression, localization context, and stable HPA labels without dumping the raw upstream record. When tissue rows exist, they should appear before the supporting RNA summary text.
 
 ```bash
-out="$(biomcp get gene BRAF hpa)"
+out="$(biomcp get gene DIO1 hpa)"
 echo "$out" | mustmatch like "## Human Protein Atlas"
 echo "$out" | mustmatch like "Reliability:"
 echo "$out" | mustmatch like "Subcellular"
 echo "$out" | mustmatch like "| Tissue | Level |"
+echo "$out" | mustmatch '/\| [^|]+ \| (High|Medium|Low|Not detected) \|/'
+tissue_line="$(printf '%s\n' "$out" | grep -n '| Tissue | Level |' | cut -d: -f1 | head -n1)"
+rna_line="$(printf '%s\n' "$out" | grep -n 'RNA summary:' | cut -d: -f1 | head -n1)"
+test -n "$tissue_line"
+test -n "$rna_line"
+test "$tissue_line" -lt "$rna_line"
 ```
 
 ## Druggability Section

@@ -15,8 +15,7 @@ struct EmbeddedSkills;
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// Legacy compatibility command for the removed embedded skill catalog
-    #[command(hide = true)]
+    /// List embedded worked examples
     List,
     /// Show a specific use-case by number or name
     #[command(external_subcommand)]
@@ -143,9 +142,9 @@ pub fn list_use_cases() -> Result<String, BioMcpError> {
     }
 
     let mut out = String::new();
-    out.push_str("# BioMCP Skill Use-Cases\n\n");
+    out.push_str("# BioMCP Worked Examples\n\n");
     out.push_str(
-        "Skills are step-by-step investigation workflows. Run `biomcp skill <name>` to view.\n\n",
+        "Worked examples are short, executable investigation patterns. Run `biomcp skill <name>` to open one.\n\n",
     );
     for c in cases {
         out.push_str(&format!("{} {} - {}\n", c.number, c.slug, c.title));
@@ -209,7 +208,7 @@ pub fn show_use_case(name: &str) -> Result<String, BioMcpError> {
         return Err(BioMcpError::NotFound {
             entity: "skill".into(),
             id: name.to_string(),
-            suggestion: "Try: biomcp skill".into(),
+            suggestion: "Try: biomcp skill list".into(),
         });
     };
 
@@ -589,14 +588,17 @@ mod tests {
     }
 
     #[test]
-    fn embedded_skill_overview_includes_t017_t018_polish() -> Result<(), BioMcpError> {
+    fn embedded_skill_overview_is_routing_first_and_points_to_worked_examples()
+    -> Result<(), BioMcpError> {
         let overview = show_overview()?;
 
-        assert!(overview.contains("biomcp search gene BRAF --limit 5"));
-        assert!(overview.contains("biomcp search variant BRAF V600E"));
-        assert!(overview.contains("biomcp search trial melanoma --status recruiting --limit 5"));
-        assert!(overview.contains("biomcp search all BRAF"));
-        assert!(overview.contains("`expression`, `hpa`, `druggability`, `clingen`"));
+        assert!(overview.contains("## Routing rules"));
+        assert!(overview.contains("## Section reference"));
+        assert!(overview.contains("## Cross-entity pivot rules"));
+        assert!(overview.contains("## Output and evidence rules"));
+        assert!(overview.contains("biomcp search drug --indication \"<disease>\""));
+        assert!(overview.contains("biomcp discover \"<free text>\""));
+        assert!(overview.contains("Run `biomcp skill list` for worked examples"));
 
         Ok(())
     }
@@ -645,21 +647,51 @@ mod tests {
     }
 
     #[test]
-    fn embedded_use_case_catalog_is_empty() -> Result<(), BioMcpError> {
-        assert!(list_use_case_refs()?.is_empty());
-        assert_eq!(list_use_cases()?, "No skills found");
-        assert!(show_use_case("01").is_err());
+    fn embedded_use_case_catalog_lists_expected_worked_examples() -> Result<(), BioMcpError> {
+        let refs = list_use_case_refs()?;
+        let slugs = refs
+            .iter()
+            .map(|case| case.slug.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            slugs,
+            vec![
+                "treatment-lookup",
+                "symptom-phenotype",
+                "gene-disease-orientation",
+                "article-follow-up",
+            ]
+        );
+
+        let listing = list_use_cases()?;
+        assert!(listing.contains("# BioMCP Worked Examples"));
+        assert!(
+            listing.contains("01 treatment-lookup - Pattern: Treatment / approved-drug lookup")
+        );
+        assert!(listing.contains(
+            "04 article-follow-up - Pattern: Article follow-up via citations and recommendations"
+        ));
+
+        let numbered = show_use_case("01")?;
+        assert!(numbered.contains("# Pattern: Treatment / approved-drug lookup"));
+        assert!(
+            numbered.contains("biomcp search drug --indication \"myasthenia gravis\" --limit 5")
+        );
+
+        let slugged = show_use_case("article-follow-up")?;
+        assert!(slugged.contains("# Pattern: Article follow-up via citations and recommendations"));
+        assert!(slugged.contains("biomcp article citations 22663011 --limit 5"));
+
         Ok(())
     }
 
     #[test]
-    fn missing_skill_suggests_skill_overview() {
-        let err = show_use_case("01").expect_err("missing skill should error");
+    fn missing_skill_suggests_skill_catalog() {
+        let err = show_use_case("99").expect_err("missing skill should error");
         let msg = err.to_string();
 
-        assert!(msg.contains("skill '01' not found"));
-        assert!(msg.contains("Try: biomcp skill"));
-        assert!(!msg.contains("Try: biomcp skill list"));
+        assert!(msg.contains("skill '99' not found"));
+        assert!(msg.contains("Try: biomcp skill list"));
     }
 
     #[test]

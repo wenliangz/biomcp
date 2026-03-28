@@ -23,6 +23,8 @@ Drugs: {{ clinical_drugs | join(", ") }}
 {% if aliases -%}
 ## Aliases (NCBI Gene / MyGene.info)
 
+Aliases are alternate names used in literature and databases when a paper does not use the HGNC symbol.
+
 {{ aliases | join(", ") }}
 {% endif -%}
 {% endif -%}
@@ -124,11 +126,6 @@ No GTEx expression records returned for this gene query.
 ## Human Protein Atlas
 
 {% if hpa and (hpa.tissues or hpa.subcellular_main_location or hpa.subcellular_additional_location or hpa.reliability or hpa.protein_summary or hpa.rna_summary) -%}
-{% if hpa.reliability %}- Reliability: {{ hpa.reliability }}{% endif %}
-{% if hpa.protein_summary %}- Protein summary: {{ hpa.protein_summary }}{% endif %}
-{% if hpa.rna_summary %}- RNA summary: {{ hpa.rna_summary }}{% endif %}
-{% if hpa.subcellular_main_location %}- Subcellular main locations: {{ hpa.subcellular_main_location | join(", ") }}{% endif %}
-{% if hpa.subcellular_additional_location %}- Subcellular additional locations: {{ hpa.subcellular_additional_location | join(", ") }}{% endif %}
 {% if hpa.tissues -%}
 | Tissue | Level |
 |---|---|
@@ -136,6 +133,11 @@ No GTEx expression records returned for this gene query.
 | {{ row.tissue }} | {{ row.level }} |
 {% endfor -%}
 {% endif -%}
+{% if hpa.reliability %}- Reliability: {{ hpa.reliability }}{% endif %}
+{% if hpa.protein_summary %}- Protein summary: {{ hpa.protein_summary }}{% endif %}
+{% if hpa.rna_summary %}- RNA summary: {{ hpa.rna_summary }}{% endif %}
+{% if hpa.subcellular_main_location %}- Subcellular main locations: {{ hpa.subcellular_main_location | join(", ") }}{% endif %}
+{% if hpa.subcellular_additional_location %}- Subcellular additional locations: {{ hpa.subcellular_additional_location | join(", ") }}{% endif %}
 {% else -%}
 No Human Protein Atlas records returned for this gene query.
 {% endif -%}

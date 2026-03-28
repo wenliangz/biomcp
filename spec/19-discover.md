@@ -9,6 +9,9 @@ examples against stable structural markers and suggestion contracts.
 | Gene Alias | `discover ERBB1` | Confirms alias resolution and gene suggestion |
 | Drug Brand Name | `discover Keytruda` | Confirms brand-name normalization to generic drug |
 | Symptom Query | `discover "chest pain"` | Confirms symptom-safe suggestions and MedlinePlus overlay |
+| Treatment Query | `discover "what drugs treat myasthenia gravis"` | Confirms treatment intent leads with structured indication search |
+| Disease Symptoms | `discover "symptoms of Marfan syndrome"` | Confirms disease-linked symptom routing prefers phenotypes |
+| Gene + Disease | `discover "BRAF melanoma"` | Confirms combined orientation queries prefer `search all` |
 | Ambiguous Query | `discover diabetes` | Confirms ambiguity guidance is explicit |
 | Pathway Query | `discover "MAPK signaling"` | Confirms pathway-oriented suggestion generation |
 | Underspecified Variant | `discover V600E` | Confirms the command avoids false gene certainty |
@@ -46,6 +49,30 @@ echo "$out" | mustmatch like "MedlinePlus"
 echo "$out" | mustmatch like "biomcp search disease -q \"chest pain\" --limit 10"
 echo "$out" | mustmatch like "biomcp search trial -c \"chest pain\" --limit 5"
 echo "$out" | mustmatch like "biomcp search article -k \"chest pain\" --limit 5"
+```
+
+## Treatment Query
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json discover "what drugs treat myasthenia gravis")"
+echo "$out" | jq -e '._meta.next_commands[0] | ascii_downcase == "biomcp search drug --indication \"myasthenia gravis\" --limit 5"' > /dev/null
+```
+
+## Disease Symptoms
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json discover "symptoms of Marfan syndrome")"
+echo "$out" | jq -e '._meta.next_commands[0] | test("^biomcp get disease .+ phenotypes$")' > /dev/null
+```
+
+## Gene + Disease
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json discover "BRAF melanoma")"
+echo "$out" | jq -e '._meta.next_commands[0] == "biomcp search all --gene BRAF --disease \"melanoma\""' > /dev/null
 ```
 
 ## Ambiguous Query

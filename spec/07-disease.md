@@ -7,6 +7,7 @@ Disease commands normalize labels to ontology-backed identifiers and provide cro
 | Disease search | `search disease melanoma` | Confirms disease normalization output |
 | Disease detail | `get disease melanoma` | Confirms canonical disease card |
 | Disease genes | `get disease melanoma genes` | Confirms association section rendering |
+| Sparse phenotype guidance | `get disease "Marfan syndrome" phenotypes` | Confirms truthful completeness note and review follow-up |
 | Disease to trials | `disease trials melanoma` | Confirms trial helper path |
 | Disease to articles | `disease articles melanoma` | Confirms literature helper path |
 | Disease to drugs | `disease drugs melanoma` | Confirms treatment helper path |
@@ -88,6 +89,17 @@ Disease-to-drug pivoting provides treatment-oriented context when starting from 
 out="$(biomcp disease drugs melanoma --limit 3)"
 echo "$out" | mustmatch like "# Drugs: indication=melanoma"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
+```
+
+## Sparse Phenotype Coverage Notes
+
+When phenotype rows are present but limited, BioMCP should say the section is source-backed and may be incomplete for the full disease presentation, then suggest a review-literature follow-up.
+
+```bash
+out="$(biomcp get disease 'Marfan syndrome' phenotypes)"
+echo "$out" | mustmatch like "source-backed"
+echo "$out" | mustmatch like "may be incomplete for the full disease presentation"
+echo "$out" | mustmatch like 'biomcp search article -d "Marfan syndrome" --type review'
 ```
 
 ## Exact Disease Ranking
