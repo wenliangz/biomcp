@@ -52,6 +52,21 @@ pub struct MutationFrequencyResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct TopMutatedGeneRow {
+    pub gene: String,
+    pub mutated_samples: usize,
+    pub mutation_events: usize,
+    pub mutation_rate: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TopMutatedGenesResult {
+    pub study_id: String,
+    pub total_samples: usize,
+    pub rows: Vec<TopMutatedGeneRow>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CnaDistributionResult {
     pub study_id: String,
     pub gene: String,
@@ -432,6 +447,85 @@ pub fn mutation_counts_by_sample(
     }
 
     Ok(sorted_counts(sample_counts))
+}
+
+pub fn top_mutated_genes(
+    study_dir: &Path,
+    limit: usize,
+) -> Result<TopMutatedGenesResult, BioMcpError> {
+    let study_id = study_id_from_dir(study_dir);
+    let path = study_dir.join(MUTATIONS_FILE);
+    let mut reader = TsvReader::open(&path)?;
+    let header = header_map(&reader.headers);
+
+    let gene_idx = require_column(&header, "HUGO_SYMBOL", &path)?;
+    let sample_idx =
+        column_index(&header, &["TUMOR_SAMPLE_BARCODE", "SAMPLE_ID"]).ok_or_else(|| {
+            BioMcpError::SourceUnavailable {
+                source_name: SOURCE_NAME.to_string(),
+                reason: format!(
+                    "Missing SAMPLE_ID/Tumor_Sample_Barcode column in {}",
+                    path.display()
+                ),
+                suggestion: "Use a valid cBioPortal mutation file.".to_string(),
+            }
+        })?;
+
+    let mut gene_to_samples: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut gene_to_events: HashMap<String, usize> = HashMap::new();
+    let mut observed_samples = HashSet::new();
+
+    while let Some(row) = reader.next_row()? {
+        let gene = row_field(&row, gene_idx).to_ascii_uppercase();
+        let sample = row_field(&row, sample_idx);
+        if gene.is_empty() || sample.is_empty() {
+            continue;
+        }
+
+        observed_samples.insert(sample.to_string());
+        gene_to_samples
+            .entry(gene.clone())
+            .or_default()
+            .insert(sample.to_string());
+        *gene_to_events.entry(gene).or_insert(0) += 1;
+    }
+
+    let total_samples = clinical_sample_ids(study_dir)?
+        .map(|ids| ids.len())
+        .filter(|count| *count > 0)
+        .unwrap_or(observed_samples.len());
+
+    let mut rows = gene_to_samples
+        .into_iter()
+        .map(|(gene, samples)| {
+            let mutated_samples = samples.len();
+            let mutation_events = gene_to_events.get(&gene).copied().unwrap_or(0);
+            let mutation_rate = if total_samples > 0 {
+                mutated_samples as f64 / total_samples as f64
+            } else {
+                0.0
+            };
+            TopMutatedGeneRow {
+                gene,
+                mutated_samples,
+                mutation_events,
+                mutation_rate,
+            }
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        b.mutated_samples
+            .cmp(&a.mutated_samples)
+            .then_with(|| b.mutation_events.cmp(&a.mutation_events))
+            .then_with(|| a.gene.cmp(&b.gene))
+    });
+    rows.truncate(limit.clamp(1, 50));
+
+    Ok(TopMutatedGenesResult {
+        study_id,
+        total_samples,
+        rows,
+    })
 }
 
 pub fn cna_distribution(
@@ -2200,6 +2294,39 @@ EGFR\tS4\tMissense_Mutation\tp.L858R\n",
                 ("S3".to_string(), 1),
             ]
         );
+    }
+
+    #[test]
+    fn top_mutated_genes_ranks_by_samples_then_events_then_gene() {
+        let fixture = TestStudyDir::new("top-mutated");
+        let study_dir = fixture.study_path("top_mutated_study");
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\n\
+TP53\tS1\tMissense_Mutation\tp.R175H\n\
+TP53\tS2\tMissense_Mutation\tp.R248Q\n\
+KRAS\tS2\tMissense_Mutation\tp.G12D\n\
+KRAS\tS3\tMissense_Mutation\tp.G12V\n\
+BRAF\tS1\tMissense_Mutation\tp.V600E\n",
+        );
+        write_minimal_clinical_samples(
+            &study_dir,
+            &[
+                "P1\tS1\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+                "P2\tS2\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+                "P3\tS3\tLung Cancer\tLung Adenocarcinoma\tLUAD",
+            ],
+        );
+
+        let result = top_mutated_genes(&study_dir, 10).expect("top mutated genes");
+        assert_eq!(result.study_id, "top_mutated_study");
+        assert_eq!(result.total_samples, 3);
+        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows[0].gene, "KRAS");
+        assert_eq!(result.rows[0].mutated_samples, 2);
+        assert_eq!(result.rows[0].mutation_events, 2);
+        assert_eq!(result.rows[1].gene, "TP53");
+        assert_eq!(result.rows[2].gene, "BRAF");
     }
 
     #[test]

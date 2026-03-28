@@ -58,7 +58,7 @@ New to BioMCP? Try:
 - `get trial <nct_id> locations --offset <N> --limit <N>` - page trial locations
 - `enrich <GENE1,GENE2,...>` - gene-set enrichment via g:Profiler
 - `batch <entity> <id1,id2,...>` - parallel get operations
-- `study list|download|query|co-occurrence|cohort|survival|compare` - local cBioPortal study analytics
+- `study list|download|top-mutated|query|co-occurrence|cohort|survival|compare` - local cBioPortal study analytics
 
 ## Filter Highlights
 
@@ -89,6 +89,7 @@ New to BioMCP? Try:
 - `protein structures <accession> --limit <N> --offset <N>`
 - `study list`
 - `study download [--list] [<study_id>]`
+- `study top-mutated --study <id> [--limit <N>]`
 - `study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]`
 - `study query --study <id> --gene <symbol> --type <mutations|cna|expression>`
 - `study cohort --study <id> --gene <symbol>`

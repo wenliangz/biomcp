@@ -1882,6 +1882,21 @@ See also: biomcp list study")]
         #[command(flatten)]
         chart: ChartArgs,
     },
+    /// Rank the most frequently mutated genes across a study
+    #[command(after_help = "\
+EXAMPLES:
+  biomcp study top-mutated --study msk_impact_2017
+  biomcp study top-mutated --study cll_broad_2022 --limit 10
+
+See also: biomcp list study")]
+    TopMutated {
+        /// Study identifier (e.g., msk_impact_2017)
+        #[arg(short, long)]
+        study: String,
+        /// Maximum rows to return (default: 10, clamped to 1..=50)
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
     /// Filter samples across mutation, CNA, expression, and clinical criteria
     #[command(after_help = "\
 EXAMPLES:
@@ -4800,6 +4815,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         } else {
                             Ok(crate::render::markdown::study_query_markdown(&result))
                         }
+                    }
+                }
+                StudyCommand::TopMutated { study, limit } => {
+                    let result = crate::entities::study::top_mutated_genes(&study, limit).await?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&result)?)
+                    } else {
+                        Ok(crate::render::markdown::study_top_mutated_markdown(&result))
                     }
                 }
                 StudyCommand::Filter {
@@ -8686,6 +8709,29 @@ mod tests {
                 assert_eq!(study, "msk_impact_2017");
                 assert_eq!(gene, "TP53");
                 assert_eq!(query_type, "mutations");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn study_top_mutated_parses_limit_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "study",
+            "top-mutated",
+            "--study",
+            "msk_impact_2017",
+            "--limit",
+            "10",
+        ])
+        .expect("study top-mutated should parse");
+        match cli.command {
+            Commands::Study {
+                cmd: StudyCommand::TopMutated { study, limit },
+            } => {
+                assert_eq!(study, "msk_impact_2017");
+                assert_eq!(limit, 10);
             }
             other => panic!("unexpected command: {other:?}"),
         }

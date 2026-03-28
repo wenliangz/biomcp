@@ -6,6 +6,7 @@ This spec validates the local cBioPortal study command family. Assertions stay a
 |---|---|---|
 | Environment setup | `BIOMCP_STUDY_DIR` | Makes the local dataset dependency explicit |
 | Study listing | `study list` | Confirms study discovery and list table schema |
+| Top mutated genes | `study top-mutated` | Confirms ranked gene-frequency table for a study |
 | Mutation frequency | `study query --type mutations` | Confirms mutation query headings and metrics |
 | CNA distribution | `study query --type cna` | Confirms CNA bucket rows |
 | Expression distribution | `study query --type expression` | Confirms expression summary metrics |
@@ -43,6 +44,20 @@ out="$(biomcp study list)"
 echo "$out" | mustmatch like "# Study Datasets"
 echo "$out" | mustmatch like "| Study ID | Name | Cancer Type | Samples | Available Data |"
 echo "$out" | mustmatch like "msk_impact_2017"
+```
+
+## Top Mutated Genes
+
+Top-mutated should provide a study-level ranked view using distinct mutated
+samples as the primary ordering, while keeping event counts and rates visible.
+
+```bash
+. "$PWD/.cache/spec-study-env"
+out="$(biomcp study top-mutated --study msk_impact_2017 --limit 10)"
+echo "$out" | mustmatch like "# Study Top Mutated Genes: msk_impact_2017"
+echo "$out" | mustmatch like "| Gene | Mutated Samples | Mutation Events | Total Samples | Mutation Rate |"
+echo "$out" | mustmatch like "| TP53 | 2 | 2 | 3 |"
+echo "$out" | mustmatch like "| KRAS | 2 | 2 | 3 |"
 ```
 
 ## Mutation Frequency Query

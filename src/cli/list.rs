@@ -605,6 +605,7 @@ fn list_study() -> String {
 
 - `study list` - list locally available cBioPortal studies from `BIOMCP_STUDY_DIR`
 - `study download [--list] [<study_id>]` - list downloadable study IDs or install a study into `BIOMCP_STUDY_DIR`
+- `study top-mutated --study <id> [--limit <N>]` - rank the most frequently mutated genes in a study
 - `study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>] [--expression-above <gene:threshold>] [--expression-below <gene:threshold>] [--cancer-type <type>]` - intersect sample filters across mutation, CNA, expression, and clinical data
 - `study query --study <id> --gene <symbol> --type <mutations|cna|expression>` - run per-study gene query
 - `study cohort --study <id> --gene <symbol>` - split the cohort into `<gene>-mutant` vs `<gene>-wildtype`
@@ -625,6 +626,7 @@ fn list_study() -> String {
 - `study list`
 - `study download --list`
 - `study download msk_impact_2017`
+- `study top-mutated --study msk_impact_2017 --limit 10`
 - `study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53 --amplified ERBB2 --expression-above ERBB2:1.5`
 - `study query --study msk_impact_2017 --gene TP53 --type mutations`
 - `study query --study brca_tcga_pan_can_atlas_2018 --gene ERBB2 --type cna`
@@ -782,6 +784,7 @@ mod tests {
         let out = render(Some("study")).expect("list study should render");
         assert!(out.contains("# study"));
         assert!(out.contains("study download [--list] [<study_id>]"));
+        assert!(out.contains("study top-mutated --study <id> [--limit <N>]"));
         assert!(out.contains(
             "study filter --study <id> [--mutated <symbol>] [--amplified <symbol>] [--deleted <symbol>]"
         ));
