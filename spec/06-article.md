@@ -178,6 +178,23 @@ echo "$saved" | mustmatch not like "Creative Commons Attribution License"
 echo "$saved" | mustmatch not like "eLife Sciences Publications"
 ```
 
+## Large Article Full Text Saved Markdown
+
+Large PMC OA archives should also preserve the saved-file contract instead of
+failing at the default 8 MB response-body ceiling.
+
+```bash
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+out="$(TMPDIR="$tmpdir" biomcp get article 25268582 fulltext)"
+echo "$out" | mustmatch like "## Full Text"
+echo "$out" | mustmatch like "Saved to:"
+path="$(printf '%s\n' "$out" | sed -n 's/^Saved to: //p' | head -n1)"
+test -n "$path"
+test -f "$path"
+test -s "$path"
+```
+
 ## Article to Entities
 
 `article entities` exposes actionable next-command pivots by entity class. We check top-level heading and genes subsection marker.

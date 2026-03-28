@@ -119,7 +119,8 @@ impl PmcOaClient {
             .send()
             .await?;
         let status = resp.status();
-        let bytes = crate::sources::read_limited_body(resp, PMC_OA_API).await?;
+        let bytes =
+            crate::sources::read_limited_body_with_limit(resp, PMC_OA_API, MAX_TGZ_BYTES).await?;
         if !status.is_success() {
             let excerpt = crate::sources::body_excerpt(&bytes);
             return Err(BioMcpError::Api {
@@ -226,6 +227,70 @@ mod tests {
         let client = PmcOaClient::new_for_test(server.uri(), Some("test-key".into())).unwrap();
         let href = client.oa_tgz_url("PMC123").await.unwrap().unwrap();
         assert_eq!(href, "https://ftp.ncbi.nlm.nih.gov/pub/pmc/file.tar.gz");
+    }
+
+    #[tokio::test]
+    async fn get_full_text_xml_accepts_archive_larger_than_default_body_limit() {
+        let server = MockServer::start().await;
+        let mut tar_buf = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tar_buf);
+            let mut state = 0x1234_5678_u32;
+            let filler = (0..(9 * 1024 * 1024))
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    (state & 0xff) as u8
+                })
+                .collect::<Vec<_>>();
+            let mut filler_header = Header::new_gnu();
+            filler_header.set_size(filler.len() as u64);
+            filler_header.set_mode(0o644);
+            filler_header.set_cksum();
+            builder
+                .append_data(&mut filler_header, "supplement.bin", &filler[..])
+                .unwrap();
+
+            let contents = b"<article><body>large-ok</body></article>";
+            let mut xml_header = Header::new_gnu();
+            xml_header.set_size(contents.len() as u64);
+            xml_header.set_mode(0o644);
+            xml_header.set_cksum();
+            builder
+                .append_data(&mut xml_header, "sample.nxml", &contents[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        gz.write_all(&tar_buf).unwrap();
+        let tgz = gz.finish().unwrap();
+        assert!(tgz.len() > 8 * 1024 * 1024);
+
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .and(query_param("id", "PMC123"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                r#"<records><record><link format="tgz" href="{}/archive.tgz"/></record></records>"#,
+                server.uri()
+            )))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/archive.tgz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(tgz))
+            .mount(&server)
+            .await;
+
+        let client = PmcOaClient::new_for_test(server.uri(), None).unwrap();
+        let xml = client
+            .get_full_text_xml("PMC123")
+            .await
+            .expect("large archive should succeed")
+            .expect("nxml should be extracted");
+        assert!(xml.contains("large-ok"));
     }
 
     #[test]
