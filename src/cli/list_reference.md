@@ -58,7 +58,7 @@ New to BioMCP? Try:
 - `get trial <nct_id> locations --offset <N> --limit <N>` - page trial locations
 - `enrich <GENE1,GENE2,...>` - gene-set enrichment via g:Profiler
 - `batch <entity> <id1,id2,...>` - parallel get operations
-- `study list|download|top-mutated|query|co-occurrence|cohort|survival|compare` - local cBioPortal study analytics
+- `study list|download|top-mutated|filter|query|co-occurrence|cohort|survival|compare` - local cBioPortal study analytics
 
 ## Filter Highlights
 
