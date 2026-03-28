@@ -302,6 +302,42 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     )
 
 
+def test_chart_rendering_architecture_doc_matches_repo_contract() -> None:
+    technical = _read_repo("design/technical/overview.md")
+    chart_section = _normalize_ws(_markdown_section(technical, "Chart Rendering"))
+
+    assert "## Chart Rendering" in technical
+    assert "`biomcp chart` serves embedded markdown chart docs" in chart_section
+    assert "`src/cli/chart.rs`" in chart_section
+    assert "`docs/charts/`" in chart_section
+    assert "`RustEmbed`" in chart_section
+    assert "`biomcp chart` documents the chart surface, but does not render charts" in chart_section
+    assert "`ChartArgs`" in chart_section
+    assert "`src/cli/mod.rs`" in chart_section
+    assert "`src/render/chart.rs`" in chart_section
+    assert "`study query`" in chart_section
+    assert "`study co-occurrence`" in chart_section
+    assert "`study compare`" in chart_section
+    assert "`study survival`" in chart_section
+    assert "`bar`, `stacked-bar`, `pie`, `waterfall`, `heatmap`, `histogram`, `density`, `box`, `violin`, `ridgeline`, `scatter`, and `survival`" in chart_section
+    assert "terminal" in chart_section
+    assert "SVG file" in chart_section
+    assert "PNG file behind the `charts-png` feature" in chart_section
+    assert "MCP inline SVG" in chart_section
+    assert "`--cols` and `--rows` size terminal output" in chart_section
+    assert "`--width` and `--height` size SVG, PNG, and MCP inline SVG output" in chart_section
+    assert "`--scale` is PNG-only" in chart_section
+    assert "`--title`, `--theme`, and `--palette` style rendered charts" in chart_section
+    assert "Heatmaps reject `--palette`" in chart_section
+    assert "`rewrite_mcp_chart_args()`" in chart_section
+    assert "text pass plus an SVG pass" in chart_section
+    assert "`--terminal` is stripped" in chart_section
+    assert "`--output` / `-o` are rejected" in chart_section
+    assert "`--cols` / `--rows` and `--scale` are rejected for the SVG pass" in chart_section
+    assert "`docs/charts/index.md`" in chart_section
+    assert "user-facing chart reference and examples" in chart_section
+
+
 def test_source_integration_architecture_doc_captures_repo_contract() -> None:
     technical = _read_repo("design/technical/overview.md")
     source_integration = _read_repo("design/technical/source-integration.md")
