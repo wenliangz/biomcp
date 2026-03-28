@@ -28,4 +28,4 @@ cd biomcp
 ```
 
 Use `RUN.md` for the release-binary runbook and
-`design/technical/staging-demo.md` for the promotion contract.
+`architecture/technical/staging-demo.md` for the promotion contract.

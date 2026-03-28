@@ -11,6 +11,8 @@ site/
 .climb/
 .climb-test-vault/
 .march/
+.claude/
+.agents/
 paper/generated/
 benchmarks/bioasq/datasets/raw/
 benchmarks/bioasq/datasets/normalized/

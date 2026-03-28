@@ -9,12 +9,10 @@ src/
 tests/
 spec/
 docs/
-design/
+architecture/
 paper/
 benchmarks/
-presentations/
 examples/
-demo/
 scripts/
 templates/
 protos/

@@ -8,8 +8,8 @@
 #   biomcp serve-http --host 127.0.0.1 --port 8080
 #
 # Then run this demo:
-#   uv run --script demo/streamable_http_client.py
-#   uv run --script demo/streamable_http_client.py http://127.0.0.1:8080
+#   uv run --script examples/streamable-http/streamable_http_client.py
+#   uv run --script examples/streamable-http/streamable_http_client.py http://127.0.0.1:8080
 import asyncio
 import sys
 from datetime import timedelta
@@ -27,7 +27,7 @@ WORKFLOW = [
 
 def resolve_base_url(argv: list[str]) -> str:
     if len(argv) > 2:
-        raise SystemExit("Usage: demo/streamable_http_client.py [base_url]")
+        raise SystemExit("Usage: examples/streamable-http/streamable_http_client.py [base_url]")
     return argv[1] if len(argv) > 1 else DEFAULT_BASE_URL
 
 

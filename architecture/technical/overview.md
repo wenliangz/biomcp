@@ -291,14 +291,14 @@ workflows. These scripts:
 
 These are the canonical smoke checks for a working release.
 
-### 6. Remote HTTP Demo Artifact (`demo/streamable_http_client.py`)
+### 6. Remote HTTP Demo Artifact (`examples/streamable-http/streamable_http_client.py`)
 
 Release verification for the Streamable HTTP surface also includes the
 standalone Streamable HTTP demo client
-(`demo/streamable_http_client.py`). Run `biomcp serve-http`, then execute:
+(`examples/streamable-http/streamable_http_client.py`). Run `biomcp serve-http`, then execute:
 
 ```bash
-uv run --script demo/streamable_http_client.py
+uv run --script examples/streamable-http/streamable_http_client.py
 ```
 
 The demo initializes against `/mcp` and prints `Command:` framing before a
@@ -331,7 +331,7 @@ replacing the real BioMCP markdown output.
 
 ## Operator Notes
 
-Runtime operator docs now live in `design/technical/staging-demo.md` and
+Runtime operator docs now live in `architecture/technical/staging-demo.md` and
 `RUN.md`. Use those documents for the shared target, promotion contract, and
 exact release-binary run/smoke commands, then use `scripts/` for the source
 probe inventory and demo helpers.

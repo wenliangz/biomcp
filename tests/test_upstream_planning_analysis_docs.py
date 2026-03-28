@@ -94,14 +94,14 @@ def test_strategy_and_frontier_capture_upstream_planning_contract() -> None:
     assert "# BioMCP Frontier" in frontier
     assert "## G002" in frontier
     assert "## G003" in frontier
-    assert "design/functional/overview.md" in frontier
-    assert "design/technical/overview.md" in frontier
-    assert "design/ux/cli-reference.md" in frontier
+    assert "architecture/functional/overview.md" in frontier
+    assert "architecture/technical/overview.md" in frontier
+    assert "architecture/ux/cli-reference.md" in frontier
     assert "Harvest Guidance" in frontier
 
 
 def test_functional_overview_preserves_readme_surface_and_study_family() -> None:
-    functional = _read_repo("design/functional/overview.md")
+    functional = _read_repo("architecture/functional/overview.md")
 
     assert "# BioMCP Functional Overview" in functional
     assert "## Entity Surface" in functional
@@ -139,8 +139,8 @@ def test_functional_overview_preserves_readme_surface_and_study_family() -> None
 
 
 def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> None:
-    technical = _read_repo("design/technical/overview.md")
-    ux = _read_repo("design/ux/cli-reference.md")
+    technical = _read_repo("architecture/technical/overview.md")
+    ux = _read_repo("architecture/ux/cli-reference.md")
     article_guide = _read_repo("docs/user-guide/article.md")
     data_sources = _read_repo("docs/reference/data-sources.md")
     article_impl = _read_repo("src/entities/article.rs")
@@ -304,7 +304,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
 
 
 def test_chart_rendering_architecture_doc_matches_repo_contract() -> None:
-    technical = _read_repo("design/technical/overview.md")
+    technical = _read_repo("architecture/technical/overview.md")
     chart_section = _normalize_ws(_markdown_section(technical, "Chart Rendering"))
 
     assert "## Chart Rendering" in technical
@@ -340,8 +340,8 @@ def test_chart_rendering_architecture_doc_matches_repo_contract() -> None:
 
 
 def test_source_integration_architecture_doc_captures_repo_contract() -> None:
-    technical = _read_repo("design/technical/overview.md")
-    source_integration = _read_repo("design/technical/source-integration.md")
+    technical = _read_repo("architecture/technical/overview.md")
+    source_integration = _read_repo("architecture/technical/source-integration.md")
     drug_guide = _read_repo("docs/user-guide/drug.md")
     bioasq_reference = _read_repo("docs/reference/bioasq-benchmark.md")
     cli_mod = _read_repo("src/cli/mod.rs")
@@ -595,9 +595,9 @@ def test_makefile_spec_split_contract_is_documented_and_executable() -> None:
 
 
 def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
-    staging_demo = _read_repo("design/technical/staging-demo.md")
+    staging_demo = _read_repo("architecture/technical/staging-demo.md")
     runbook = _read_repo("RUN.md")
-    technical = _read_repo("design/technical/overview.md")
+    technical = _read_repo("architecture/technical/overview.md")
     scripts_readme = _read_repo("scripts/README.md")
     source_contracts = _read_repo("scripts/source-contracts.md")
     contract_smoke = _read_repo("scripts/contract-smoke.sh")
@@ -644,7 +644,7 @@ def test_runtime_contract_docs_and_scripts_align_on_release_target() -> None:
     assert "docs/user-guide/cli-reference.md" in runbook
     assert "docs/reference/mcp-server.md" in runbook
 
-    assert "design/technical/staging-demo.md" in technical
+    assert "architecture/technical/staging-demo.md" in technical
     assert "RUN.md" in technical
     assert "S2_API_KEY" in technical
     assert "Semantic Scholar article enrichment/navigation" in technical

@@ -67,15 +67,15 @@ workflow over the remote MCP `biomcp` tool:
 
 ```bash
 biomcp serve-http --host 127.0.0.1 --port 8080
-uv run --script demo/streamable_http_client.py
-uv run --script demo/streamable_http_client.py http://127.0.0.1:8080
+uv run --script examples/streamable-http/streamable_http_client.py
+uv run --script examples/streamable-http/streamable_http_client.py http://127.0.0.1:8080
 ```
 
 The demo connects to `/mcp`, prints `Command: ...` before each BioMCP step,
 and leaves the real markdown output untouched so a screenshot or recording
 still makes sense without extra narration.
 
-See `demo/README.md` for the short newcomer walkthrough, expected output
+See `examples/streamable-http/README.md` for the short newcomer walkthrough, expected output
 markers, `uv run --quiet` guidance for first-run dependency noise, and the
 release-binary note for repo verification.
 
