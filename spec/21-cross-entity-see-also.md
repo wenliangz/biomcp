@@ -1,7 +1,9 @@
 # Cross-Entity See Also
 
 This spec locks the approved cross-entity next-step hints that should teach the
-typed BioMCP surfaces directly from normal output.
+typed BioMCP surfaces directly from normal output. Agents learn the right next
+call from output context, not from proactively reading help — so every card and
+empty-state must surface the structured path directly.
 
 | Section | Command focus | Why it matters |
 |---|---|---|
