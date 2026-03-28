@@ -2,6 +2,10 @@
 
 {% if count == 0 -%}
 No drugs found
+{% if discover_hint %}
+
+{{ discover_hint }}
+{% endif %}
 {% else -%}
 Found {{ count }} drug{% if count != 1 %}s{% endif %}
 

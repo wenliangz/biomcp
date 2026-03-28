@@ -40,6 +40,13 @@ pub struct StudyDataset {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct StudyLookupRow {
+    pub study_id: String,
+    pub has_mutations: bool,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct MutationFrequencyResult {
     pub study_id: String,
     pub gene: String,
@@ -322,6 +329,54 @@ pub fn list_studies(root: &Path) -> Result<Vec<StudyDataset>, BioMcpError> {
 
     studies.sort_by(|a, b| a.study_id.cmp(&b.study_id));
     Ok(studies)
+}
+
+pub(crate) fn list_study_lookup_rows(root: &Path) -> Result<Vec<StudyLookupRow>, BioMcpError> {
+    let studies = list_studies(root)?;
+    let mut rows = Vec::with_capacity(studies.len());
+
+    for study in studies {
+        let mut terms = vec![study.study_id.clone(), study.meta.name.clone()];
+        if let Some(short_name) = study.meta.short_name.as_deref() {
+            terms.push(short_name.to_string());
+        }
+        if let Some(cancer_type) = study.meta.cancer_type.as_deref() {
+            terms.push(cancer_type.to_string());
+        }
+        if study.has_clinical_sample {
+            terms.extend(
+                clinical_column_values(&study.path, "CANCER_TYPE")
+                    .unwrap_or_default()
+                    .into_values(),
+            );
+            terms.extend(
+                clinical_column_values(&study.path, "CANCER_TYPE_DETAILED")
+                    .unwrap_or_default()
+                    .into_values(),
+            );
+        }
+
+        let mut deduped = Vec::new();
+        let mut seen = HashSet::new();
+        for term in terms {
+            let trimmed = term.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let key = trimmed.to_ascii_lowercase();
+            if seen.insert(key) {
+                deduped.push(trimmed.to_string());
+            }
+        }
+
+        rows.push(StudyLookupRow {
+            study_id: study.study_id,
+            has_mutations: study.has_mutations,
+            terms: deduped,
+        });
+    }
+
+    Ok(rows)
 }
 
 pub fn mutation_frequency(
@@ -2226,6 +2281,42 @@ ERBB2\t2064\t2.1\t1.0\t3.4\tbad\n",
         assert!(study.has_cna);
         assert!(study.has_expression);
         assert!(study.has_clinical_sample);
+    }
+
+    #[test]
+    fn list_study_lookup_rows_includes_clinical_cancer_labels() {
+        let fixture = TestStudyDir::new("study-lookup");
+        let study_dir = fixture.study_path("brca_tcga_pan_can_atlas_2018");
+        fixture.write_file(
+            &study_dir.join("meta_study.txt"),
+            "cancer_study_identifier: brca_tcga_pan_can_atlas_2018\nname: BRCA TCGA PanCan Atlas 2018\ntype_of_cancer: brca\n",
+        );
+        fixture.write_file(
+            &study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        );
+        write_minimal_clinical_samples(
+            &study_dir,
+            &["P1\tS1\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA"],
+        );
+
+        let rows = list_study_lookup_rows(&fixture.root).expect("study lookup rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].study_id, "brca_tcga_pan_can_atlas_2018");
+        assert!(rows[0].has_mutations);
+        assert!(
+            rows[0]
+                .terms
+                .iter()
+                .any(|term| term == "BRCA TCGA PanCan Atlas 2018")
+        );
+        assert!(rows[0].terms.iter().any(|term| term == "Breast Cancer"));
+        assert!(
+            rows[0]
+                .terms
+                .iter()
+                .any(|term| term == "Breast Invasive Carcinoma")
+        );
     }
 
     #[test]

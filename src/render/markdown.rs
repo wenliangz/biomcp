@@ -1066,11 +1066,68 @@ fn related_command_description(command: &str) -> Option<&'static str> {
         Some("deepen into protein function and localization")
     } else if command.starts_with("biomcp get gene ") && command.ends_with(" hpa") {
         Some("deepen into tissue expression and localization")
+    } else if command.starts_with("biomcp search pgx -d ") {
+        Some("pharmacogenomics interactions")
+    } else if command.starts_with("biomcp get pgx ") {
+        Some("pharmacogenomics card")
+    } else if command.starts_with("biomcp study top-mutated --study ") {
+        Some("mutation frequency ranking")
+    } else if command == "biomcp study download --list" {
+        Some("browse downloadable cancer genomics studies")
     } else if command.starts_with("biomcp drug adverse-events ") {
         Some("inspect safety reports and adverse-event signal")
     } else {
         None
     }
+}
+
+fn shell_quote_arg(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let quoted = quote_arg(trimmed);
+    if quoted != trimmed {
+        return quoted;
+    }
+
+    if trimmed.chars().any(|ch| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '\\'
+                | '$'
+                | '`'
+                | '|'
+                | '&'
+                | ';'
+                | '<'
+                | '>'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '*'
+                | '?'
+                | '!'
+                | '#'
+        )
+    }) {
+        return format!("\"{}\"", trimmed.replace('\\', "\\\\").replace('"', "\\\""));
+    }
+
+    trimmed.to_string()
+}
+
+fn discover_try_line(query: &str, description: &str) -> String {
+    let query = shell_quote_arg(query);
+    if query.is_empty() {
+        return String::new();
+    }
+    format!("Try: biomcp discover {query}   - {description}")
 }
 
 fn markdown_cell(value: &str) -> String {
@@ -1261,6 +1318,7 @@ pub(crate) fn related_gene(gene: &Gene) -> Vec<String> {
     {
         out.push(format!("biomcp get gene {symbol} hpa"));
     }
+    out.push(format!("biomcp get pgx {symbol}"));
     out.push(format!("biomcp search variant -g {symbol}"));
     out.push(format!("biomcp search article -g {symbol}"));
     out.push(format!("biomcp search drug --target {symbol}"));
@@ -1368,7 +1426,95 @@ pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
     out.push(format!("biomcp search trial -c {name}"));
     out.push(format!("biomcp search article -d {name}"));
     out.push(format!("biomcp search drug {name}"));
+    if is_oncology_disease(disease) {
+        if let Some(study_id) = best_local_oncology_study_id(disease) {
+            out.push(format!("biomcp study top-mutated --study {study_id}"));
+        } else {
+            out.push("biomcp study download --list".to_string());
+        }
+    }
     dedupe_markdown_commands(out)
+}
+
+fn is_oncology_disease(disease: &Disease) -> bool {
+    disease.civic.is_some()
+        || disease.top_gene_scores.iter().any(|row| {
+            row.summary
+                .somatic_mutation_score
+                .map(|score| score > 0.0)
+                .unwrap_or(false)
+        })
+}
+
+fn normalize_match_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn best_oncology_study_id(
+    disease: &Disease,
+    studies: &[crate::sources::cbioportal_study::StudyLookupRow],
+) -> Option<String> {
+    let candidate_labels = std::iter::once(disease.name.as_str())
+        .chain(disease.synonyms.iter().map(String::as_str))
+        .map(normalize_match_text)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+
+    let mut best: Option<(u8, usize, &str)> = None;
+    for study in studies.iter().filter(|study| study.has_mutations) {
+        for term in &study.terms {
+            let normalized_term = normalize_match_text(term);
+            if normalized_term.is_empty() {
+                continue;
+            }
+
+            let match_kind = if candidate_labels
+                .iter()
+                .any(|candidate| candidate == &normalized_term)
+            {
+                Some(0)
+            } else if candidate_labels.iter().any(|candidate| {
+                candidate.contains(&normalized_term) || normalized_term.contains(candidate)
+            }) {
+                Some(1)
+            } else {
+                None
+            };
+
+            let Some(match_kind) = match_kind else {
+                continue;
+            };
+
+            let candidate = (match_kind, normalized_term.len(), study.study_id.as_str());
+            if best
+                .as_ref()
+                .map(|current| candidate < *current)
+                .unwrap_or(true)
+            {
+                best = Some(candidate);
+            }
+        }
+    }
+
+    best.map(|(_, _, study_id)| study_id.to_string())
+}
+
+fn best_local_oncology_study_id(disease: &Disease) -> Option<String> {
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+    let rows = crate::sources::cbioportal_study::list_study_lookup_rows(&root).ok()?;
+    best_oncology_study_id(disease, &rows)
 }
 
 fn disease_literature_query(disease: &Disease) -> String {
@@ -1518,6 +1664,7 @@ pub(crate) fn related_drug(drug: &Drug) -> Vec<String> {
 
     out.push(format!("biomcp drug trials {name}"));
     out.push(format!("biomcp drug adverse-events {name}"));
+    out.push(format!("biomcp search pgx -d {name}"));
 
     if let Some(target) = drug.targets.first().map(String::as_str) {
         let sym = target.trim();
@@ -2116,10 +2263,12 @@ pub fn disease_search_markdown_with_footer(
     pagination_footer: &str,
 ) -> Result<String, BioMcpError> {
     let tmpl = env()?.get_template("disease_search.md.j2")?;
+    let discover_hint = discover_try_line(query, "resolve abbreviations and synonyms");
     let body = tmpl.render(context! {
         query => query,
         count => results.len(),
         results => results,
+        discover_hint => discover_hint,
         pagination_footer => pagination_footer,
     })?;
     Ok(with_pagination_footer(body, pagination_footer))
@@ -3061,10 +3210,12 @@ pub fn drug_search_markdown_with_footer(
 ) -> Result<String, BioMcpError> {
     let tmpl = env()?.get_template("drug_search.md.j2")?;
     let count = total_count.unwrap_or(results.len());
+    let discover_hint = discover_try_line(query, "resolve drug trial codes and aliases");
     let body = tmpl.render(context! {
         query => query,
         count => count,
         results => results,
+        discover_hint => discover_hint,
         pagination_footer => pagination_footer,
     })?;
     Ok(with_pagination_footer(body, pagination_footer))
@@ -3089,10 +3240,18 @@ pub fn drug_search_markdown_with_region(
         }
         DrugRegion::Eu => {
             let count = eu_total.unwrap_or(eu_results.len());
+            if count == 0 && is_structured_indication_query(query) {
+                return Ok(empty_drug_indication_search_message(query, region));
+            }
             let mut out = String::new();
             let _ = writeln!(out, "# Drugs: {query}\n");
             if count == 0 {
                 out.push_str("No drugs found\n");
+                let discover_hint =
+                    discover_try_line(query, "resolve drug trial codes and aliases");
+                if !discover_hint.is_empty() {
+                    let _ = writeln!(out, "\n{discover_hint}");
+                }
                 return Ok(out);
             }
 
@@ -3125,6 +3284,7 @@ pub fn drug_search_markdown_with_region(
 
             out.push_str("## US (MyChem.info / OpenFDA)\n\n");
             let us_count = us_total.unwrap_or(us_results.len());
+            let eu_count = eu_total.unwrap_or(eu_results.len());
             if us_results.is_empty() {
                 if us_count == 0 && is_structured_indication_query(query) {
                     out.push_str(&empty_drug_indication_search_body(query, DrugRegion::All));
@@ -3183,6 +3343,14 @@ pub fn drug_search_markdown_with_region(
                 }
             }
 
+            if us_count == 0 && eu_count == 0 && !is_structured_indication_query(query) {
+                let discover_hint =
+                    discover_try_line(query, "resolve drug trial codes and aliases");
+                if !discover_hint.is_empty() {
+                    let _ = writeln!(out, "\n{discover_hint}");
+                }
+            }
+
             out.push_str("\nUse `get drug <name>` for full details.\n");
             if !pagination_footer.trim().is_empty() {
                 let _ = writeln!(out, "\n{pagination_footer}");
@@ -3209,14 +3377,15 @@ fn indication_query_value(query: &str) -> &str {
 fn empty_drug_indication_search_body(query: &str, region: DrugRegion) -> String {
     let disease = indication_query_value(query);
     let review_query = quote_arg(&format!("{disease} treatment"));
+    let discover_hint = discover_try_line(disease, "resolve drug trial codes and aliases");
     match region {
         DrugRegion::Us => format!(
-            "No drugs found in U.S. regulatory data for this indication.\nThis absence is informative for approved-drug questions, but it does not rule out investigational or off-label evidence.\nTry `biomcp search article -k {review_query} --type review --limit 5` for broader treatment literature."
+            "No drugs found in U.S. regulatory data for this indication.\nThis absence is informative for approved-drug questions, but it does not rule out investigational or off-label evidence.\nTry `biomcp search article -k {review_query} --type review --limit 5` for broader treatment literature.\n{discover_hint}"
         ),
         DrugRegion::All => format!(
-            "No drugs found in U.S. regulatory data for this indication.\nThis absence is informative for approved-drug questions and is specific to the structured regulatory portion of the combined search.\nTry `biomcp search article -k {review_query} --type review --limit 5` for broader treatment literature."
+            "No drugs found in U.S. regulatory data for this indication.\nThis absence is informative for approved-drug questions and is specific to the structured regulatory portion of the combined search.\nTry `biomcp search article -k {review_query} --type review --limit 5` for broader treatment literature.\n{discover_hint}"
         ),
-        DrugRegion::Eu => "No drugs found".to_string(),
+        DrugRegion::Eu => format!("No drugs found\n{discover_hint}"),
     }
 }
 
@@ -4948,6 +5117,32 @@ mod tests {
     }
 
     #[test]
+    fn format_sections_block_keeps_gene_ontology_in_top_more_entries() {
+        let block = format_sections_block(
+            "gene",
+            "NANOG",
+            vec![
+                "pathways".to_string(),
+                "ontology".to_string(),
+                "diseases".to_string(),
+                "protein".to_string(),
+            ],
+        );
+
+        let pathways = block
+            .find("biomcp get gene NANOG pathways")
+            .expect("pathways command");
+        let ontology = block
+            .find("biomcp get gene NANOG ontology")
+            .expect("ontology command");
+        let diseases = block
+            .find("biomcp get gene NANOG diseases")
+            .expect("diseases command");
+        assert!(pathways < ontology);
+        assert!(ontology < diseases);
+    }
+
+    #[test]
     fn related_gene_prioritizes_localization_deepening_when_supported() {
         let gene = Gene {
             symbol: "OPA1".to_string(),
@@ -4999,7 +5194,46 @@ mod tests {
         let related = related_gene(&gene);
         assert_eq!(related[0], "biomcp get gene OPA1 protein");
         assert_eq!(related[1], "biomcp get gene OPA1 hpa");
+        assert!(related.contains(&"biomcp get pgx OPA1".to_string()));
         assert!(related.contains(&"biomcp search variant -g OPA1".to_string()));
+    }
+
+    #[test]
+    fn related_drug_includes_pgx_search() {
+        let drug = Drug {
+            name: "warfarin".to_string(),
+            drugbank_id: None,
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let related = related_drug(&drug);
+        assert!(related.contains(&"biomcp search pgx -d warfarin".to_string()));
     }
 
     #[test]
@@ -5106,6 +5340,158 @@ mod tests {
     }
 
     #[test]
+    fn related_disease_non_oncology_skips_study_hints() {
+        let disease = Disease {
+            id: "MONDO:0007947".to_string(),
+            name: "Marfan syndrome".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let related = related_disease(&disease);
+        assert!(!related.iter().any(|cmd| cmd.contains("biomcp study ")));
+    }
+
+    #[test]
+    fn related_disease_oncology_without_local_match_falls_back_to_download_list() {
+        let disease = Disease {
+            id: "MONDO:0005105".to_string(),
+            name: "melanoma".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: Some(crate::sources::civic::CivicContext::default()),
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "biomcp-render-study-empty-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create empty study root");
+        let original = std::env::var_os("BIOMCP_STUDY_DIR");
+        unsafe { std::env::set_var("BIOMCP_STUDY_DIR", &root) };
+        let related = related_disease(&disease);
+        match original {
+            Some(value) => unsafe { std::env::set_var("BIOMCP_STUDY_DIR", value) },
+            None => unsafe { std::env::remove_var("BIOMCP_STUDY_DIR") },
+        }
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(related.contains(&"biomcp study download --list".to_string()));
+    }
+
+    #[test]
+    fn related_disease_oncology_with_local_match_prefers_top_mutated() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "biomcp-render-study-match-{}-{unique}",
+            std::process::id()
+        ));
+        let study_dir = root.join("brca_tcga_pan_can_atlas_2018");
+        std::fs::create_dir_all(&study_dir).expect("create study dir");
+        std::fs::write(
+            study_dir.join("meta_study.txt"),
+            "cancer_study_identifier: brca_tcga_pan_can_atlas_2018\nname: BRCA TCGA PanCan Atlas 2018\ntype_of_cancer: brca\n",
+        )
+        .expect("write meta");
+        std::fs::write(
+            study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        )
+        .expect("write mutations");
+        std::fs::write(
+            study_dir.join("data_clinical_sample.txt"),
+            "# comment\nPATIENT_ID\tSAMPLE_ID\tCANCER_TYPE\tCANCER_TYPE_DETAILED\tONCOTREE_CODE\nP1\tS1\tBreast Cancer\tBreast Invasive Carcinoma\tBRCA\n",
+        )
+        .expect("write clinical sample");
+
+        let disease = Disease {
+            id: "MONDO:0007254".to_string(),
+            name: "breast cancer".to_string(),
+            definition: None,
+            synonyms: vec!["mammary carcinoma".to_string()],
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: vec![crate::entities::disease::DiseaseTargetScore {
+                symbol: "TP53".to_string(),
+                summary: crate::entities::disease::DiseaseAssociationScoreSummary {
+                    overall_score: 0.8,
+                    gwas_score: None,
+                    rare_variant_score: None,
+                    somatic_mutation_score: Some(0.4),
+                },
+            }],
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let original = std::env::var_os("BIOMCP_STUDY_DIR");
+        unsafe { std::env::set_var("BIOMCP_STUDY_DIR", &root) };
+        let related = related_disease(&disease);
+        match original {
+            Some(value) => unsafe { std::env::set_var("BIOMCP_STUDY_DIR", value) },
+            None => unsafe { std::env::remove_var("BIOMCP_STUDY_DIR") },
+        }
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(related.contains(
+            &"biomcp study top-mutated --study brca_tcga_pan_can_atlas_2018".to_string()
+        ));
+        assert!(!related.contains(&"biomcp study download --list".to_string()));
+    }
+
+    #[test]
     fn study_top_mutated_markdown_renders_ranked_table() {
         let markdown = study_top_mutated_markdown(&StudyTopMutatedGenesResult {
             study_id: "msk_impact_2017".to_string(),
@@ -5173,7 +5559,20 @@ mod tests {
             related[0],
             "biomcp search article --drug orteronel --type review --limit 5"
         );
+        assert!(related.contains(&"biomcp search pgx -d orteronel".to_string()));
         assert!(related.contains(&"biomcp drug adverse-events orteronel".to_string()));
+    }
+
+    #[test]
+    fn discover_try_line_quotes_shell_sensitive_queries() {
+        assert_eq!(
+            discover_try_line("ERBB1\"alias", "resolve abbreviations and synonyms"),
+            "Try: biomcp discover \"ERBB1\\\"alias\"   - resolve abbreviations and synonyms"
+        );
+        assert_eq!(
+            discover_try_line("BRAF V600E", "resolve abbreviations and synonyms"),
+            "Try: biomcp discover \"BRAF V600E\"   - resolve abbreviations and synonyms"
+        );
     }
 
     #[test]
@@ -6511,7 +6910,40 @@ mod tests {
         assert!(markdown.contains(
             "biomcp search article -k \"Marfan syndrome treatment\" --type review --limit 5"
         ));
+        assert!(markdown.contains("Try: biomcp discover \"Marfan syndrome\""));
         assert!(!markdown.contains("No drugs found\n"));
+    }
+
+    #[test]
+    fn disease_search_empty_state_includes_discover_hint() {
+        let markdown = disease_search_markdown_with_footer("definitelynotarealdisease", &[], "")
+            .expect("markdown");
+
+        assert!(markdown.contains("Try: biomcp discover definitelynotarealdisease"));
+    }
+
+    #[test]
+    fn drug_search_standard_empty_state_includes_discover_hint() {
+        let markdown =
+            drug_search_markdown_with_footer("MK-3475", &[], Some(0), "").expect("markdown");
+
+        assert!(markdown.contains("Try: biomcp discover MK-3475"));
+    }
+
+    #[test]
+    fn drug_search_eu_empty_state_includes_discover_hint() {
+        let markdown = drug_search_markdown_with_region(
+            "MK-3475",
+            DrugRegion::Eu,
+            &[],
+            None,
+            &[],
+            Some(0),
+            "",
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("Try: biomcp discover MK-3475"));
     }
 
     #[test]
@@ -6533,6 +6965,131 @@ mod tests {
         );
         assert!(markdown.contains("## US (MyChem.info / OpenFDA)"));
         assert!(markdown.contains("## EU (EMA)"));
+    }
+
+    #[test]
+    fn drug_search_all_region_empty_state_includes_discover_only_when_both_regions_are_empty() {
+        let empty_markdown = drug_search_markdown_with_region(
+            "MK-3475",
+            DrugRegion::All,
+            &[],
+            Some(0),
+            &[],
+            Some(0),
+            "",
+        )
+        .expect("markdown");
+        assert!(empty_markdown.contains("Try: biomcp discover MK-3475"));
+
+        let us_only_markdown = drug_search_markdown_with_region(
+            "MK-3475",
+            DrugRegion::All,
+            &[crate::entities::drug::DrugSearchResult {
+                name: "pembrolizumab".to_string(),
+                drugbank_id: None,
+                mechanism: None,
+                target: None,
+                drug_type: None,
+            }],
+            Some(1),
+            &[],
+            Some(0),
+            "",
+        )
+        .expect("markdown");
+        assert!(!us_only_markdown.contains("Try: biomcp discover MK-3475"));
+
+        let eu_only_markdown = drug_search_markdown_with_region(
+            "MK-3475",
+            DrugRegion::All,
+            &[],
+            Some(0),
+            &[crate::entities::drug::EmaDrugSearchResult {
+                name: "Keytruda".to_string(),
+                active_substance: "pembrolizumab".to_string(),
+                ema_product_number: "EMEA/H/C/003820".to_string(),
+                status: "Authorized".to_string(),
+            }],
+            Some(1),
+            "",
+        )
+        .expect("markdown");
+        assert!(!eu_only_markdown.contains("Try: biomcp discover MK-3475"));
+    }
+
+    #[test]
+    fn drug_search_eu_indication_empty_state_includes_discover_hint() {
+        let markdown = drug_search_markdown_with_region(
+            "indication=Marfan syndrome",
+            DrugRegion::Eu,
+            &[],
+            None,
+            &[],
+            Some(0),
+            "",
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("Try: biomcp discover \"Marfan syndrome\""));
+    }
+
+    #[test]
+    fn related_disease_malformed_study_lookup_falls_back_to_download_list() {
+        let disease = Disease {
+            id: "MONDO:0005105".to_string(),
+            name: "melanoma".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: Some(crate::sources::civic::CivicContext::default()),
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "biomcp-render-study-malformed-{}-{unique}",
+            std::process::id()
+        ));
+        let study_dir = root.join("broken-study");
+        std::fs::create_dir_all(&study_dir).expect("create malformed study dir");
+        std::fs::write(
+            study_dir.join("meta_study.txt"),
+            "name: Missing identifier\n",
+        )
+        .expect("write malformed meta");
+        std::fs::write(
+            study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        )
+        .expect("write mutations");
+
+        let original = std::env::var_os("BIOMCP_STUDY_DIR");
+        unsafe { std::env::set_var("BIOMCP_STUDY_DIR", &root) };
+        let related = related_disease(&disease);
+        match original {
+            Some(value) => unsafe { std::env::set_var("BIOMCP_STUDY_DIR", value) },
+            None => unsafe { std::env::remove_var("BIOMCP_STUDY_DIR") },
+        }
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(related.contains(&"biomcp study download --list".to_string()));
     }
 
     #[test]
