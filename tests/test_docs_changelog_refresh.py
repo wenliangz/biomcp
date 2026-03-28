@@ -206,10 +206,11 @@ def test_changelog_audit_backfills_rust_release_gaps() -> None:
     assert "MCP chart responses can now return SVG inline" in v0_8_17_block
 
 
-def test_release_overview_mentions_v0_8_18_current_version_and_release_files() -> None:
+def test_release_overview_uses_manifest_reference_for_current_version_and_release_files() -> None:
     overview = _read("design/technical/overview.md")
 
-    assert "**Current version:** 0.8.18 (as of 2026-03-25)" in overview
+    assert "**Current version:** see `Cargo.toml`" in overview
+    assert "`scripts/check-version-sync.sh` keeps" in overview
     assert "Release checklist" in overview
     for required_file in [
         "`Cargo.toml`",

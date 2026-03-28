@@ -1,168 +1,104 @@
 # Code Review Log
 
-## Review Scope
+## Scope Reviewed
 
-Reviewed:
-
-- `.march/ticket.md`
 - `.march/design-draft.md`
 - `.march/design-final.md`
 - `.march/code-log.md`
-- staged implementation in:
-  - `src/sources/gwas.rs`
-  - `src/entities/variant.rs`
-  - `src/transform/variant.rs`
-  - `src/render/markdown.rs`
-  - `src/render/provenance.rs`
-  - `templates/variant.md.j2`
-  - `docs/user-guide/variant.md`
-  - `spec/03-variant.md`
+- `design/technical/overview.md`
+- `tests/test_docs_changelog_refresh.py`
+- `tests/test_upstream_planning_analysis_docs.py`
+- Relevant implementation surfaces referenced by the new architecture text:
+  `src/cli/chart.rs`, `src/cli/mod.rs`, `src/render/chart.rs`,
+  `scripts/check-version-sync.sh`, and `spec/13-study.md`
 
-Re-ran the relevant local gates:
+## Critique
 
-- `cargo test --quiet`
-- `make spec-pr`
-- `make check`
+### Design Completeness Audit
 
-## Design Completeness Audit
+- Current-version drift fix: implemented in `design/technical/overview.md`.
+  The overview now points to `Cargo.toml` and names the actual version-sync
+  manifests enforced by `scripts/check-version-sync.sh`.
+- New `## Chart Rendering` section: implemented in
+  `design/technical/overview.md`.
+- `biomcp chart` described as embedded documentation, not the renderer:
+  implemented and consistent with `src/cli/chart.rs`.
+- Study rendering ownership documented for `study query`,
+  `study co-occurrence`, `study compare`, and `study survival`:
+  implemented and consistent with `ChartArgs` in `src/cli/mod.rs`.
+- Actual 12 chart types and command compatibility matrix: implemented and
+  consistent with `ChartType` plus validation in `src/render/chart.rs`.
+- Output targets and flag boundaries: implemented and consistent with
+  `output_target()` and `rewrite_mcp_chart_args()`.
+- MCP rewrite behavior: implemented and consistent with the real rewrite layer.
+  The overview does not mention a nonexistent `--png` flag and does not imply
+  MCP file output.
+- Link to `docs/charts/index.md`: implemented.
+- Docs-contract updates required by the final design:
+  `tests/test_docs_changelog_refresh.py` and
+  `tests/test_upstream_planning_analysis_docs.py` were both updated.
 
-I checked every "Needs change" item, acceptance criterion, and proof-matrix row
-from `.march/design-final.md` against the staged code and spec changes.
+Result: no design item from `design-final.md` was skipped.
 
-### Design items mapped to code
+### Test-Design Traceability
 
-- GWAS source error remap:
-  implemented in `src/sources/gwas.rs` via `remap_gwas_error()` and applied to
-  all public GWAS fetch methods.
-- Truthful unavailable state on variants:
-  implemented in `src/entities/variant.rs` by adding
-  `gwas_unavailable_reason: Option<String>` and updating `add_gwas_section()`
-  to degrade only on `BioMcpError::SourceUnavailable`.
-- Variant initialization updates:
-  implemented in `src/transform/variant.rs::from_myvariant_hit()` and
-  `src/entities/variant.rs::gwas_only_variant_stub()`.
-- Truthful markdown rendering:
-  implemented in `templates/variant.md.j2` and wired through
-  `src/render/markdown.rs`.
-- Honest provenance when GWAS is unavailable:
-  implemented in `src/render/provenance.rs::variant_section_sources()`.
-- JSON/doc contract update:
-  implemented in `docs/user-guide/variant.md`.
-- Live spec gate update:
-  implemented in `spec/03-variant.md::GWAS Supporting PMIDs`.
+- Proof matrix item "Current-version line is drift-proof":
+  covered by the overview text itself and by
+  `test_release_overview_uses_manifest_reference_for_current_version_and_release_files`.
+- Proof matrix item "Overview docs contract accepts the new version wording":
+  covered by `tests/test_docs_changelog_refresh.py`.
+- Proof matrix item "Chart architecture section exists and uses the real repo model":
+  covered by `test_chart_rendering_architecture_doc_matches_repo_contract`.
+- Proof matrix item "Study chart behavior referenced by the architecture doc still matches shipped behavior":
+  covered by existing chart scenarios in `spec/13-study.md`.
+- Proof matrix item "Full repo contracts stay green after the doc and test updates":
+  covered by `make test-contracts`.
 
-### Acceptance criteria check
+Result: the required tests/specs existed, but the implementation step did not
+replay the full proof matrix. `.march/code-log.md` showed targeted docs pytest
+and `make check`, but it omitted `make spec-pr` and `make test-contracts`,
+which `design-final.md` explicitly called out as verification surfaces.
 
-- `biomcp --json get variant rs7903146 gwas` no longer hard-fails on
-  GWAS decode/transient failures:
-  covered by source remap plus entity-layer degradation.
-- Requested-but-unavailable GWAS remains truthful:
-  `gwas` stays empty, `gwas_unavailable_reason` is set,
-  `supporting_pmids` stays `None`.
-- Successful GWAS loads preserve current behavior:
-  success path still populates `gwas` and `supporting_pmids`, and clears the
-  unavailable marker before loading.
-- Markdown renders an unavailable message rather than a false empty-state:
-  implemented in the GWAS template branch.
-- `_meta.section_sources` still reports GWAS when unavailable:
-  implemented in provenance.
-- PR spec gate is green:
-  verified by `make spec-pr`.
+### Quality Checks
 
-### Documentation / contract audit
-
-- The JSON contract doc now distinguishes:
-  - `supporting_pmids: null` when not loaded or temporarily unavailable
-  - `gwas_unavailable_reason` when requested but unavailable
-  - `supporting_pmids: []` only for a successful load with no PMIDs
-- The executable spec now matches the intended contract by accepting either:
-  - array-valued `supporting_pmids`, or
-  - string-valued `gwas_unavailable_reason`
-
-I did not find a design item with no matching code or contract change.
-
-## Test-Design Traceability
-
-Each proof-matrix item in `.march/design-final.md` has matching proof:
-
-- GWAS decode failure remaps to source unavailability:
-  `src/sources/gwas.rs::associations_by_rsid_remaps_decode_failures_to_source_unavailable`
-- Transient GWAS HTTP failure remaps to source unavailability:
-  `src/sources/gwas.rs::associations_by_rsid_remaps_transient_http_failures_to_source_unavailable`
-- GWAS-only variant request degrades instead of failing:
-  `src/entities/variant.rs::gwas_only_request_returns_variant_when_gwas_is_unavailable`
-- Markdown tells the truth for unavailable GWAS:
-  `src/render/markdown.rs::variant_markdown_renders_gwas_unavailable_message`
-- Provenance keeps GWAS visible when unavailable:
-  `src/render/provenance.rs::variant_provenance_includes_gwas_when_requested_section_is_unavailable`
-- Live GWAS contract stays green:
-  `spec/03-variant.md::GWAS Supporting PMIDs`
-- Rust regressions are not introduced:
-  `cargo test --quiet`
-
-I also checked the assertions themselves:
-
-- The source tests assert `BioMcpError::SourceUnavailable`, not just any error.
-- The entity test asserts the returned variant exists and carries the truthful
-  unavailable fields.
-- The markdown test asserts the unavailable message is present and the false
-  empty-state copy is absent.
-- The provenance test asserts the `gwas` section key remains present.
-- The spec heading asserts the user-visible contract rather than the exact
-  current implementation shape.
-
-I did not find a missing proof-matrix test or a weak assertion that should
-block this review.
-
-## Critique Findings
-
-No additional implementation defects were found in the reviewed change set.
-
-The source remap is scoped correctly, the entity degradation is narrow enough
-to avoid swallowing internal bugs, the rendering and provenance changes preserve
-truthfulness, and the docs/spec updates match the new contract.
+- Implementation quality: the touched docs and pytest files follow adjacent repo
+  conventions. No unnecessary abstractions were introduced.
+- Test quality: the new pytest coverage checks contract text, not incidental
+  formatting trivia. Existing `spec/13-study.md` remains the outside-in proof
+  for chart behavior.
+- Performance: not applicable; docs-only change.
+- Data completeness: the chart section documents all contractually required
+  surfaces named in the final design.
+- Security: no new untrusted-input flow introduced.
 
 ## Fix Plan
 
-No implementation fixes were needed beyond replacing the stale review artifact
-with this ticket-specific log.
+- Repair the verification gap by running the proof-matrix gates that were not
+  replayed during implementation: `make spec-pr` and `make test-contracts`.
+- Re-run `make check` after the verification repair, per the review-step
+  instructions.
+- Record the issue and the repaired verification state in this review log.
 
 ## Repair
 
-Applied:
+- Ran `make spec-pr`: passed (`218 passed, 6 skipped, 36 deselected`).
+- Ran `make test-contracts`: passed (`125 passed` and `mkdocs build --strict`).
+- Re-ran `make check`: passed.
 
-- Replaced the stale `.march/code-review-log.md` with a review log for ticket
-  `071-bug-fix-harden-gwas-variant-section-for-live-decode-failures`.
-
-No Rust, template, doc, or spec changes were required during review because the
-reviewed implementation already matched the final design and passed the gates.
-
-## Post-Fix Collateral Scan
-
-After replacing the review artifact:
-
-- No dead code was introduced.
-- No unused imports or variables were introduced.
-- No resource cleanup paths changed.
-- No stale error messages were introduced.
-- No variable shadowing was introduced.
-
-## Verification
-
-- `cargo test --quiet` passed.
-- `make spec-pr` passed: `218 passed, 6 skipped, 36 deselected`.
-- `make check` passed.
+No source changes were required. The implementation itself was complete and
+accurate; the only defect was incomplete verification against the final design.
 
 ## Residual Concerns
 
-No residual concerns from this review.
-
-## Out-of-Scope Observations
-
-None.
+- The final design intentionally leaves a spec gap for architecture-doc prose.
+  The overview contract is enforced through docs-contract pytest, not a
+  dedicated `spec/*.md` file. Verify should continue treating those pytest
+  files as the enforcement surface for future overview edits.
+- `mkdocs build --strict` emitted the existing upstream Material/MkDocs 2.0
+  warning, but the build succeeded and this review did not change that surface.
 
 ## Defect Register
 
 | # | Category | Lintable | Description |
 |---|----------|----------|-------------|
-| 1 | None found | no | No additional defects found during code review beyond the implementation already present in the worktree |
+| 1 | verification-gap | no | `design-final.md` required `make spec-pr` and `make test-contracts`, but the implementation replay only covered targeted docs pytest and `make check`; review ran the missing gates and confirmed they pass. |

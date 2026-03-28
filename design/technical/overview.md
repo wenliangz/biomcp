@@ -28,7 +28,9 @@ curl ... install.sh | bash       # binary installer (resolves latest release)
 ```
 
 - **Edition:** Rust 2024
-- **Current version:** 0.8.18 (as of 2026-03-25)
+- **Current version:** see `Cargo.toml` (`scripts/check-version-sync.sh` keeps
+  `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `manifest.json`, and
+  `CITATION.cff` aligned)
 - **Package name:** `biomcp-cli` on PyPI; binary name is `biomcp`
 - **PyPI publishing:** GitHub Actions trusted publisher (no token needed)
 - **Release checklist:** Bump `Cargo.toml`, `Cargo.lock`, `pyproject.toml`,
@@ -84,6 +86,54 @@ The validation boundary is also part of the architecture contract:
 - Semantic Scholar helper commands accept PMID, PMCID, DOI, arXiv, and
   Semantic Scholar paper IDs and reject other identifiers before calling the
   backend.
+
+## Chart Rendering
+
+Chart rendering belongs to the local study analytics surface, not the generic
+entity lookup path. The architecture has two related chart surfaces that share
+the same chart vocabulary but serve different purposes.
+
+- `biomcp chart` serves embedded markdown chart docs through
+  `src/cli/chart.rs`, `docs/charts/`, and `RustEmbed`.
+- `biomcp chart` documents the chart surface, but does not render charts.
+- `biomcp study ... --chart` is the rendering path, with `ChartArgs` defined
+  in `src/cli/mod.rs` and output generation implemented in
+  `src/render/chart.rs`.
+
+The rendering entrypoints are `study query`, `study co-occurrence`,
+`study compare`, and `study survival`. Across those commands, BioMCP supports
+`bar`, `stacked-bar`, `pie`, `waterfall`, `heatmap`, `histogram`, `density`,
+`box`, `violin`, `ridgeline`, `scatter`, and `survival`, with the command and
+data-shape matrix enforced in code:
+
+| Command | Valid chart types |
+|---------|-------------------|
+| `study query --type mutations` | `bar`, `pie`, `waterfall` |
+| `study query --type cna` | `bar`, `pie` |
+| `study query --type expression` | `histogram`, `density` |
+| `study co-occurrence` | `bar`, `pie`, `heatmap` |
+| `study compare --type expression` | `box`, `violin`, `ridgeline`, `scatter` |
+| `study compare --type mutations` | `bar`, `stacked-bar` |
+| `study survival` | `bar`, `survival` |
+
+The renderer targets terminal, SVG file, PNG file behind the `charts-png`
+feature, and MCP inline SVG output. `--cols` and `--rows` size terminal
+output. `--width` and `--height` size SVG, PNG, and MCP inline SVG output.
+`--scale` is PNG-only. `--title`, `--theme`, and `--palette` style rendered
+charts. Heatmaps reject `--palette` because `study co-occurrence --chart
+heatmap` uses a fixed continuous colormap.
+
+MCP chart responses are handled by `rewrite_mcp_chart_args()`, which turns a
+charted study request into a text pass plus an SVG pass. In that rewrite
+boundary, `--terminal` is stripped, `--output` / `-o` are rejected, and
+`--cols` / `--rows` and `--scale` are rejected for the SVG pass. The SVG pass
+preserves chart selection, sizing, and styling flags and injects inline-SVG
+output for MCP clients; MCP does not return terminal or file output.
+
+For the user-facing chart reference and examples, see `docs/charts/index.md`.
+That guide covers workflows and examples in detail; this overview documents
+where the chart docs, study rendering path, and MCP response rewrite fit
+together.
 
 ## API Keys
 
