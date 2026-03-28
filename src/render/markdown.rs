@@ -6910,6 +6910,7 @@ mod tests {
         assert!(markdown.contains(
             "biomcp search article -k \"Marfan syndrome treatment\" --type review --limit 5"
         ));
+        assert!(markdown.contains("Try: biomcp discover \"Marfan syndrome\""));
         assert!(!markdown.contains("No drugs found\n"));
     }
 
@@ -6997,6 +6998,98 @@ mod tests {
         )
         .expect("markdown");
         assert!(!us_only_markdown.contains("Try: biomcp discover MK-3475"));
+
+        let eu_only_markdown = drug_search_markdown_with_region(
+            "MK-3475",
+            DrugRegion::All,
+            &[],
+            Some(0),
+            &[crate::entities::drug::EmaDrugSearchResult {
+                name: "Keytruda".to_string(),
+                active_substance: "pembrolizumab".to_string(),
+                ema_product_number: "EMEA/H/C/003820".to_string(),
+                status: "Authorized".to_string(),
+            }],
+            Some(1),
+            "",
+        )
+        .expect("markdown");
+        assert!(!eu_only_markdown.contains("Try: biomcp discover MK-3475"));
+    }
+
+    #[test]
+    fn drug_search_eu_indication_empty_state_includes_discover_hint() {
+        let markdown = drug_search_markdown_with_region(
+            "indication=Marfan syndrome",
+            DrugRegion::Eu,
+            &[],
+            None,
+            &[],
+            Some(0),
+            "",
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("Try: biomcp discover \"Marfan syndrome\""));
+    }
+
+    #[test]
+    fn related_disease_malformed_study_lookup_falls_back_to_download_list() {
+        let disease = Disease {
+            id: "MONDO:0005105".to_string(),
+            name: "melanoma".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: Some(crate::sources::civic::CivicContext::default()),
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "biomcp-render-study-malformed-{}-{unique}",
+            std::process::id()
+        ));
+        let study_dir = root.join("broken-study");
+        std::fs::create_dir_all(&study_dir).expect("create malformed study dir");
+        std::fs::write(
+            study_dir.join("meta_study.txt"),
+            "name: Missing identifier\n",
+        )
+        .expect("write malformed meta");
+        std::fs::write(
+            study_dir.join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\n",
+        )
+        .expect("write mutations");
+
+        let original = std::env::var_os("BIOMCP_STUDY_DIR");
+        unsafe { std::env::set_var("BIOMCP_STUDY_DIR", &root) };
+        let related = related_disease(&disease);
+        match original {
+            Some(value) => unsafe { std::env::set_var("BIOMCP_STUDY_DIR", value) },
+            None => unsafe { std::env::remove_var("BIOMCP_STUDY_DIR") },
+        }
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(related.contains(&"biomcp study download --list".to_string()));
     }
 
     #[test]

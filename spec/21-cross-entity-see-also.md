@@ -15,13 +15,26 @@ typed BioMCP surfaces directly from normal output.
 
 ## Drug to PGx
 
+Drug cards should advertise the typed PGx search directly in normal markdown
+output so agents can pivot without guessing the command shape.
+
 ```bash
 out="$(biomcp get drug warfarin)"
 echo "$out" | mustmatch like "biomcp search pgx -d warfarin"
 echo "$out" | mustmatch like "pharmacogenomics interactions"
 ```
 
+The JSON contract should expose the same next command in `_meta.next_commands`.
+
+```bash
+out="$(biomcp --json get drug warfarin)"
+echo "$out" | jq -e '._meta.next_commands | index("biomcp search pgx -d warfarin") != null' > /dev/null
+```
+
 ## Gene to PGx
+
+Gene cards should point to the PGx card in both markdown and JSON because the
+same hint powers agentic follow-up planning across renderers.
 
 ```bash
 out="$(biomcp get gene TP53)"
@@ -36,6 +49,9 @@ echo "$out" | jq -e '._meta.next_commands | index("biomcp get pgx TP53") != null
 
 ## Gene More Ordering
 
+This ticket should not demote `ontology`; the default gene card still needs the
+top follow-up trio to stay `pathways`, `ontology`, and `diseases`.
+
 ```bash
 out="$(biomcp get gene NANOG)"
 echo "$out" | mustmatch like "More:"
@@ -45,6 +61,9 @@ echo "$out" | mustmatch like "biomcp get gene NANOG diseases"
 ```
 
 ## Oncology Study Local Match
+
+When oncology context and a matching local study are both present, the disease
+card should suggest the executable `study top-mutated` command.
 
 ```bash
 bash fixtures/setup-study-spec-fixture.sh "$PWD"
@@ -56,6 +75,9 @@ echo "$out" | mustmatch like "mutation frequency ranking"
 
 ## Oncology Study Fallback
 
+When there is no usable local study match, the disease card should still teach
+the next structured step by falling back to the study catalog.
+
 ```bash
 empty_root="$(mktemp -d)"
 out="$(BIOMCP_STUDY_DIR="$empty_root" biomcp get disease melanoma genes)"
@@ -66,6 +88,9 @@ rm -rf "$empty_root"
 
 ## Disease Zero-Result Discover
 
+Empty disease searches should redirect users to `discover` with the original
+query preserved in the suggested command.
+
 ```bash
 out="$(biomcp search disease definitelynotarealdisease --limit 3)"
 echo "$out" | mustmatch like "Try: biomcp discover definitelynotarealdisease"
@@ -73,6 +98,9 @@ echo "$out" | mustmatch like "resolve abbreviations and synonyms"
 ```
 
 ## Drug Zero-Result Discover
+
+Empty drug searches should do the same, nudging users toward `discover` when a
+trial code or alias is more likely than a canonical drug name match.
 
 ```bash
 out="$(biomcp search drug definitelynotarealdrugname --region us --limit 3)"
