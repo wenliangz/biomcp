@@ -23,7 +23,7 @@ biomcp update [--check]       → self-update or check for updates
 biomcp list [entity]          → show entities, commands, and filters
 biomcp skill                  → show the embedded BioMCP agent guide
 biomcp skill install <dir>    → install the BioMCP guide into an agent directory
-biomcp skill list             → legacy alias; currently reports no embedded catalog
+biomcp skill list             → list embedded worked examples
 biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`
 ```
 
@@ -218,12 +218,12 @@ Overview: `biomcp skill` (prints the embedded `SKILL.md` guide)
 
 Install: `biomcp skill install ~/.claude --force`
 
-List: `biomcp skill list` (currently prints `No skills found` because the old
-embedded use-case catalog no longer ships)
+List: `biomcp skill list`
 
-Legacy lookup: `biomcp skill 03` or `biomcp skill variant-to-treatment`
-returns a clear not-found error rather than stale content
+Open: `biomcp skill 01` or `biomcp skill article-follow-up`
 
-Install output lands in `skills/biomcp/` and currently includes `SKILL.md`
-plus `jq-examples.md`. The installer auto-discovers existing config
+Install output lands in `skills/biomcp/` and currently includes `SKILL.md`,
+`use-cases/`, `jq-examples.md`, `examples/`, and `schemas/`. The installer auto-discovers existing config
 directories (`.claude`, `.agents/skills/`, etc.) when no directory is passed.
+
+MCP resources include `biomcp://skill/<slug>` for each embedded worked example.

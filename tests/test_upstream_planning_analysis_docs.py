@@ -127,12 +127,12 @@ def test_functional_overview_preserves_readme_surface_and_study_family() -> None
         "`biomcp study list|download|filter|query|co-occurrence|cohort|survival|compare`"
         in functional
     )
-    assert "BioMCP ships an embedded agent guide" in functional
+    assert "BioMCP ships an embedded agent guide plus worked examples" in functional
     assert "`biomcp skill` shows the BioMCP agent guide" in functional
     assert "`biomcp skill install <dir>` installs that guide" in functional
-    assert "`biomcp skill list` is a legacy compatibility alias" in functional
-    assert "`No skills found`" in functional
-    assert "`biomcp skill 03` fail clearly" in functional
+    assert "`biomcp skill list` shows embedded worked examples" in functional
+    assert "`biomcp skill <name>` opens an embedded worked example" in functional
+    assert "`biomcp://skill/<slug>`" in functional
     assert "search all [slot filters]" in functional
     assert "biomcp search all --gene BRAF --disease melanoma" in functional
     assert "biomcp search all BRAF" in functional
@@ -289,10 +289,11 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "biomcp search all BRAF" in ux
     assert "positional alias" in ux
     assert "biomcp skill                  → show the embedded BioMCP agent guide" in ux
-    assert "biomcp skill list             → legacy alias; currently reports no embedded catalog" in ux
+    assert "biomcp skill list             → list embedded worked examples" in ux
     assert "Overview: `biomcp skill`" in ux
     assert "List: `biomcp skill list`" in ux
-    assert "Legacy lookup: `biomcp skill 03` or `biomcp skill variant-to-treatment`" in ux
+    assert "Open: `biomcp skill 01` or `biomcp skill article-follow-up`" in ux
+    assert "biomcp://skill/<slug>" in ux
     assert "biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`" in ux
     assert "biomcp serve-sse             → removed compatibility command; use `biomcp serve-http`" not in ux
     assert (

@@ -34,10 +34,10 @@ When connected, clients should discover:
 
 - one tool: `biomcp`
 - one help resource (`biomcp://help`)
+- one markdown resource per embedded BioMCP worked example (`biomcp://skill/<slug>`)
 
-Current builds do not discover a browsable `biomcp://skill/<slug>` catalog because no embedded use-case files ship.
-Resource discovery still gives agent clients a stable entry point before
-execution.
+Resource discovery gives agent clients both the overview entry point and the
+worked-example catalog before execution.
 
 ## Operational tips
 

@@ -1,14 +1,16 @@
 # Skills
 
-BioMCP ships one embedded guide plus supporting reference files for agent
-workflows. The current workflow is:
+BioMCP ships one embedded guide plus supporting reference files and worked
+examples for agent workflows. The current workflow is:
 
 ```bash
 biomcp skill
+biomcp skill list
+biomcp skill article-follow-up
 biomcp skill install ~/.claude
 ```
 
-## Read the guide
+## Read the overview
 
 `biomcp skill` prints the embedded `skills/SKILL.md` overview. Start there if
 you want the current BioMCP workflow guidance without installing anything into
@@ -16,8 +18,18 @@ an agent directory.
 
 ## Learn the workflows
 
-The embedded guide teaches three core deterministic workflows. You can read
-them directly in the public docs without installing into an agent directory:
+Use `biomcp skill list` to browse the embedded worked examples and
+`biomcp skill <slug|number>` to open one in the CLI:
+
+```bash
+biomcp skill list
+biomcp skill article-follow-up
+```
+
+Current builds ship examples for treatment lookup, symptom lookup,
+gene-disease orientation, and article follow-up. The installed `skills/` tree
+also includes worked examples you can read directly in the repo or in an agent
+directory:
 
 - [Guide Workflows](../how-to/guide-workflows.md) - variant pathogenicity,
   drug safety, and broad gene-disease investigation
@@ -47,15 +59,7 @@ Current builds install the full embedded reference tree into
 `<agent>/skills/biomcp/`, including:
 
 - `SKILL.md`
+- `use-cases/`
 - `jq-examples.md`
 - `examples/`
 - `schemas/`
-
-## Legacy compatibility note
-
-`biomcp skill list` remains as a legacy compatibility alias and currently prints
-`No skills found`.
-
-Numeric and slug lookups are also legacy compatibility paths. Commands such as
-`biomcp skill 03` and `biomcp skill variant-to-treatment` currently fail with a
-clear not-found message and suggest `biomcp skill`.

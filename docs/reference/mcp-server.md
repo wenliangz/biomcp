@@ -132,14 +132,12 @@ assert '"BioMCP allows read-only commands only" in result.content[0].text' in te
 
 ## Resource Catalog
 
-Current builds always publish the help resource:
+Current builds always publish the help resource and one markdown resource per embedded skill use-case:
 
 | URI | Name | Notes |
 |-----|------|-------|
 | `biomcp://help` | BioMCP Overview | Always listed |
-
-No `biomcp://skill/<slug>` resources are currently listed because the embedded
-`skills/` tree ships no `use-cases/*.md` files.
+| `biomcp://skill/<slug>` | Pattern: ... | Listed when the matching embedded worked example exists |
 
 ```python
 from pathlib import Path
@@ -150,14 +148,15 @@ use_cases_dir = repo_root / "skills" / "use-cases"
 assert "RESOURCE_HELP_URI" in shell
 assert 'RawResource::new(RESOURCE_HELP_URI, "BioMCP Overview")' in shell
 assert "list_use_case_refs()" in shell
-assert not use_cases_dir.exists() or list(use_cases_dir.glob("*.md")) == []
+assert use_cases_dir.exists()
+assert list(use_cases_dir.glob("*.md"))
 ```
 
 ## Resource Read Mapping
 
 - `biomcp://help` maps to `show_overview()`.
-- Compatibility reads for `biomcp://skill/<slug>` map to `show_use_case(<slug>)`
-  when an embedded use-case exists.
+- `biomcp://skill/<slug>` maps to `show_use_case(<slug>)` when an embedded
+  worked example exists.
 - All successful reads return `text/markdown`.
 
 ```python

@@ -45,7 +45,7 @@ biomcp study compare --study <id> --gene <symbol> --type <expression|mutations> 
 biomcp study co-occurrence --study <id> --genes <g1,g2,...>
 biomcp skill
 biomcp skill install [dir]
-biomcp skill list                 # legacy compatibility alias
+biomcp skill list                 # list embedded worked examples
 biomcp mcp
 biomcp serve
 biomcp serve-http [--host 127.0.0.1] [--port 8080]
@@ -54,9 +54,12 @@ biomcp uninstall
 biomcp version
 ```
 
-Numeric and slug skill lookups remain compatibility behavior, but they are not
-part of the recommended command synopsis because current builds do not ship a
-browsable embedded catalog.
+Worked examples are also addressable directly:
+
+```text
+biomcp skill 01
+biomcp skill article-follow-up
+```
 
 `biomcp health --apis-only` is the upstream inventory smoke test. Full
 `biomcp health` also reports local readiness rows such as EMA local data and
