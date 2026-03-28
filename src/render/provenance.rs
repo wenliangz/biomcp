@@ -604,7 +604,7 @@ pub(crate) fn variant_section_sources(variant: &Variant) -> Vec<SectionSource> {
     );
     push_section(
         &mut out,
-        !variant.gwas.is_empty(),
+        !variant.gwas.is_empty() || has_opt_text(&variant.gwas_unavailable_reason),
         "gwas",
         "GWAS",
         ["GWAS Catalog"],
@@ -957,6 +957,7 @@ pub(crate) fn adverse_event_report_section_sources(
 mod tests {
     use super::*;
     use crate::entities::pathway::Pathway;
+    use crate::entities::variant::Variant;
 
     #[test]
     fn pathway_source_label_maps_known_sources() {
@@ -1006,5 +1007,47 @@ mod tests {
         let keys: Vec<&str> = sections.iter().map(|s| s.key.as_str()).collect();
         assert!(keys.contains(&"identity"), "identity section expected");
         assert!(keys.contains(&"genes"), "genes section expected");
+    }
+
+    #[test]
+    fn variant_provenance_includes_gwas_when_requested_section_is_unavailable() {
+        let variant = Variant {
+            gene: String::new(),
+            id: "rs7903146".to_string(),
+            hgvs_p: None,
+            hgvs_c: None,
+            rsid: Some("rs7903146".to_string()),
+            cosmic_id: None,
+            significance: None,
+            clinvar_id: None,
+            clinvar_review_status: None,
+            clinvar_review_stars: None,
+            conditions: Vec::new(),
+            gnomad_af: None,
+            allele_frequency_raw: None,
+            allele_frequency_percent: None,
+            consequence: None,
+            cadd_score: None,
+            sift_pred: None,
+            polyphen_pred: None,
+            conservation: None,
+            expanded_predictions: Vec::new(),
+            population_breakdown: None,
+            cosmic_context: None,
+            cgi_associations: Vec::new(),
+            civic: None,
+            clinvar_conditions: Vec::new(),
+            clinvar_condition_reports: None,
+            top_disease: None,
+            cancer_frequencies: Vec::new(),
+            cancer_frequency_source: None,
+            gwas: Vec::new(),
+            gwas_unavailable_reason: Some("GWAS association data temporarily unavailable.".into()),
+            supporting_pmids: None,
+            prediction: None,
+        };
+
+        let sources = variant_section_sources(&variant);
+        assert!(sources.iter().any(|source| source.key == "gwas"));
     }
 }

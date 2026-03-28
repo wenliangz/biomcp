@@ -2,141 +2,167 @@
 
 ## Review Scope
 
-Reviewed `.march/ticket.md`, `.march/design-draft.md`, `.march/design-final.md`,
-`.march/code-log.md`, the staged implementation in `src/cli/mod.rs`,
-`src/cli/chart.rs`, `src/entities/discover.rs`, and `src/render/json.rs`, plus
-the staged spec changes in `spec/04-trial.md`, `spec/06-article.md`,
-`spec/13-study.md`, and `spec/19-discover.md`.
+Reviewed:
 
-Re-ran the relevant local gates and direct help/JSON surfaces:
+- `.march/ticket.md`
+- `.march/design-draft.md`
+- `.march/design-final.md`
+- `.march/code-log.md`
+- staged implementation in:
+  - `src/sources/gwas.rs`
+  - `src/entities/variant.rs`
+  - `src/transform/variant.rs`
+  - `src/render/markdown.rs`
+  - `src/render/provenance.rs`
+  - `templates/variant.md.j2`
+  - `docs/user-guide/variant.md`
+  - `spec/03-variant.md`
 
-- `cargo test help_`
-- `cargo test article_date_help_advertises_shared_accepted_formats`
-- `cargo test trial_phase_help_explains_canonical_numeric_forms_and_aliases`
-- `cargo test chart_help_lists_descriptions_for_all_chart_topics`
-- `cargo test to_discover_json_adds_discover_meta_aliases`
-- `cargo run --bin biomcp -- search article --help`
-- `cargo run --bin biomcp -- search trial --help`
-- `cargo run --bin biomcp -- chart --help`
-- `cargo run --bin biomcp -- --json discover Keytruda`
+Re-ran the relevant local gates:
+
+- `cargo test --quiet`
+- `make spec-pr`
+- `make check`
 
 ## Design Completeness Audit
 
-Every final-design item marked as requiring change has a matching staged code or
-spec change:
+I checked every "Needs change" item, acceptance criterion, and proof-matrix row
+from `.march/design-final.md` against the staged code and spec changes.
 
-- Visible article date aliases:
-  implemented in `src/cli/mod.rs` by changing `search article` date flags to
-  `visible_alias = "since"` and `visible_alias = "until"`.
-- Discover JSON de-duplication:
-  implemented in `src/entities/discover.rs` with `#[serde(skip)]` on
-  `DiscoverResult.next_commands`, while `src/render/json.rs` keeps
-  `_meta.next_commands` populated.
-- Chart help descriptions:
-  implemented in `src/cli/chart.rs` by adding one-line clap doc comments to all
-  chart subcommands.
-- Trial phase canonical note:
-  implemented in `src/cli/mod.rs` by explicitly documenting canonical numeric
-  forms and accepted `PHASE*` aliases.
+### Design items mapped to code
 
-Documentation and contract updates were checked separately:
+- GWAS source error remap:
+  implemented in `src/sources/gwas.rs` via `remap_gwas_error()` and applied to
+  all public GWAS fetch methods.
+- Truthful unavailable state on variants:
+  implemented in `src/entities/variant.rs` by adding
+  `gwas_unavailable_reason: Option<String>` and updating `add_gwas_section()`
+  to degrade only on `BioMcpError::SourceUnavailable`.
+- Variant initialization updates:
+  implemented in `src/transform/variant.rs::from_myvariant_hit()` and
+  `src/entities/variant.rs::gwas_only_variant_stub()`.
+- Truthful markdown rendering:
+  implemented in `templates/variant.md.j2` and wired through
+  `src/render/markdown.rs`.
+- Honest provenance when GWAS is unavailable:
+  implemented in `src/render/provenance.rs::variant_section_sources()`.
+- JSON/doc contract update:
+  implemented in `docs/user-guide/variant.md`.
+- Live spec gate update:
+  implemented in `spec/03-variant.md::GWAS Supporting PMIDs`.
 
-- `spec/06-article.md` now proves the visible `--since` / `--until` help
-  aliases.
-- `spec/19-discover.md` now proves `._meta.next_commands` exists and root
-  `.next_commands` is absent.
-- `spec/13-study.md` now proves representative chart help descriptions.
-- `spec/04-trial.md` now proves the canonical numeric phase note and alias note.
+### Acceptance criteria check
 
-I did not find a final-design implementation item with no corresponding code or
-spec change.
+- `biomcp --json get variant rs7903146 gwas` no longer hard-fails on
+  GWAS decode/transient failures:
+  covered by source remap plus entity-layer degradation.
+- Requested-but-unavailable GWAS remains truthful:
+  `gwas` stays empty, `gwas_unavailable_reason` is set,
+  `supporting_pmids` stays `None`.
+- Successful GWAS loads preserve current behavior:
+  success path still populates `gwas` and `supporting_pmids`, and clears the
+  unavailable marker before loading.
+- Markdown renders an unavailable message rather than a false empty-state:
+  implemented in the GWAS template branch.
+- `_meta.section_sources` still reports GWAS when unavailable:
+  implemented in provenance.
+- PR spec gate is green:
+  verified by `make spec-pr`.
+
+### Documentation / contract audit
+
+- The JSON contract doc now distinguishes:
+  - `supporting_pmids: null` when not loaded or temporarily unavailable
+  - `gwas_unavailable_reason` when requested but unavailable
+  - `supporting_pmids: []` only for a successful load with no PMIDs
+- The executable spec now matches the intended contract by accepting either:
+  - array-valued `supporting_pmids`, or
+  - string-valued `gwas_unavailable_reason`
+
+I did not find a design item with no matching code or contract change.
 
 ## Test-Design Traceability
 
-Each proof-matrix entry has a matching test surface and the assertions now check
-the intended behavior:
+Each proof-matrix item in `.march/design-final.md` has matching proof:
 
-- `search article --help` visible aliases:
-  `cli::tests::article_date_help_advertises_shared_accepted_formats` plus the
-  executable assertions in `spec/06-article.md`.
-- `discover --json` root de-duplication:
-  `render::json::tests::to_discover_json_adds_discover_meta_aliases` plus the
-  structural `jq` assertions in `spec/19-discover.md`.
-- `chart --help` chart purposes:
-  `cli::tests::chart_help_lists_descriptions_for_all_chart_topics` plus the
-  representative assertions in `spec/13-study.md`.
-- `search trial --help` canonical phase note:
-  `cli::tests::trial_phase_help_explains_canonical_numeric_forms_and_aliases`
-  plus the executable assertions in `spec/04-trial.md`.
+- GWAS decode failure remaps to source unavailability:
+  `src/sources/gwas.rs::associations_by_rsid_remaps_decode_failures_to_source_unavailable`
+- Transient GWAS HTTP failure remaps to source unavailability:
+  `src/sources/gwas.rs::associations_by_rsid_remaps_transient_http_failures_to_source_unavailable`
+- GWAS-only variant request degrades instead of failing:
+  `src/entities/variant.rs::gwas_only_request_returns_variant_when_gwas_is_unavailable`
+- Markdown tells the truth for unavailable GWAS:
+  `src/render/markdown.rs::variant_markdown_renders_gwas_unavailable_message`
+- Provenance keeps GWAS visible when unavailable:
+  `src/render/provenance.rs::variant_provenance_includes_gwas_when_requested_section_is_unavailable`
+- Live GWAS contract stays green:
+  `spec/03-variant.md::GWAS Supporting PMIDs`
+- Rust regressions are not introduced:
+  `cargo test --quiet`
 
-The unit tests and direct `cargo run` help output agree with the staged
-implementation. I did not find a missing proof-matrix test or a weak assertion
-in the staged Rust/spec changes.
+I also checked the assertions themselves:
 
-## Issues Found During Critique
+- The source tests assert `BioMcpError::SourceUnavailable`, not just any error.
+- The entity test asserts the returned variant exists and carries the truthful
+  unavailable fields.
+- The markdown test asserts the unavailable message is present and the false
+  empty-state copy is absent.
+- The provenance test asserts the `gwas` section key remains present.
+- The spec heading asserts the user-visible contract rather than the exact
+  current implementation shape.
 
-1. The existing `.march/code-review-log.md` in the worktree was stale and
-   documented an unrelated earlier ticket, so this step did not yet have the
-   required review artifact for ticket 068.
+I did not find a missing proof-matrix test or a weak assertion that should
+block this review.
 
-No implementation defect was found in the staged Rust or spec changes after
-re-running the ticket's relevant help and JSON surfaces.
+## Critique Findings
+
+No additional implementation defects were found in the reviewed change set.
+
+The source remap is scoped correctly, the entity degradation is narrow enough
+to avoid swallowing internal bugs, the rendering and provenance changes preserve
+truthfulness, and the docs/spec updates match the new contract.
 
 ## Fix Plan
 
-- Replace the stale `.march/code-review-log.md` with a current review log for
-  ticket 068.
-- Re-run the repo gate after writing the artifact.
+No implementation fixes were needed beyond replacing the stale review artifact
+with this ticket-specific log.
 
 ## Repair
 
-Applied the following fix:
+Applied:
 
-- Replaced `.march/code-review-log.md` with this ticket-specific review log.
+- Replaced the stale `.march/code-review-log.md` with a review log for ticket
+  `071-bug-fix-harden-gwas-variant-section-for-live-decode-failures`.
 
-No Rust or spec changes were required beyond the already-staged implementation,
-because the re-run outputs matched the final design and proof matrix.
+No Rust, template, doc, or spec changes were required during review because the
+reviewed implementation already matched the final design and passed the gates.
 
 ## Post-Fix Collateral Scan
 
-Checked the touched review artifact and surrounding step state after replacing
-the file:
+After replacing the review artifact:
 
-- No dead code or unused imports were introduced.
-- No cleanup logic or resource handling changed.
-- No stale error messages or variable shadowing were introduced.
+- No dead code was introduced.
+- No unused imports or variables were introduced.
+- No resource cleanup paths changed.
+- No stale error messages were introduced.
+- No variable shadowing was introduced.
 
 ## Verification
 
-- `cargo test help_` passed.
-- `cargo test article_date_help_advertises_shared_accepted_formats` passed.
-- `cargo test trial_phase_help_explains_canonical_numeric_forms_and_aliases`
-  passed.
-- `cargo test chart_help_lists_descriptions_for_all_chart_topics` passed.
-- `cargo test to_discover_json_adds_discover_meta_aliases` passed.
-- `cargo run --bin biomcp -- search article --help` showed
-  `[aliases: --since]` and `[aliases: --until]`.
-- `cargo run --bin biomcp -- search trial --help` showed the canonical numeric
-  phase note and accepted alias note.
-- `cargo run --bin biomcp -- chart --help` showed one-line descriptions for all
-  chart subcommands.
-- `cargo run --bin biomcp -- --json discover Keytruda` emitted
-  `_meta.next_commands` and no root `next_commands`.
-
-`make check` still needed at the time this log was written and was run
-afterward as the final gate for the step.
+- `cargo test --quiet` passed.
+- `make spec-pr` passed: `218 passed, 6 skipped, 36 deselected`.
+- `make check` passed.
 
 ## Residual Concerns
 
-No residual implementation concerns were found. Verify should only confirm that
-`make check` stays green in this worktree.
+No residual concerns from this review.
 
 ## Out-of-Scope Observations
 
-No out-of-scope follow-up issue was needed from this review.
+None.
 
 ## Defect Register
 
 | # | Category | Lintable | Description |
 |---|----------|----------|-------------|
-| 1 | stale-doc | no | The existing `.march/code-review-log.md` was stale from an unrelated earlier ticket and could not serve as the required review artifact for ticket 068 |
+| 1 | None found | no | No additional defects found during code review beyond the implementation already present in the worktree |

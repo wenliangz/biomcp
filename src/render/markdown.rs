@@ -2195,6 +2195,7 @@ pub fn variant_markdown(
         cancer_frequencies => &variant.cancer_frequencies,
         cancer_frequency_source => &variant.cancer_frequency_source,
         gwas => &variant.gwas,
+        gwas_unavailable_reason => &variant.gwas_unavailable_reason,
         prediction => prediction,
         expression_interpretation => expr_i,
         splice_interpretation => splice_i,
@@ -5009,6 +5010,23 @@ mod tests {
         assert!(markdown.contains("Top disease (ClinVar): Melanoma (2 reports)"));
         assert!(markdown.contains("gnomAD AF:"));
         assert!(markdown.contains("(0.0100%)"));
+    }
+
+    #[test]
+    fn variant_markdown_renders_gwas_unavailable_message() {
+        let variant: Variant = serde_json::from_value(serde_json::json!({
+            "id": "rs7903146",
+            "gene": "TCF7L2",
+            "rsid": "rs7903146",
+            "gwas": [],
+            "gwas_unavailable_reason": "GWAS association data temporarily unavailable."
+        }))
+        .expect("variant should deserialize");
+
+        let markdown =
+            variant_markdown(&variant, &["gwas".to_string()]).expect("rendered markdown");
+        assert!(markdown.contains("GWAS association data temporarily unavailable."));
+        assert!(!markdown.contains("No GWAS associations found for this variant."));
     }
 
     #[test]

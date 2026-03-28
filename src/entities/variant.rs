@@ -82,6 +82,8 @@ pub struct Variant {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gwas: Vec<VariantGwasAssociation>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub gwas_unavailable_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub supporting_pmids: Option<Vec<String>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1839,6 +1841,8 @@ fn map_gwas_association(
 }
 
 async fn add_gwas_section(variant: &mut Variant, query_id: &str) -> Result<(), BioMcpError> {
+    variant.gwas.clear();
+    variant.gwas_unavailable_reason = None;
     variant.supporting_pmids = Some(Vec::new());
 
     let fallback_rsid = parse_variant_id(query_id)
@@ -1860,8 +1864,28 @@ async fn add_gwas_section(variant: &mut Variant, query_id: &str) -> Result<(), B
         return Ok(());
     };
 
-    let client = GwasClient::new()?;
-    let associations = client.associations_by_rsid(&rsid, 20).await?;
+    let client = match GwasClient::new() {
+        Ok(client) => client,
+        Err(err @ BioMcpError::SourceUnavailable { .. }) => {
+            warn!(rsid = %rsid, "GWAS association data unavailable: {err}");
+            variant.supporting_pmids = None;
+            variant.gwas_unavailable_reason =
+                Some("GWAS association data temporarily unavailable.".to_string());
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
+    let associations = match client.associations_by_rsid(&rsid, 20).await {
+        Ok(associations) => associations,
+        Err(err @ BioMcpError::SourceUnavailable { .. }) => {
+            warn!(rsid = %rsid, "GWAS association data unavailable: {err}");
+            variant.supporting_pmids = None;
+            variant.gwas_unavailable_reason =
+                Some("GWAS association data temporarily unavailable.".to_string());
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
     let mut rows: Vec<VariantGwasAssociation> = associations
         .iter()
         .filter_map(|assoc| map_gwas_association(assoc, Some(&rsid)))
@@ -1936,6 +1960,7 @@ fn gwas_only_variant_stub(rsid: &str) -> Variant {
         cancer_frequencies: Vec::new(),
         cancer_frequency_source: None,
         gwas: Vec::new(),
+        gwas_unavailable_reason: None,
         supporting_pmids: None,
         prediction: None,
     }
@@ -1989,6 +2014,7 @@ pub async fn get(id: &str, sections: &[String]) -> Result<Variant, BioMcpError> 
     }
     if !section_flags.include_gwas {
         variant.gwas.clear();
+        variant.gwas_unavailable_reason = None;
         variant.supporting_pmids = None;
     }
     if section_flags.include_prediction {
@@ -2010,6 +2036,41 @@ pub async fn get(id: &str, sections: &[String]) -> Result<Variant, BioMcpError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn lock_env() -> tokio::sync::MutexGuard<'static, ()> {
+        crate::test_support::env_lock().lock().await
+    }
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // Safety: tests serialize environment mutation with `lock_env()`.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.name, value),
+                    None => std::env::remove_var(self.name),
+                }
+            }
+        }
+    }
+
+    fn set_env_var(name: &'static str, value: Option<&str>) -> EnvVarGuard {
+        let previous = std::env::var(name).ok();
+        // Safety: tests serialize environment mutation with `lock_env()`.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        EnvVarGuard { name, previous }
+    }
 
     #[test]
     fn parse_variant_id_examples() {
@@ -2282,6 +2343,7 @@ mod tests {
         assert_eq!(variant.id, "rs7903146");
         assert_eq!(variant.rsid.as_deref(), Some("rs7903146"));
         assert!(variant.gwas.is_empty());
+        assert_eq!(variant.gwas_unavailable_reason, None);
     }
 
     #[test]
@@ -2317,6 +2379,7 @@ mod tests {
             cancer_frequencies: Vec::new(),
             cancer_frequency_source: None,
             gwas: Vec::new(),
+            gwas_unavailable_reason: None,
             supporting_pmids: None,
             prediction: None,
         };
@@ -2396,6 +2459,37 @@ mod tests {
             collect_supporting_pmids(&rows),
             vec!["12345".to_string(), "PMID-ABC".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn gwas_only_request_returns_variant_when_gwas_is_unavailable() {
+        let _env = lock_env().await;
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/singleNucleotidePolymorphisms/rs7903146/associations",
+            ))
+            .and(query_param("projection", "associationByStudy"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("{bad-json"),
+            )
+            .mount(&server)
+            .await;
+
+        let _base = set_env_var("BIOMCP_GWAS_BASE", Some(&server.uri()));
+        let variant = get("rs7903146", &["gwas".to_string()])
+            .await
+            .expect("GWAS-only request should degrade");
+
+        assert_eq!(variant.id, "rs7903146");
+        assert!(variant.gwas.is_empty());
+        assert_eq!(
+            variant.gwas_unavailable_reason.as_deref(),
+            Some("GWAS association data temporarily unavailable.")
+        );
+        assert_eq!(variant.supporting_pmids, None);
     }
 
     #[test]

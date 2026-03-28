@@ -958,6 +958,7 @@ pub fn from_myvariant_hit(hit: &MyVariantHit) -> Variant {
         cancer_frequencies: Vec::new(),
         cancer_frequency_source: None,
         gwas: Vec::new(),
+        gwas_unavailable_reason: None,
         supporting_pmids: None,
         prediction: None,
     }
