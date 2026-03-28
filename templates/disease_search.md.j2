@@ -4,6 +4,10 @@
 No diseases found matching '{{ query }}'.
 
 Try a broader search or check spelling.
+{% if discover_hint %}
+
+{{ discover_hint }}
+{% endif %}
 {% else -%}
 Found {{ count }} disease{% if count != 1 %}s{% endif %}
 
