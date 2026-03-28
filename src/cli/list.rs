@@ -318,12 +318,6 @@ fn list_drug() -> String {
 - `search drug --interactions <drug>` - unavailable from current public data sources
 - `search drug ... --limit <N> --offset <N>`
 
-## When to use this surface
-
-- Use the positional name lookup when you already know the drug or brand name.
-- Use `--indication`, `--target`, or `--mechanism` when the question is structured.
-- Start with `get drug <name>` after a name match, and switch to review literature when the structured card is sparse.
-
 ## Helpers
 
 - `drug trials <name>`
@@ -369,12 +363,6 @@ fn list_disease() -> String {
 - `search disease -q <query> --phenotype <HP:...>`
 - `search disease -q <query> --onset <period>`
 - `search disease ... --limit <N> --offset <N>`
-
-## When to use this surface
-
-- Use `get disease <name_or_id>` when you want the normalized disease card, genes, or phenotype-backed sections.
-- Use `get disease <name_or_id> phenotypes` for symptom questions.
-- Use `search article -d <disease>` when you need broader review literature or want to supplement sparse structured disease data.
 
 ## Helpers
 
@@ -488,11 +476,6 @@ fn list_batch() -> String {
 
 - `batch <entity> <id1,id2,...>` - parallel `get` operations for up to 10 IDs
 
-## When to use this surface
-
-- Use batch when you already have a short list of IDs and need the same sections for each one.
-- Prefer batch over manual repetition when comparing a handful of genes, drugs, trials, or diseases.
-
 ## Options
 
 - `--sections <s1,s2,...>` - request specific sections on each entity
@@ -521,11 +504,6 @@ fn list_enrich() -> String {
 ## Command
 
 - `enrich <GENE1,GENE2,...>` - gene-set enrichment using g:Profiler
-
-## When to use this surface
-
-- Use enrich when you already have a gene set and want shared pathways, GO terms, or functional categories.
-- Prefer enrich over repeated single-gene ontology lookups once you have 3 or more genes.
 
 ## Options
 
@@ -738,6 +716,7 @@ mod tests {
         let out = render(None).expect("list root should render");
         assert!(out.contains("## Quickstart"));
         assert!(out.contains("## When to Use What"));
+        assert_eq!(out.matches("## When to Use What").count(), 1);
         assert!(out.contains("search all --gene BRAF --disease melanoma"));
         assert!(out.contains("discover \"<free text>\""));
         assert!(out.contains("article citations <id>"));
@@ -787,12 +766,14 @@ mod tests {
         assert!(batch.contains("# batch"));
         assert!(batch.contains("batch <entity> <id1,id2,...>"));
         assert!(batch.contains("## When to use this surface"));
+        assert_eq!(batch.matches("## When to use this surface").count(), 1);
         assert!(batch.contains("Use batch when you already have a short list of IDs"));
 
         let enrich = render(Some("enrich")).expect("list enrich should render");
         assert!(enrich.contains("# enrich"));
         assert!(enrich.contains("enrich <GENE1,GENE2,...>"));
         assert!(enrich.contains("## When to use this surface"));
+        assert_eq!(enrich.matches("## When to use this surface").count(), 1);
         assert!(enrich.contains("Use enrich when you already have a gene set"));
     }
 
@@ -836,6 +817,7 @@ mod tests {
     fn list_drug_describes_omitted_region_behavior() {
         let out = list_drug();
         assert!(out.contains("## When to use this surface"));
+        assert_eq!(out.matches("## When to use this surface").count(), 1);
         assert!(out.contains(
             "Use the positional name lookup when you already know the drug or brand name."
         ));
@@ -857,6 +839,7 @@ mod tests {
     fn list_disease_mentions_disgenet_section() {
         let out = render(Some("disease")).expect("list disease should render");
         assert!(out.contains("## When to use this surface"));
+        assert_eq!(out.matches("## When to use this surface").count(), 1);
         assert!(
             out.contains(
                 "Use `get disease <name_or_id>` when you want the normalized disease card"

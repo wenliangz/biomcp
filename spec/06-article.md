@@ -369,14 +369,16 @@ echo "$out" | mustmatch like "publisher"
 Default article search uses relevance sort. The output header echoes the sort in effect so callers can verify the default.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search article -k melanoma --limit 3)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search article -k melanoma --limit 3)"
 echo "$out" | mustmatch like "sort=relevance"
 ```
 
 Passing `--sort date` opts into date-based ordering.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search article -k melanoma --sort date --limit 3)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search article -k melanoma --sort date --limit 3)"
 echo "$out" | mustmatch like "sort=date"
 ```
 

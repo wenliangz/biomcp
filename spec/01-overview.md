@@ -68,7 +68,7 @@ out="$(biomcp list gene)"
 echo "$out" | mustmatch like "## Search filters"
 echo "$out" | mustmatch like "## Helpers"
 echo "$out" | mustmatch like "## When to use this surface"
-echo "$out" | mustmatch like "Use `get gene <symbol>` for the default card"
+echo "$out" | mustmatch like 'Use `get gene <symbol>` for the default card'
 ```
 
 ## Article Routing Help

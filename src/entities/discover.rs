@@ -266,7 +266,7 @@ pub(crate) fn build_result(
 
     concepts.sort_by(|left, right| compare_concepts(left, right, query));
     let ambiguous = is_ambiguous(&concepts);
-    let intent = detect_intent(&normalized_query, &concepts);
+    let intent = detect_intent(query, &normalized_query, &concepts);
     let plain_language = select_plain_language(&concepts, medline_topics, intent);
     let next_commands = generate_commands(query, &concepts, ambiguous, intent);
 
@@ -755,7 +755,11 @@ fn heuristic_type(label: &str, query: &str) -> DiscoverType {
     }
 }
 
-fn detect_intent(normalized_query: &str, concepts: &[DiscoverConcept]) -> DiscoverIntent {
+fn detect_intent(
+    query: &str,
+    normalized_query: &str,
+    concepts: &[DiscoverConcept],
+) -> DiscoverIntent {
     if contains_any_phrase(
         normalized_query,
         &[
@@ -802,7 +806,7 @@ fn detect_intent(normalized_query: &str, concepts: &[DiscoverConcept]) -> Discov
             "medication",
             "medications",
         ],
-    ) && top_concept_of_type(concepts, DiscoverType::Disease).is_some()
+    ) && treatment_focus(query, concepts).is_some()
     {
         return DiscoverIntent::TreatmentSearch;
     }
@@ -824,9 +828,7 @@ fn detect_intent(normalized_query: &str, concepts: &[DiscoverConcept]) -> Discov
     ) {
         return DiscoverIntent::SymptomSearch;
     }
-    if top_concept_of_type(concepts, DiscoverType::Gene).is_some()
-        && top_concept_of_type(concepts, DiscoverType::Disease).is_some()
-    {
+    if gene_disease_focus(query, concepts).is_some() {
         return DiscoverIntent::GeneDiseaseOrientation;
     }
     if contains_any_phrase(
@@ -940,19 +942,21 @@ fn generate_commands(
             }
         }
         DiscoverIntent::TreatmentSearch => {
-            if let Some(disease) = top_concept_of_type(concepts, DiscoverType::Disease) {
+            if let Some(disease) = treatment_focus(query, concepts) {
                 commands.push(format!(
                     "biomcp search drug --indication {} --limit 5",
-                    quote_query_term(&disease.label)
+                    quote_query_term(&disease)
                 ));
                 commands.push(format!(
                     "biomcp search article -d {} --type review --limit 5",
-                    quote_query_term(&disease.label)
+                    quote_query_term(&disease)
                 ));
             }
         }
         DiscoverIntent::SymptomSearch => {
-            if let Some(disease) = top_concept_of_type(concepts, DiscoverType::Disease) {
+            if is_disease_symptom_request(query)
+                && let Some(disease) = top_concept_of_type(concepts, DiscoverType::Disease)
+            {
                 if let Some(disease_ref) = disease_command_ref(disease) {
                     commands.push(format!("biomcp get disease {disease_ref} phenotypes"));
                 }
@@ -977,16 +981,15 @@ fn generate_commands(
             return dedupe_strings(commands);
         }
         DiscoverIntent::GeneDiseaseOrientation => {
-            if let (Some(gene), Some(disease)) = (
-                top_concept_of_type(concepts, DiscoverType::Gene),
-                top_concept_of_type(concepts, DiscoverType::Disease),
-            ) {
+            if let Some((gene, disease)) = gene_disease_focus(query, concepts) {
                 commands.push(format!(
                     "biomcp search all --gene {} --disease \"{}\"",
-                    gene.label, disease.label
+                    gene, disease
                 ));
-                commands.push(format!("biomcp get gene {}", gene.label));
-                if let Some(disease_ref) = disease_command_ref(disease) {
+                commands.push(format!("biomcp get gene {}", gene));
+                if let Some(disease_ref) =
+                    disease_concept_for_label(concepts, &disease).and_then(disease_command_ref)
+                {
                     commands.push(format!("biomcp get disease {disease_ref}"));
                 }
                 return dedupe_strings(commands);
@@ -1067,9 +1070,15 @@ fn generate_commands(
 }
 
 fn contains_any_phrase(normalized_query: &str, phrases: &[&str]) -> bool {
-    phrases
-        .iter()
-        .any(|phrase| normalized_query.contains(&normalize_query(phrase)))
+    let query_tokens = normalized_query.split_whitespace().collect::<Vec<_>>();
+    phrases.iter().any(|phrase| {
+        let phrase = normalize_query(phrase);
+        let phrase_tokens = phrase.split_whitespace().collect::<Vec<_>>();
+        !phrase_tokens.is_empty()
+            && query_tokens
+                .windows(phrase_tokens.len())
+                .any(|window| window == phrase_tokens.as_slice())
+    })
 }
 
 fn top_concept_of_type(
@@ -1077,6 +1086,105 @@ fn top_concept_of_type(
     kind: DiscoverType,
 ) -> Option<&DiscoverConcept> {
     concepts.iter().find(|concept| concept.primary_type == kind)
+}
+
+fn disease_concept_for_label<'a>(
+    concepts: &'a [DiscoverConcept],
+    label: &str,
+) -> Option<&'a DiscoverConcept> {
+    let normalized = normalize_query(label);
+    concepts.iter().find(|concept| {
+        concept.primary_type == DiscoverType::Disease
+            && normalize_query(&concept.label) == normalized
+    })
+}
+
+fn treatment_focus(query: &str, concepts: &[DiscoverConcept]) -> Option<String> {
+    if let Some(disease) = top_concept_of_type(concepts, DiscoverType::Disease) {
+        return Some(disease.label.clone());
+    }
+
+    strip_ascii_prefixes(
+        query,
+        &[
+            "what drugs treat ",
+            "what drug treats ",
+            "what treats ",
+            "drugs for ",
+            "drug for ",
+            "treatment for ",
+            "treatments for ",
+            "therapy for ",
+            "therapies for ",
+            "medication for ",
+            "medications for ",
+            "treat ",
+        ],
+    )
+    .map(ToString::to_string)
+}
+
+fn is_disease_symptom_request(query: &str) -> bool {
+    contains_any_phrase(
+        &normalize_query(query),
+        &[
+            "symptoms of",
+            "signs of",
+            "phenotypes of",
+            "clinical features of",
+        ],
+    )
+}
+
+fn gene_disease_focus(query: &str, concepts: &[DiscoverConcept]) -> Option<(String, String)> {
+    if matches!(
+        concepts.first().map(|concept| concept.primary_type),
+        Some(DiscoverType::Pathway)
+    ) || contains_any_phrase(
+        &normalize_query(query),
+        &["pathway", "signaling", "cascade", "process"],
+    ) {
+        return None;
+    }
+
+    if let (Some(gene), Some(disease)) = (
+        top_concept_of_type(concepts, DiscoverType::Gene),
+        top_concept_of_type(concepts, DiscoverType::Disease),
+    ) {
+        return Some((gene.label.clone(), disease.label.clone()));
+    }
+
+    let trimmed = query.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let gene = parts.next()?.trim();
+    let disease = parts.next()?.trim();
+    if disease.is_empty() {
+        return None;
+    }
+    if looks_like_gene_symbol_token(gene) {
+        Some((gene.to_string(), disease.to_string()))
+    } else {
+        None
+    }
+}
+
+fn looks_like_gene_symbol_token(token: &str) -> bool {
+    let token = token.trim();
+    !token.is_empty()
+        && token.len() <= 10
+        && token == token.to_ascii_uppercase()
+        && crate::sources::is_valid_gene_symbol(token)
+}
+
+fn strip_ascii_prefixes<'a>(query: &'a str, prefixes: &[&str]) -> Option<&'a str> {
+    let trimmed = query.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    prefixes.iter().find_map(|prefix| {
+        lowered
+            .starts_with(prefix)
+            .then_some(trimmed[prefix.len()..].trim())
+            .filter(|rest| !rest.is_empty())
+    })
 }
 
 fn disease_command_ref(concept: &DiscoverConcept) -> Option<String> {

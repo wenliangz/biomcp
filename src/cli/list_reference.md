@@ -31,22 +31,6 @@ New to BioMCP? Try:
 | The same sections for several entities | `batch <entity> <id1,id2,...> --sections <s1,s2,...>` |
 | Enriched pathways or functions for a gene set | `enrich <GENE1,GENE2,...>` |
 
-## When to Use What
-
-| You want to know... | Start with |
-|---|---|
-| What drugs treat a disease | `search drug --indication "<disease>"` |
-| Symptoms or phenotypes of a disease | `get disease <name_or_id> phenotypes` |
-| What a gene does | `get gene <symbol>` |
-| Drug safety or adverse events | `drug adverse-events <name>` |
-| Review literature for synthesis | `search article -k "<query>" --type review` |
-| How to follow one article into the next papers | `article citations <id>` |
-| How a gene and disease connect | `search all --gene BRAF --disease melanoma` |
-| I know the entities but not the next pivot | `search all --gene BRAF --disease melanoma` |
-| I only have free text | `discover "<free text>"` |
-| Run the same get across multiple IDs | `batch <entity> <id1,id2,...>` |
-| Interpret a gene set | `enrich <GENE1,GENE2,...>` |
-
 ## Entities
 
 - gene

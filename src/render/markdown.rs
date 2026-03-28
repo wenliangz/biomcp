@@ -1060,7 +1060,7 @@ fn related_command_description(command: &str) -> Option<&'static str> {
     } else if command.starts_with("biomcp article recommendations ") {
         Some("find related papers to broaden coverage")
     } else if command.contains(" --type review --limit 5") {
-        Some("supplement sparse structured data with review literature")
+        Some("supplement sparse structured data with review literature for indication context")
     } else if command.starts_with("biomcp get gene ") && command.ends_with(" protein") {
         Some("deepen into protein function and localization")
     } else if command.starts_with("biomcp get gene ") && command.ends_with(" hpa") {

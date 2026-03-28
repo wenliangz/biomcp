@@ -5958,10 +5958,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             search_json(results, pagination)
                         } else {
                             let footer = pagination_footer_offset(&pagination);
-                            Ok(crate::render::markdown::drug_search_markdown_with_footer(
+                            Ok(crate::render::markdown::drug_search_markdown_with_region(
                                 &query_summary,
+                                region,
                                 &results,
                                 pagination.total,
+                                &[],
+                                None,
                                 &footer,
                             )?)
                         }
@@ -5987,10 +5990,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                     search_json(results, pagination)
                                 } else {
                                     let footer = pagination_footer_offset(&pagination);
-                                    Ok(crate::render::markdown::drug_search_markdown_with_footer(
+                                    Ok(crate::render::markdown::drug_search_markdown_with_region(
                                         &query_summary,
+                                        region,
                                         &results,
                                         pagination.total,
+                                        &[],
+                                        None,
                                         &footer,
                                     )?)
                                 }

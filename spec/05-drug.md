@@ -69,7 +69,7 @@ out="$(biomcp search drug --indication 'Marfan syndrome' --region us --limit 3)"
 echo "$out" | mustmatch like "U.S. regulatory data"
 echo "$out" | mustmatch like "This absence is informative"
 echo "$out" | mustmatch like 'biomcp search article -k "Marfan syndrome treatment" --type review --limit 5'
-echo "$out" | mustmatch not like "No drugs found"
+echo "$out" | mustmatch not like $'No drugs found\n\nShowing 0 of 0 results.'
 ```
 
 ## Getting Drug Details
@@ -225,7 +225,8 @@ name. The OpenFDA rescue path should prefer the exact Keytruda label over the
 newer KEYTRUDA QLEX combo label and respect the requested limit/total text.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search drug Keytruda --region us --limit 1)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search drug Keytruda --region us --limit 1)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
 echo "$out" | mustmatch like "Found 1 drug"
 echo "$out" | mustmatch like "|Name|Mechanism|Target|"
