@@ -712,6 +712,10 @@ mod tests {
         .expect("discover json");
 
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert!(
+            value.get("next_commands").is_none(),
+            "discover JSON should expose next_commands only in _meta"
+        );
         assert_eq!(
             value["_meta"]["next_commands"][0],
             "biomcp get drug pembrolizumab"

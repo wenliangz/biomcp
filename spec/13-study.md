@@ -14,6 +14,7 @@ This spec validates the local cBioPortal study command family. Assertions stay a
 | Expression comparison | `study compare --type expression` | Confirms per-group expression summary tables |
 | Mutation rate comparison | `study compare --type mutations` | Confirms per-group mutation-rate summary tables |
 | Co-occurrence | `study co-occurrence` | Confirms pairwise table schema |
+| Chart help | `chart --help` | Confirms chart topics are self-describing in CLI help |
 | Multi-omics filter | `study filter` | Confirms cross-table intersection output and validation |
 | Missing data handling | missing expression or survival inputs | Confirms actionable source-unavailable messages |
 | Unknown study handling | invalid `--study` | Confirms actionable not-found message |
@@ -151,6 +152,19 @@ echo "$out" | mustmatch like "# Study Co-occurrence: msk_impact_2017"
 echo "$out" | mustmatch like "Genes: TP53, KRAS"
 echo "$out" | mustmatch like "Sample universe: clinical sample file"
 echo "$out" | mustmatch like "| Gene A | Gene B | Both | A only | B only | Neither | Log Odds Ratio | p-value |"
+```
+
+## Chart Help
+
+The chart documentation entrypoint should summarize each chart topic directly in
+CLI help so operators can discover the right surface before opening the full
+markdown page.
+
+```bash
+out="$(biomcp chart --help)"
+echo "$out" | mustmatch like "bar          Categorical counts as vertical bars"
+echo "$out" | mustmatch like "stacked-bar  Mutation-grouped sample counts split by outcome"
+echo "$out" | mustmatch like "survival     Kaplan-Meier survival curves"
 ```
 
 ## Multi-Omics Filter

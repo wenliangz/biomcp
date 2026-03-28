@@ -16,6 +16,7 @@ pub(crate) struct DiscoverResult {
     pub concepts: Vec<DiscoverConcept>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plain_language: Option<PlainLanguageTopic>,
+    #[serde(skip)]
     pub next_commands: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,

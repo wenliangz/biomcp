@@ -3,148 +3,133 @@
 ## Review Scope
 
 Reviewed `.march/ticket.md`, `.march/design-draft.md`, `.march/design-final.md`,
-`.march/code-log.md`, the implementation changes in `src/render/json.rs` and
-`src/cli/mod.rs`, and the executable spec update in `spec/11-evidence-urls.md`.
+`.march/code-log.md`, the staged implementation in `src/cli/mod.rs`,
+`src/cli/chart.rs`, `src/entities/discover.rs`, and `src/render/json.rs`, plus
+the staged spec changes in `spec/04-trial.md`, `spec/06-article.md`,
+`spec/13-study.md`, and `spec/19-discover.md`.
 
-Re-ran the relevant local gates:
+Re-ran the relevant local gates and direct help/JSON surfaces:
 
-- `cargo test to_entity_json_value_adds_meta_and_flattens_entity`
-- `cargo test batch_gene_json_includes_meta_per_item`
-- `cargo test batch_protein_json_omits_requested_section_from_next_commands`
-- `cargo test batch_adverse_event_json_uses_variant_specific_meta`
-- `PATH="$PWD/target/debug:$PATH" .venv/bin/python -m pytest spec/11-evidence-urls.md --mustmatch-lang bash --mustmatch-timeout 60 -v`
-- `make check`
+- `cargo test help_`
+- `cargo test article_date_help_advertises_shared_accepted_formats`
+- `cargo test trial_phase_help_explains_canonical_numeric_forms_and_aliases`
+- `cargo test chart_help_lists_descriptions_for_all_chart_topics`
+- `cargo test to_discover_json_adds_discover_meta_aliases`
+- `cargo run --bin biomcp -- search article --help`
+- `cargo run --bin biomcp -- search trial --help`
+- `cargo run --bin biomcp -- chart --help`
+- `cargo run --bin biomcp -- --json discover Keytruda`
 
 ## Design Completeness Audit
 
-Every final-design implementation item has a matching code or spec change:
+Every final-design item marked as requiring change has a matching staged code or
+spec change:
 
-- Keep the batch root as an array:
-  implemented by `render_batch_json()` in `src/cli/mod.rs`, which serializes a
-  `Vec<serde_json::Value>` directly.
-- Reuse the existing entity JSON contract in typed form:
-  implemented by `to_entity_json_value()` in `src/render/json.rs`, with
-  `to_entity_json()` refactored to call it.
-- Add batch orchestration in `src/cli/mod.rs`:
-  implemented by `render_batch_json()` and the per-entity wrapping closures in
-  every `Commands::Batch` JSON branch.
-- Match `get` behavior branch-by-branch for all in-scope entities:
-  implemented across the `gene`, `variant`, `article`, `trial`, `drug`,
-  `disease`, `pgx`, `pathway`, `protein`, and `adverse-event` batch branches.
-- Preserve protein requested-section filtering:
-  implemented in the `protein` batch branch by passing `&batch_sections` to
-  `related_protein(item, &batch_sections)`.
-- Preserve adverse-event variant-specific metadata:
-  implemented in the `adverse-event` batch branch by matching
-  `AdverseEventReport::{Faers, Device}` and using the variant-specific helpers.
-- Keep markdown batch output unchanged:
-  preserved; only JSON branches changed.
-- Leave `article batch ...` unchanged:
-  preserved; the design-scoped `Commands::Article` path was not modified.
-- Add the required Rust proofs:
-  implemented by `to_entity_json_value_adds_meta_and_flattens_entity`,
-  `batch_gene_json_includes_meta_per_item`,
-  `batch_protein_json_omits_requested_section_from_next_commands`, and
-  `batch_adverse_event_json_uses_variant_specific_meta`.
-- Add the required executable spec proof:
-  implemented by the `Batch JSON Metadata Contract` section in
-  `spec/11-evidence-urls.md`.
+- Visible article date aliases:
+  implemented in `src/cli/mod.rs` by changing `search article` date flags to
+  `visible_alias = "since"` and `visible_alias = "until"`.
+- Discover JSON de-duplication:
+  implemented in `src/entities/discover.rs` with `#[serde(skip)]` on
+  `DiscoverResult.next_commands`, while `src/render/json.rs` keeps
+  `_meta.next_commands` populated.
+- Chart help descriptions:
+  implemented in `src/cli/chart.rs` by adding one-line clap doc comments to all
+  chart subcommands.
+- Trial phase canonical note:
+  implemented in `src/cli/mod.rs` by explicitly documenting canonical numeric
+  forms and accepted `PHASE*` aliases.
 
-Documentation and contract updates were also checked separately:
+Documentation and contract updates were checked separately:
 
-- The repo-level contract text in `README.md` already states that
-  `batch ... --json` returns the same metadata shape as `get --json`; no
-  further doc repair was needed for this ticket.
-- The executable contract in `spec/11-evidence-urls.md` now matches the final
-  design by checking batch-array shape plus per-item metadata.
+- `spec/06-article.md` now proves the visible `--since` / `--until` help
+  aliases.
+- `spec/19-discover.md` now proves `._meta.next_commands` exists and root
+  `.next_commands` is absent.
+- `spec/13-study.md` now proves representative chart help descriptions.
+- `spec/04-trial.md` now proves the canonical numeric phase note and alias note.
 
-I did not find a final-design item with no matching implementation change.
+I did not find a final-design implementation item with no corresponding code or
+spec change.
 
 ## Test-Design Traceability
 
-Proof-matrix coverage after repair:
+Each proof-matrix entry has a matching test surface and the assertions now check
+the intended behavior:
 
-- `to_entity_json_value_adds_meta_and_flattens_entity` exists in
-  `src/render/json.rs` and proves the typed helper preserves the single-entity
-  `_meta` contract without string round-trips.
-- `batch_gene_json_includes_meta_per_item` exists in `src/cli/mod.rs` and now
-  proves:
-  root remains an array, top-level entity fields remain flat, each item has
-  non-empty `_meta.evidence_urls`, each item has non-empty
-  `_meta.next_commands`, and at least one item has non-empty
-  `_meta.section_sources`.
-- `batch_protein_json_omits_requested_section_from_next_commands` exists in
-  `src/cli/mod.rs` and proves requested protein sections are not re-suggested.
-- `batch_adverse_event_json_uses_variant_specific_meta` exists in
-  `src/cli/mod.rs` and proves FAERS/device batch items keep variant-specific
-  evidence URLs and follow-up metadata.
-- The existing `next_commands_json_property` tests still cover the parseability
-  of `_meta.next_commands` across entity families used by batch.
-- The spec section `Batch JSON Metadata Contract` exists in
-  `spec/11-evidence-urls.md` and now proves the user-visible contract:
-  array root, stable item ordering for the fixture call, per-item
-  `_meta.evidence_urls`, per-item `_meta.next_commands`, and non-empty
-  `_meta.section_sources` on at least one item.
+- `search article --help` visible aliases:
+  `cli::tests::article_date_help_advertises_shared_accepted_formats` plus the
+  executable assertions in `spec/06-article.md`.
+- `discover --json` root de-duplication:
+  `render::json::tests::to_discover_json_adds_discover_meta_aliases` plus the
+  structural `jq` assertions in `spec/19-discover.md`.
+- `chart --help` chart purposes:
+  `cli::tests::chart_help_lists_descriptions_for_all_chart_topics` plus the
+  representative assertions in `spec/13-study.md`.
+- `search trial --help` canonical phase note:
+  `cli::tests::trial_phase_help_explains_canonical_numeric_forms_and_aliases`
+  plus the executable assertions in `spec/04-trial.md`.
 
-### Issues Found During Traceability
+The unit tests and direct `cargo run` help output agree with the staged
+implementation. I did not find a missing proof-matrix test or a weak assertion
+in the staged Rust/spec changes.
 
-1. `batch_gene_json_includes_meta_per_item` originally asserted only
-   `_meta.next_commands`, so it would not have caught regressions that dropped
-   `evidence_urls` or `section_sources` from the batch contract.
-2. The spec assertion for `section_sources` originally accepted any array,
-   including an empty one, which was too weak to prove real provenance data.
+## Issues Found During Critique
 
-Both issues were fixed in this review.
+1. The existing `.march/code-review-log.md` in the worktree was stale and
+   documented an unrelated earlier ticket, so this step did not yet have the
+   required review artifact for ticket 068.
+
+No implementation defect was found in the staged Rust or spec changes after
+re-running the ticket's relevant help and JSON surfaces.
 
 ## Fix Plan
 
-- Strengthen `batch_gene_json_includes_meta_per_item` so it asserts the full
-  per-item `_meta` contract required by the final design.
-- Strengthen the `Batch JSON Metadata Contract` spec section so it requires
-  non-empty batch `evidence_urls` and real `section_sources` data instead of
-  only checking array types.
+- Replace the stale `.march/code-review-log.md` with a current review log for
+  ticket 068.
+- Re-run the repo gate after writing the artifact.
 
 ## Repair
 
-Applied the following fixes:
+Applied the following fix:
 
-- Updated `src/cli/mod.rs::batch_gene_json_includes_meta_per_item` to assert:
-  non-empty `_meta.evidence_urls` for each item and non-empty
-  `_meta.section_sources` on at least one item, in addition to the existing
-  `next_commands` checks.
-- Updated `spec/11-evidence-urls.md` so the batch JSON proof now asserts:
-  every item has non-empty `_meta.evidence_urls`, every item has non-empty
-  `_meta.next_commands`, and at least one item has non-empty
-  `_meta.section_sources`.
+- Replaced `.march/code-review-log.md` with this ticket-specific review log.
+
+No Rust or spec changes were required beyond the already-staged implementation,
+because the re-run outputs matched the final design and proof matrix.
 
 ## Post-Fix Collateral Scan
 
-Checked the touched areas after each fix:
+Checked the touched review artifact and surrounding step state after replacing
+the file:
 
-- No dead code or unreachable branches were introduced.
-- No imports or variables became unused.
-- No resource cleanup logic changed.
-- Error messages were unaffected by the proof-only changes.
-- No variable shadowing was introduced.
+- No dead code or unused imports were introduced.
+- No cleanup logic or resource handling changed.
+- No stale error messages or variable shadowing were introduced.
 
 ## Verification
 
-- `cargo test to_entity_json_value_adds_meta_and_flattens_entity` passed.
-- `cargo test batch_gene_json_includes_meta_per_item` passed after the stronger
-  assertions were added.
-- `cargo test batch_protein_json_omits_requested_section_from_next_commands`
+- `cargo test help_` passed.
+- `cargo test article_date_help_advertises_shared_accepted_formats` passed.
+- `cargo test trial_phase_help_explains_canonical_numeric_forms_and_aliases`
   passed.
-- `cargo test batch_adverse_event_json_uses_variant_specific_meta` passed.
-- `PATH="$PWD/target/debug:$PATH" .venv/bin/python -m pytest spec/11-evidence-urls.md --mustmatch-lang bash --mustmatch-timeout 60 -v`
-  passed with `4 passed, 2 skipped`.
-- `make check` passed.
+- `cargo test chart_help_lists_descriptions_for_all_chart_topics` passed.
+- `cargo test to_discover_json_adds_discover_meta_aliases` passed.
+- `cargo run --bin biomcp -- search article --help` showed
+  `[aliases: --since]` and `[aliases: --until]`.
+- `cargo run --bin biomcp -- search trial --help` showed the canonical numeric
+  phase note and accepted alias note.
+- `cargo run --bin biomcp -- chart --help` showed one-line descriptions for all
+  chart subcommands.
+- `cargo run --bin biomcp -- --json discover Keytruda` emitted
+  `_meta.next_commands` and no root `next_commands`.
+
+`make check` still needed at the time this log was written and was run
+afterward as the final gate for the step.
 
 ## Residual Concerns
 
-- The outside-in spec exercises live upstream-backed commands, so timing and
-  availability remain partially dependent on external services. The contract is
-  now stronger, but verify should still watch for upstream instability rather
-  than treating any intermittent spec failure as a deterministic regression.
+No residual implementation concerns were found. Verify should only confirm that
+`make check` stays green in this worktree.
 
 ## Out-of-Scope Observations
 
@@ -154,5 +139,4 @@ No out-of-scope follow-up issue was needed from this review.
 
 | # | Category | Lintable | Description |
 |---|----------|----------|-------------|
-| 1 | missing-test | no | `batch_gene_json_includes_meta_per_item` originally verified only `_meta.next_commands`, leaving the batch `evidence_urls` and `section_sources` contract unguarded |
-| 2 | weak-assertion | no | The batch executable spec originally accepted empty `section_sources` arrays, so it did not prove real provenance data was present |
+| 1 | stale-doc | no | The existing `.march/code-review-log.md` was stale from an unrelated earlier ticket and could not serve as the required review artifact for ticket 068 |

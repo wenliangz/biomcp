@@ -755,10 +755,10 @@ See also: biomcp list article")]
         positional_query: Option<String>,
 
         /// Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)
-        #[arg(long = "date-from", alias = "since")]
+        #[arg(long = "date-from", visible_alias = "since")]
         date_from: Option<String>,
         /// Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)
-        #[arg(long = "date-to", alias = "until")]
+        #[arg(long = "date-to", visible_alias = "until")]
         date_to: Option<String>,
 
         // `long = "type"` is used instead of deriving from the field name because
@@ -837,7 +837,8 @@ See also: biomcp list trial")]
         #[arg(long, num_args = 1..)]
         facility: Vec<String>,
 
-        /// Filter by phase [values: NA, 1, 1/2, 2, 3, 4, EARLY_PHASE1, PHASE1, PHASE2, PHASE3, PHASE4].
+        /// Filter by phase. Canonical CLI forms: NA, 1, 1/2, 2, 3, 4.
+        /// Accepted aliases: EARLY_PHASE1, PHASE1, PHASE2, PHASE3, PHASE4.
         ///
         /// `1/2` matches the ClinicalTrials.gov combined Phase 1/Phase 2 label
         /// (studies tagged as both phases), not Phase 1 OR Phase 2.
@@ -7294,6 +7295,18 @@ mod tests {
         String::from_utf8(help).expect("help should be utf-8")
     }
 
+    fn render_chart_long_help() -> String {
+        let mut command = Cli::command();
+        let chart = command
+            .find_subcommand_mut("chart")
+            .expect("chart subcommand should exist");
+        let mut help = Vec::new();
+        chart
+            .write_long_help(&mut help)
+            .expect("chart help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
     #[test]
     fn trial_facility_help_names_text_search_and_geo_verify_modes() {
         let help = render_trial_search_long_help();
@@ -7326,6 +7339,34 @@ mod tests {
 
         assert!(help.contains("Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)"));
         assert!(help.contains("Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)"));
+        assert!(help.contains("[aliases: --since]"));
+        assert!(help.contains("[aliases: --until]"));
+    }
+
+    #[test]
+    fn trial_phase_help_explains_canonical_numeric_forms_and_aliases() {
+        let help = render_trial_search_long_help();
+
+        assert!(help.contains("Canonical CLI forms: NA, 1, 1/2, 2, 3, 4."));
+        assert!(help.contains("Accepted aliases: EARLY_PHASE1, PHASE1, PHASE2, PHASE3, PHASE4."));
+    }
+
+    #[test]
+    fn chart_help_lists_descriptions_for_all_chart_topics() {
+        let help = render_chart_long_help();
+
+        assert!(help.contains("bar          Categorical counts as vertical bars"));
+        assert!(help.contains("stacked-bar  Mutation-grouped sample counts split by outcome"));
+        assert!(help.contains("pie          Proportional distribution of categories"));
+        assert!(help.contains("waterfall    Ranked per-sample mutation burden"));
+        assert!(help.contains("heatmap      Pairwise co-occurrence matrix"));
+        assert!(help.contains("histogram    Binned distribution of a continuous value"));
+        assert!(help.contains("density      Smoothed distribution estimate"));
+        assert!(help.contains("box          Median, IQR, and whiskers for group comparison"));
+        assert!(help.contains("violin       Full distribution shape for group comparison"));
+        assert!(help.contains("ridgeline    Stacked density comparison across groups"));
+        assert!(help.contains("scatter      Paired expression values for two genes"));
+        assert!(help.contains("survival     Kaplan-Meier survival curves"));
     }
 
     #[test]
