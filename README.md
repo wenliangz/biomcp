@@ -86,7 +86,7 @@ Remote clients connect to `http://127.0.0.1:8080/mcp`. Probe routes are
 Runnable demo:
 
 ```bash
-uv run --script demo/streamable_http_client.py
+uv run --script examples/streamable-http/streamable_http_client.py
 ```
 
 See [Remote HTTP Server](https://biomcp.org/getting-started/remote-http/) for

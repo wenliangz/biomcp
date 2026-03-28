@@ -67,12 +67,12 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     docs_index = _read("docs/index.md")
     mkdocs = _read("mkdocs.yml")
     remote_http = _read("docs/getting-started/remote-http.md")
-    demo_readme = _read("demo/README.md")
+    demo_readme = _read("examples/streamable-http/README.md")
 
     assert "### Remote HTTP server" in readme
     assert "biomcp serve-http --host 127.0.0.1 --port 8080" in readme
     assert "http://127.0.0.1:8080/mcp" in readme
-    assert "demo/streamable_http_client.py" in readme
+    assert "examples/streamable-http/streamable_http_client.py" in readme
     assert "https://biomcp.org/getting-started/remote-http/" in readme
     assert readme.index("### Remote HTTP server") < readme.index(
         "## Multi-worker deployment"
@@ -83,7 +83,7 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     assert "http://127.0.0.1:8080/mcp" in docs_index
     assert "`/health`, `/readyz`, and `/`" in docs_index
     assert "getting-started/remote-http.md" in docs_index
-    assert "demo/streamable_http_client.py" in docs_index
+    assert "examples/streamable-http/streamable_http_client.py" in docs_index
 
     assert "Remote HTTP Server: getting-started/remote-http.md" in mkdocs
 
@@ -96,14 +96,14 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     assert "`/readyz`" in remote_http
     assert "streamable_http_client" in remote_http
     assert "terminate_on_close=False" in remote_http
-    assert "demo/streamable_http_client.py" in remote_http
+    assert "examples/streamable-http/streamable_http_client.py" in remote_http
     assert "three-step BRAF V600E melanoma" in remote_http
     assert "workflow over the remote MCP `biomcp` tool" in remote_http
     assert "prints `Command: ...` before each BioMCP step" in remote_http
     assert "biomcp search all --gene BRAF --disease melanoma --counts-only" in remote_http
     assert 'biomcp get variant "BRAF V600E" clinvar' in remote_http
     assert 'biomcp search trial -c melanoma --mutation "BRAF V600E" --limit 5' in remote_http
-    assert "demo/README.md" in remote_http
+    assert "examples/streamable-http/README.md" in remote_http
     assert "--scenario braf-melanoma" not in remote_http
     assert "Available tools:" not in remote_http
 
@@ -112,7 +112,7 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
     assert "how to start the server" in demo_readme.lower()
     assert "how to run the client" in demo_readme.lower()
     assert "what output to expect" in demo_readme.lower()
-    assert "uv run --quiet --script demo/streamable_http_client.py" in demo_readme
+    assert "uv run --quiet --script examples/streamable-http/streamable_http_client.py" in demo_readme
     assert "./target/release/biomcp serve-http --host 127.0.0.1 --port 8080" in demo_readme
     assert "http://127.0.0.1:8080/mcp" in demo_readme
     assert "Command: biomcp search all --gene BRAF --disease melanoma --counts-only" in demo_readme
@@ -127,18 +127,18 @@ def test_remote_http_docs_are_promoted_for_newcomers() -> None:
 
 
 def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
-    demo_script = _read("demo/streamable_http_client.py")
+    demo_script = _read("examples/streamable-http/streamable_http_client.py")
 
     assert demo_script.startswith("#!/usr/bin/env -S uv run --script")
     assert '# requires-python = ">=3.11"' in demo_script
     assert '"mcp>=' in demo_script
     assert "biomcp serve-http --host 127.0.0.1 --port 8080" in demo_script
-    assert "uv run --script demo/streamable_http_client.py" in demo_script
+    assert "uv run --script examples/streamable-http/streamable_http_client.py" in demo_script
     assert 'DEFAULT_BASE_URL = "http://127.0.0.1:8080"' in demo_script
     assert 'mcp_url = f"{base_url.rstrip(\'/\')}/mcp"' in demo_script
     assert "def resolve_base_url(argv: list[str]) -> str:" in demo_script
     assert "resolve_base_url(sys.argv)" in demo_script
-    assert "Usage: demo/streamable_http_client.py [base_url]" in demo_script
+    assert "Usage: examples/streamable-http/streamable_http_client.py [base_url]" in demo_script
     assert "terminate_on_close=False" in demo_script
     assert '"biomcp"' in demo_script
     assert 'shell' not in demo_script
@@ -154,7 +154,7 @@ def test_streamable_http_demo_script_is_runnable_repo_artifact() -> None:
 
 
 def test_release_overview_describes_streamable_http_workflow_demo() -> None:
-    overview = _read("design/technical/overview.md")
+    overview = _read("architecture/technical/overview.md")
 
     assert "standalone Streamable HTTP demo client" in overview
     assert "three-step" in overview
@@ -207,7 +207,7 @@ def test_changelog_audit_backfills_rust_release_gaps() -> None:
 
 
 def test_release_overview_uses_manifest_reference_for_current_version_and_release_files() -> None:
-    overview = _read("design/technical/overview.md")
+    overview = _read("architecture/technical/overview.md")
 
     assert "**Current version:** see `Cargo.toml`" in overview
     assert "`scripts/check-version-sync.sh` keeps" in overview
@@ -230,7 +230,7 @@ def test_release_overview_uses_manifest_reference_for_current_version_and_releas
 
 
 def test_release_overview_post_tag_public_proof_requires_all_markers() -> None:
-    overview = _read("design/technical/overview.md")
+    overview = _read("architecture/technical/overview.md")
     post_tag_block = _markdown_section_block(overview, "### Post-tag public proof")
 
     assert 'bioasq_page="$(mktemp)"' in post_tag_block

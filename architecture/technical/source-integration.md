@@ -96,7 +96,7 @@ BioMCP prefers entity-section integration over ad hoc command sprawl.
   `src/cli/mod.rs`, `src/cli/list.rs`, and
   `docs/user-guide/cli-reference.md` when the public CLI surface changes.
 - The progressive-disclosure behavior described in
-  `design/functional/overview.md` and `docs/concepts/progressive-disclosure.md`
+  `architecture/functional/overview.md` and `docs/concepts/progressive-disclosure.md`
   remains the governing UX rule.
 
 Entity integration shapes differ by entity, but common patterns include:
@@ -173,7 +173,7 @@ Downstream surfaces must stay in lockstep with the capability model:
   valid
 - renderer follow-on commands and section suggestions must derive from the
   resolved source capability list
-- docs that teach sections, including `design/functional/overview.md`,
+- docs that teach sections, including `architecture/functional/overview.md`,
   `docs/concepts/progressive-disclosure.md`, and user-guide pages, must either
   describe the source-aware constraint inline or show examples valid for the
   named source
@@ -292,7 +292,7 @@ Source additions must preserve BioMCP's runtime boundaries.
 - Keep slow or failure-prone upstream calls off the default `get` path unless
   the latency and failure profile are already acceptable there.
 - Respect the process-local rate limiting model described in
-  `design/technical/overview.md`.
+  `architecture/technical/overview.md`.
 - When many workers need one shared limiter budget, the operational answer is
   `biomcp serve-http`, not a per-ticket custom coordination layer.
 - Reuse source-specific rate limiting already present in `src/sources/` when a

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEMO_PATH = REPO_ROOT / "demo/streamable_http_client.py"
+DEMO_PATH = REPO_ROOT / "examples/streamable-http/streamable_http_client.py"
 
 
 def _load_demo_module():
@@ -23,7 +23,10 @@ def test_default_base_url_is_localhost() -> None:
     module = _load_demo_module()
 
     assert module.DEFAULT_BASE_URL == "http://127.0.0.1:8080"
-    assert module.resolve_base_url(["demo/streamable_http_client.py"]) == module.DEFAULT_BASE_URL
+    assert (
+        module.resolve_base_url(["examples/streamable-http/streamable_http_client.py"])
+        == module.DEFAULT_BASE_URL
+    )
 
 
 def test_resolve_base_url_accepts_explicit_url() -> None:
@@ -31,7 +34,7 @@ def test_resolve_base_url_accepts_explicit_url() -> None:
 
     assert (
         module.resolve_base_url(
-            ["demo/streamable_http_client.py", "http://demo.test:9000"]
+            ["examples/streamable-http/streamable_http_client.py", "http://demo.test:9000"]
         )
         == "http://demo.test:9000"
     )
@@ -40,10 +43,13 @@ def test_resolve_base_url_accepts_explicit_url() -> None:
 def test_resolve_base_url_rejects_extra_args() -> None:
     module = _load_demo_module()
 
-    with pytest.raises(SystemExit, match=re.escape("Usage: demo/streamable_http_client.py [base_url]")):
+    with pytest.raises(
+        SystemExit,
+        match=re.escape("Usage: examples/streamable-http/streamable_http_client.py [base_url]"),
+    ):
         module.resolve_base_url(
             [
-                "demo/streamable_http_client.py",
+                "examples/streamable-http/streamable_http_client.py",
                 "http://demo.test:9000",
                 "unexpected",
             ]

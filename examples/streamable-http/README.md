@@ -26,13 +26,13 @@ server version matches the worktree under test:
 Run the default workflow:
 
 ```bash
-uv run --quiet --script demo/streamable_http_client.py
+uv run --quiet --script examples/streamable-http/streamable_http_client.py
 ```
 
 Pass an explicit base URL when needed:
 
 ```bash
-uv run --quiet --script demo/streamable_http_client.py http://127.0.0.1:8080
+uv run --quiet --script examples/streamable-http/streamable_http_client.py http://127.0.0.1:8080
 ```
 
 ## What output to expect

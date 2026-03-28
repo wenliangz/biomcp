@@ -61,7 +61,7 @@ Remote clients connect to `http://127.0.0.1:8080/mcp`. Probe routes are
 `/health`, `/readyz`, and `/`. See
 [Remote HTTP Server](getting-started/remote-http.md) for setup details,
 `getting-started/remote-http.md` in the docs tree, and
-`demo/streamable_http_client.py` for a runnable client example.
+`examples/streamable-http/streamable_http_client.py` for a runnable client example.
 
 ### From source
 
