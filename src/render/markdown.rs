@@ -980,13 +980,16 @@ fn format_sections_block(entity: &str, id: &str, sections: Vec<String>) -> Strin
     if id_q.is_empty() {
         return String::new();
     }
-    let top3 = sections
-        .iter()
-        .take(3)
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("More:  biomcp get {entity} {id_q} {top3}\nAll:   biomcp get {entity} {id_q} all")
+    let mut out = String::from("More:");
+    for section in sections.iter().take(3) {
+        let _ = write!(
+            out,
+            "\n  biomcp get {entity} {id_q} {section}   - {}",
+            section_description(entity, section)
+        );
+    }
+    let _ = write!(out, "\nAll:\n  biomcp get {entity} {id_q} all");
+    out
 }
 
 fn format_related_block(commands: Vec<String>) -> String {
@@ -1000,9 +1003,73 @@ fn format_related_block(commands: Vec<String>) -> String {
     }
     let mut out = String::from("See also:");
     for cmd in &commands {
-        out.push_str(&format!("\n  {cmd}"));
+        if let Some(description) = related_command_description(cmd) {
+            out.push_str(&format!("\n  {cmd}   - {description}"));
+        } else {
+            out.push_str(&format!("\n  {cmd}"));
+        }
     }
     out
+}
+
+fn section_description(entity: &str, section: &str) -> &'static str {
+    match (entity, section) {
+        ("gene", "pathways") => "Reactome/KEGG pathway context",
+        ("gene", "ontology") => "GO-style functional enrichment",
+        ("gene", "diseases") => "disease associations",
+        ("gene", "protein") => "UniProt function and localization detail",
+        ("gene", "expression") => "GTEx tissue expression",
+        ("gene", "hpa") => "Human Protein Atlas tissue expression and localization",
+        ("gene", "go") => "QuickGO term annotations",
+        ("gene", "interactions") => "STRING interaction partners",
+        ("gene", "civic") => "CIViC clinical evidence",
+        ("gene", "druggability") => "DGIdb interactions and tractability",
+        ("gene", "clingen") => "ClinGen validity and dosage sensitivity",
+        ("gene", "constraint") => "gnomAD gene constraint metrics",
+        ("gene", "disgenet") => "DisGeNET scored disease links",
+        ("article", "annotations") => "PubTator normalized entity mentions",
+        ("article", "fulltext") => "cached full text when available",
+        ("article", "tldr") => "Semantic Scholar summary and influence",
+        ("disease", "genes") => "associated genes",
+        ("disease", "pathways") => "pathways from associated genes",
+        ("disease", "phenotypes") => "HPO phenotype annotations",
+        ("disease", "variants") => "disease-associated variants",
+        ("disease", "models") => "model-organism evidence",
+        ("disease", "prevalence") => "prevalence and epidemiology context",
+        ("disease", "civic") => "CIViC disease-context evidence",
+        ("disease", "disgenet") => "DisGeNET scored disease-gene links",
+        ("drug", "label") => "FDA label indications, warnings, and dosage",
+        ("drug", "regulatory") => "regulatory summary",
+        ("drug", "safety") => "safety context and warnings",
+        ("drug", "targets") => "ChEMBL and OpenTargets targets",
+        ("drug", "indications") => "OpenTargets indication evidence",
+        ("drug", "interactions") => "label interactions and public-data fallback",
+        ("drug", "civic") => "CIViC therapy evidence",
+        ("drug", "approvals") => "Drugs@FDA approval history",
+        _ => "additional detail",
+    }
+}
+
+fn related_command_description(command: &str) -> Option<&'static str> {
+    if command.starts_with("biomcp article entities ") {
+        Some("standardized entity extraction from this article")
+    } else if command.starts_with("biomcp article citations ") {
+        Some("follow papers that cite this article")
+    } else if command.starts_with("biomcp article references ") {
+        Some("inspect the evidence this article builds on")
+    } else if command.starts_with("biomcp article recommendations ") {
+        Some("find related papers to broaden coverage")
+    } else if command.contains(" --type review --limit 5") {
+        Some("supplement sparse structured data with review literature for indication context")
+    } else if command.starts_with("biomcp get gene ") && command.ends_with(" protein") {
+        Some("deepen into protein function and localization")
+    } else if command.starts_with("biomcp get gene ") && command.ends_with(" hpa") {
+        Some("deepen into tissue expression and localization")
+    } else if command.starts_with("biomcp drug adverse-events ") {
+        Some("inspect safety reports and adverse-event signal")
+    } else {
+        None
+    }
 }
 
 fn markdown_cell(value: &str) -> String {
@@ -1013,6 +1080,22 @@ fn markdown_cell(value: &str) -> String {
     } else {
         value
     }
+}
+
+fn dedupe_markdown_commands(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        if seen.insert(key) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
 }
 
 fn article_related_id(paper: &ArticleRelatedPaper) -> String {
@@ -1164,12 +1247,24 @@ pub(crate) fn related_gene(gene: &Gene) -> Vec<String> {
     if symbol.is_empty() {
         return Vec::new();
     }
-    vec![
-        format!("biomcp search variant -g {symbol}"),
-        format!("biomcp search article -g {symbol}"),
-        format!("biomcp search drug --target {symbol}"),
-        format!("biomcp gene trials {symbol}"),
-    ]
+    let mut out = Vec::new();
+    let summary = gene.summary.as_deref().unwrap_or("").to_ascii_lowercase();
+
+    if gene.protein.is_some() || summary.contains("mitochond") || summary.contains("membrane") {
+        out.push(format!("biomcp get gene {symbol} protein"));
+    }
+    if gene.hpa.is_some()
+        || summary.contains("mitochond")
+        || summary.contains("localiz")
+        || summary.contains("tissue")
+    {
+        out.push(format!("biomcp get gene {symbol} hpa"));
+    }
+    out.push(format!("biomcp search variant -g {symbol}"));
+    out.push(format!("biomcp search article -g {symbol}"));
+    out.push(format!("biomcp search drug --target {symbol}"));
+    out.push(format!("biomcp gene trials {symbol}"));
+    dedupe_markdown_commands(out)
 }
 
 pub(crate) fn related_variant(variant: &Variant) -> Vec<String> {
@@ -1196,6 +1291,19 @@ pub(crate) fn related_variant(variant: &Variant) -> Vec<String> {
 
 pub(crate) fn related_article(article: &Article) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    if let Some(pmid) = article
+        .pmid
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        if article.annotations.is_some() {
+            out.push(format!("biomcp article entities {pmid}"));
+        }
+        out.push(format!("biomcp article citations {pmid} --limit 3"));
+        out.push(format!("biomcp article references {pmid} --limit 3"));
+        out.push(format!("biomcp article recommendations {pmid} --limit 3"));
+    }
     if let Some(ann) = article.annotations.as_ref() {
         for g in &ann.genes {
             let sym = g.text.trim();
@@ -1218,17 +1326,6 @@ pub(crate) fn related_article(article: &Article) -> Vec<String> {
             }
             out.push(format!("biomcp get drug {name}"));
         }
-    }
-    if let Some(pmid) = article
-        .pmid
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        out.push(format!("biomcp article entities {pmid}"));
-        out.push(format!("biomcp article citations {pmid} --limit 3"));
-        out.push(format!("biomcp article references {pmid} --limit 3"));
-        out.push(format!("biomcp article recommendations {pmid} --limit 3"));
     }
     out
 }
@@ -1261,11 +1358,16 @@ pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
     if name.is_empty() {
         return Vec::new();
     }
-    vec![
-        format!("biomcp search trial -c {name}"),
-        format!("biomcp search article -d {name}"),
-        format!("biomcp search drug {name}"),
-    ]
+    let mut out = Vec::new();
+    if !disease.phenotypes.is_empty() && disease.phenotypes.len() <= 3 {
+        out.push(format!(
+            "biomcp search article -d {name} --type review --limit 5"
+        ));
+    }
+    out.push(format!("biomcp search trial -c {name}"));
+    out.push(format!("biomcp search article -d {name}"));
+    out.push(format!("biomcp search drug {name}"));
+    dedupe_markdown_commands(out)
 }
 
 pub(crate) fn related_pgx(pgx: &Pgx) -> Vec<String> {
@@ -1380,10 +1482,25 @@ pub(crate) fn related_drug(drug: &Drug) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut out = vec![
-        format!("biomcp drug trials {name}"),
-        format!("biomcp drug adverse-events {name}"),
-    ];
+    let mut out = Vec::new();
+
+    let sparse_regulatory = drug.label.is_none()
+        && drug
+            .approvals
+            .as_ref()
+            .map(|rows| rows.is_empty())
+            .unwrap_or(true)
+        && drug.ema_regulatory.is_none();
+    let sparse_indications = drug.indications.is_empty();
+
+    if sparse_regulatory || sparse_indications {
+        out.push(format!(
+            "biomcp search article --drug {name} --type review --limit 5"
+        ));
+    }
+
+    out.push(format!("biomcp drug trials {name}"));
+    out.push(format!("biomcp drug adverse-events {name}"));
 
     if let Some(target) = drug.targets.first().map(String::as_str) {
         let sym = target.trim();
@@ -1392,7 +1509,7 @@ pub(crate) fn related_drug(drug: &Drug) -> Vec<String> {
         }
     }
 
-    out
+    dedupe_markdown_commands(out)
 }
 
 pub(crate) fn related_adverse_event(event: &AdverseEvent) -> Vec<String> {
@@ -2946,6 +3063,10 @@ pub fn drug_search_markdown_with_region(
 ) -> Result<String, BioMcpError> {
     match region {
         DrugRegion::Us => {
+            let count = us_total.unwrap_or(us_results.len());
+            if count == 0 && is_structured_indication_query(query) {
+                return Ok(empty_drug_indication_search_message(query, region));
+            }
             drug_search_markdown_with_footer(query, us_results, us_total, pagination_footer)
         }
         DrugRegion::Eu => {
@@ -2985,14 +3106,19 @@ pub fn drug_search_markdown_with_region(
             let _ = writeln!(out, "# Drugs: {query}\n");
 
             out.push_str("## US (MyChem.info / OpenFDA)\n\n");
+            let us_count = us_total.unwrap_or(us_results.len());
             if us_results.is_empty() {
-                out.push_str("No drugs found\n");
+                if us_count == 0 && is_structured_indication_query(query) {
+                    out.push_str(&empty_drug_indication_search_body(query, DrugRegion::All));
+                    out.push('\n');
+                } else {
+                    out.push_str("No drugs found\n");
+                }
             } else {
-                let count = us_total.unwrap_or(us_results.len());
                 let _ = writeln!(
                     out,
-                    "Found {count} drug{}\n",
-                    if count == 1 { "" } else { "s" }
+                    "Found {us_count} drug{}\n",
+                    if us_count == 1 { "" } else { "s" }
                 );
                 out.push_str("|Name|Mechanism|Target|\n");
                 out.push_str("|---|---|---|\n");
@@ -3046,6 +3172,41 @@ pub fn drug_search_markdown_with_region(
             Ok(out)
         }
     }
+}
+
+fn is_structured_indication_query(query: &str) -> bool {
+    query
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with("indication=")
+}
+
+fn indication_query_value(query: &str) -> &str {
+    query
+        .split_once('=')
+        .map(|(_, value)| value.trim())
+        .unwrap_or(query.trim())
+}
+
+fn empty_drug_indication_search_body(query: &str, region: DrugRegion) -> String {
+    let disease = indication_query_value(query);
+    let review_query = quote_arg(&format!("{disease} treatment"));
+    match region {
+        DrugRegion::Us => format!(
+            "No drugs found in U.S. regulatory data for this indication.\nThis absence is informative for approved-drug questions, but it does not rule out investigational or off-label evidence.\nTry `biomcp search article -k {review_query} --type review --limit 5` for broader treatment literature."
+        ),
+        DrugRegion::All => format!(
+            "No drugs found in U.S. regulatory data for this indication.\nThis absence is informative for approved-drug questions and is specific to the structured regulatory portion of the combined search.\nTry `biomcp search article -k {review_query} --type review --limit 5` for broader treatment literature."
+        ),
+        DrugRegion::Eu => "No drugs found".to_string(),
+    }
+}
+
+fn empty_drug_indication_search_message(query: &str, region: DrugRegion) -> String {
+    format!(
+        "# Drugs: {query}\n\n{}\n",
+        empty_drug_indication_search_body(query, region)
+    )
 }
 
 pub fn pathway_markdown(
@@ -4689,6 +4850,11 @@ mod tests {
             disgenet: None,
         };
 
+        let summary = gene_markdown(&gene, &[]).expect("rendered markdown");
+        assert!(summary.contains(
+            "Aliases are alternate names used in literature and databases when a paper does not use the HGNC symbol."
+        ));
+
         let markdown = gene_markdown(&gene, &["hpa".to_string()]).expect("rendered markdown");
 
         assert!(markdown.contains("# BRAF - hpa"));
@@ -4701,6 +4867,194 @@ mod tests {
         assert!(markdown.contains("| Tissue | Level |"));
         assert!(markdown.contains("| Liver | High |"));
         assert!(markdown.contains("| Kidney | Medium |"));
+        assert!(
+            markdown
+                .find("| Tissue | Level |")
+                .expect("tissue table should render")
+                < markdown
+                    .find("RNA summary:")
+                    .expect("rna summary should render")
+        );
+    }
+
+    #[test]
+    fn format_sections_block_renders_described_executable_commands() {
+        let block = format_sections_block(
+            "gene",
+            "TP53",
+            vec![
+                "pathways".to_string(),
+                "hpa".to_string(),
+                "diseases".to_string(),
+                "protein".to_string(),
+            ],
+        );
+
+        assert!(block.contains("More:"));
+        assert!(block.contains("biomcp get gene TP53 pathways"));
+        assert!(block.contains("Reactome/KEGG pathway context"));
+        assert!(block.contains("biomcp get gene TP53 hpa"));
+        assert!(block.contains("Human Protein Atlas tissue expression and localization"));
+        assert!(block.contains("biomcp get gene TP53 diseases"));
+        assert!(block.contains("disease associations"));
+        assert!(block.contains("All:"));
+        assert!(block.contains("biomcp get gene TP53 all"));
+    }
+
+    #[test]
+    fn related_gene_prioritizes_localization_deepening_when_supported() {
+        let gene = Gene {
+            symbol: "OPA1".to_string(),
+            name: "OPA1 mitochondrial dynamin like GTPase".to_string(),
+            entrez_id: "4976".to_string(),
+            ensembl_id: Some("ENSG00000198836".to_string()),
+            location: Some("3q29".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("O60313".to_string()),
+            summary: Some(
+                "Mitochondrial inner membrane fusion GTPase required for cristae organization."
+                    .to_string(),
+            ),
+            gene_type: Some("protein-coding".to_string()),
+            aliases: vec!["large GTPase 1".to_string()],
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: Some(crate::entities::gene::GeneProtein {
+                accession: "O60313".to_string(),
+                name: "Dynamin-like 120 kDa protein, mitochondrial".to_string(),
+                function: None,
+                length: None,
+            }),
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: Some(crate::sources::hpa::GeneHpa {
+                tissues: vec![crate::sources::hpa::HpaTissueExpression {
+                    tissue: "Retina".to_string(),
+                    level: "High".to_string(),
+                }],
+                subcellular_main_location: vec!["Mitochondria".to_string()],
+                subcellular_additional_location: Vec::new(),
+                reliability: Some("Approved".to_string()),
+                protein_summary: None,
+                rna_summary: None,
+            }),
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let related = related_gene(&gene);
+        assert_eq!(related[0], "biomcp get gene OPA1 protein");
+        assert_eq!(related[1], "biomcp get gene OPA1 hpa");
+        assert!(related.contains(&"biomcp search variant -g OPA1".to_string()));
+    }
+
+    #[test]
+    fn related_disease_suggests_review_when_phenotypes_are_sparse() {
+        let disease = Disease {
+            id: "MONDO:0007947".to_string(),
+            name: "Marfan syndrome".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![
+                crate::entities::disease::DiseasePhenotype {
+                    hpo_id: "HP:0001166".to_string(),
+                    name: Some("Arachnodactyly".to_string()),
+                    evidence: None,
+                    frequency: None,
+                    frequency_qualifier: None,
+                    onset_qualifier: None,
+                    sex_qualifier: None,
+                    stage_qualifier: None,
+                    qualifiers: Vec::new(),
+                    source: None,
+                },
+                crate::entities::disease::DiseasePhenotype {
+                    hpo_id: "HP:0002616".to_string(),
+                    name: Some("Aortic root dilatation".to_string()),
+                    evidence: None,
+                    frequency: None,
+                    frequency_qualifier: None,
+                    onset_qualifier: None,
+                    sex_qualifier: None,
+                    stage_qualifier: None,
+                    qualifiers: Vec::new(),
+                    source: None,
+                },
+            ],
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let related = related_disease(&disease);
+        assert_eq!(
+            related[0],
+            "biomcp search article -d \"Marfan syndrome\" --type review --limit 5"
+        );
+        assert!(related.contains(&"biomcp search trial -c \"Marfan syndrome\"".to_string()));
+    }
+
+    #[test]
+    fn related_drug_suggests_review_when_label_and_indications_are_sparse() {
+        let drug = Drug {
+            name: "orteronel".to_string(),
+            drugbank_id: None,
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: Vec::new(),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let related = related_drug(&drug);
+        assert_eq!(
+            related[0],
+            "biomcp search article --drug orteronel --type review --limit 5"
+        );
+        assert!(related.contains(&"biomcp drug adverse-events orteronel".to_string()));
     }
 
     #[test]
@@ -5166,11 +5520,14 @@ mod tests {
         };
 
         let related = related_article(&article);
-        assert!(related.contains(&"biomcp article entities 22663011".to_string()));
+        assert_eq!(related[0], "biomcp article entities 22663011");
         assert!(related.contains(&"biomcp article citations 22663011 --limit 3".to_string()));
         assert!(related.contains(&"biomcp article references 22663011 --limit 3".to_string()));
         assert!(related.contains(&"biomcp article recommendations 22663011 --limit 3".to_string()));
         assert!(!related.iter().any(|cmd| cmd.contains("biomcp get article")));
+
+        let rendered = format_related_block(related);
+        assert!(rendered.contains("standardized entity extraction"));
     }
 
     #[test]
@@ -6015,6 +6372,48 @@ mod tests {
         assert!(markdown.contains("### Referrals"));
         assert!(markdown.contains("### PSUSAs"));
         assert!(markdown.contains("No data found (EMA)"));
+    }
+
+    #[test]
+    fn drug_search_empty_state_frames_zero_indication_miss_as_regulatory_signal() {
+        let markdown = drug_search_markdown_with_region(
+            "indication=Marfan syndrome",
+            DrugRegion::Us,
+            &[],
+            Some(0),
+            &[],
+            None,
+            "",
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("U.S. regulatory data"));
+        assert!(markdown.contains("This absence is informative"));
+        assert!(markdown.contains(
+            "biomcp search article -k \"Marfan syndrome treatment\" --type review --limit 5"
+        ));
+        assert!(!markdown.contains("No drugs found\n"));
+    }
+
+    #[test]
+    fn drug_search_all_region_empty_state_calls_out_regulatory_absence() {
+        let markdown = drug_search_markdown_with_region(
+            "indication=Marfan syndrome",
+            DrugRegion::All,
+            &[],
+            Some(0),
+            &[],
+            Some(0),
+            "",
+        )
+        .expect("markdown");
+
+        assert!(
+            markdown
+                .contains("specific to the structured regulatory portion of the combined search")
+        );
+        assert!(markdown.contains("## US (MyChem.info / OpenFDA)"));
+        assert!(markdown.contains("## EU (EMA)"));
     }
 
     #[test]

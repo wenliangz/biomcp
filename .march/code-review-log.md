@@ -5,100 +5,119 @@
 - `.march/design-draft.md`
 - `.march/design-final.md`
 - `.march/code-log.md`
-- `design/technical/overview.md`
-- `tests/test_docs_changelog_refresh.py`
-- `tests/test_upstream_planning_analysis_docs.py`
-- Relevant implementation surfaces referenced by the new architecture text:
-  `src/cli/chart.rs`, `src/cli/mod.rs`, `src/render/chart.rs`,
-  `scripts/check-version-sync.sh`, and `spec/13-study.md`
+- Full `git diff main..HEAD`
+- Changed runtime, spec, doc, and contract files for the help-architecture overhaul
 
 ## Critique
 
 ### Design Completeness Audit
 
-- Current-version drift fix: implemented in `design/technical/overview.md`.
-  The overview now points to `Cargo.toml` and names the actual version-sync
-  manifests enforced by `scripts/check-version-sync.sh`.
-- New `## Chart Rendering` section: implemented in
-  `design/technical/overview.md`.
-- `biomcp chart` described as embedded documentation, not the renderer:
-  implemented and consistent with `src/cli/chart.rs`.
-- Study rendering ownership documented for `study query`,
-  `study co-occurrence`, `study compare`, and `study survival`:
-  implemented and consistent with `ChartArgs` in `src/cli/mod.rs`.
-- Actual 12 chart types and command compatibility matrix: implemented and
-  consistent with `ChartType` plus validation in `src/render/chart.rs`.
-- Output targets and flag boundaries: implemented and consistent with
-  `output_target()` and `rewrite_mcp_chart_args()`.
-- MCP rewrite behavior: implemented and consistent with the real rewrite layer.
-  The overview does not mention a nonexistent `--png` flag and does not imply
-  MCP file output.
-- Link to `docs/charts/index.md`: implemented.
-- Docs-contract updates required by the final design:
-  `tests/test_docs_changelog_refresh.py` and
-  `tests/test_upstream_planning_analysis_docs.py` were both updated.
+I mapped the acceptance criteria and proof matrix to the changed code and tests.
+The implementation covered the required help surfaces, discover routing, layered
+skill catalog, HATEOAS guidance, template copy, docs updates, and MCP resource
+contract.
 
-Result: no design item from `design-final.md` was skipped.
+Gaps found during review:
+
+1. `src/cli/list_reference.md` shipped two `## When to Use What` tables.
+   The required routing table existed, but the duplicate block made the top-level
+   help noisy and contradicted the design goal of clearer orientation.
+2. `src/cli/list.rs` repeated `## When to use this surface` blocks in the
+   `drug`, `disease`, `batch`, and `enrich` pages. The content was valid, but
+   the duplicate sections reduced clarity.
+3. `tests/test_mcp_http_transport.py` had no resource-list/read coverage for the
+   new embedded worked-example catalog. The direct MCP contract tests covered the
+   new behavior, but the Streamable HTTP path from the proof matrix was not
+   updated.
 
 ### Test-Design Traceability
 
-- Proof matrix item "Current-version line is drift-proof":
-  covered by the overview text itself and by
-  `test_release_overview_uses_manifest_reference_for_current_version_and_release_files`.
-- Proof matrix item "Overview docs contract accepts the new version wording":
-  covered by `tests/test_docs_changelog_refresh.py`.
-- Proof matrix item "Chart architecture section exists and uses the real repo model":
-  covered by `test_chart_rendering_architecture_doc_matches_repo_contract`.
-- Proof matrix item "Study chart behavior referenced by the architecture doc still matches shipped behavior":
-  covered by existing chart scenarios in `spec/13-study.md`.
-- Proof matrix item "Full repo contracts stay green after the doc and test updates":
-  covered by `make test-contracts`.
+Proof-matrix coverage I verified:
 
-Result: the required tests/specs existed, but the implementation step did not
-replay the full proof matrix. `.march/code-log.md` showed targeted docs pytest
-and `make check`, but it omitted `make spec-pr` and `make test-contracts`,
-which `design-final.md` explicitly called out as verification surfaces.
+- `spec/01-overview.md` covers the top-level routing table and article routing help.
+- `spec/02-gene.md` covers alias guidance and HPA tissue detail.
+- `spec/05-drug.md` covers sparse-card guidance and informative structured miss wording.
+- `spec/06-article.md` covers annotation guidance.
+- `spec/07-disease.md` covers phenotype completeness wording.
+- `spec/10-workflows.md` covers layered skill overview, `skill list`, and `skill <name>`.
+- `spec/19-discover.md` covers treatment, symptom, and gene+disease discover routing.
+- Rust unit tests cover HATEOAS descriptions and help-text markers.
+- `tests/test_mcp_contract.py` covers MCP resource inventory and reads.
 
-### Quality Checks
+Missing test found:
 
-- Implementation quality: the touched docs and pytest files follow adjacent repo
-  conventions. No unnecessary abstractions were introduced.
-- Test quality: the new pytest coverage checks contract text, not incidental
-  formatting trivia. Existing `spec/13-study.md` remains the outside-in proof
-  for chart behavior.
-- Performance: not applicable; docs-only change.
-- Data completeness: the chart section documents all contractually required
-  surfaces named in the final design.
-- Security: no new untrusted-input flow introduced.
+- The Streamable HTTP transport contract did not verify `list_resources()` and
+  `read_resource()` for `biomcp://help` plus `biomcp://skill/<slug>` resources.
+  This was a blocking traceability gap and was fixed.
+
+### Additional Defect Found While Re-running Gates
+
+- `cargo test discover:: --lib` exposed a real routing bug:
+  `discover "what does OPA1 do"` was classified as `GeneDiseaseOrientation`
+  instead of `GeneFunction`.
+- Root cause: the fallback `gene_disease_focus()` heuristic treated any
+  uppercase-compatible first token as a gene symbol. That was too loose for
+  sentence-style queries.
 
 ## Fix Plan
 
-- Repair the verification gap by running the proof-matrix gates that were not
-  replayed during implementation: `make spec-pr` and `make test-contracts`.
-- Re-run `make check` after the verification repair, per the review-step
-  instructions.
-- Record the issue and the repaired verification state in this review log.
+1. Remove the duplicated routing/help blocks from `list_reference.md` and `list.rs`.
+2. Strengthen the affected list tests so duplicate headings fail in the future.
+3. Add Streamable HTTP resource inventory/read tests for the worked-example catalog.
+4. Tighten discover gene+disease fallback detection so sentence-style gene-function
+   queries do not misclassify.
 
 ## Repair
 
-- Ran `make spec-pr`: passed (`218 passed, 6 skipped, 36 deselected`).
-- Ran `make test-contracts`: passed (`125 passed` and `mkdocs build --strict`).
-- Re-ran `make check`: passed.
+Applied fixes:
 
-No source changes were required. The implementation itself was complete and
-accurate; the only defect was incomplete verification against the final design.
+- Removed the duplicate `## When to Use What` table from
+  `src/cli/list_reference.md`.
+- Removed duplicate `## When to use this surface` blocks from the `drug`,
+  `disease`, `batch`, and `enrich` list pages in `src/cli/list.rs`.
+- Strengthened `src/cli/list.rs` tests to assert those headings appear exactly once.
+- Added `test_streamable_http_lists_and_reads_help_and_skill_resources` to
+  `tests/test_mcp_http_transport.py`.
+- Tightened `gene_disease_focus()` in `src/entities/discover.rs` to require a
+  stricter gene-token fallback before treating free text as gene+disease orientation.
+
+### Post-Fix Collateral Scan
+
+After each fix, I checked the touched code for:
+
+- dead code or unreachable branches: none introduced
+- unused imports or variables: none introduced
+- stale error/help text: none introduced
+- shadowed variables: none introduced
+- resource-cleanup conflicts: none introduced
+
+## Verification
+
+- `checkpoint status`
+- `GIT_EDITOR=true git rebase main`
+- `cargo test list:: --lib`
+- `cargo test skill:: --lib`
+- `cargo test discover:: --lib`
+- `cargo test markdown:: --lib`
+- `cargo build --release --bin biomcp`
+- `XDG_CACHE_HOME="$(pwd)/.cache" PATH="$(pwd)/target/release:$PATH" uv run --extra dev sh -c 'PATH="$(pwd)/target/release:$PATH" pytest spec/01-overview.md spec/02-gene.md spec/05-drug.md spec/06-article.md spec/07-disease.md spec/10-workflows.md spec/19-discover.md --mustmatch-lang bash --mustmatch-timeout 60 -v'`
+- `uv run pytest tests/test_public_skill_docs_contract.py tests/test_upstream_planning_analysis_docs.py tests/test_mcp_contract.py tests/test_mcp_http_transport.py -v`
+- `make check`
+
+Results:
+
+- Specs: `97 passed, 2 skipped`
+- Python contract tests: `25 passed`
+- `make check`: passed
 
 ## Residual Concerns
 
-- The final design intentionally leaves a spec gap for architecture-doc prose.
-  The overview contract is enforced through docs-contract pytest, not a
-  dedicated `spec/*.md` file. Verify should continue treating those pytest
-  files as the enforcement surface for future overview edits.
-- `mkdocs build --strict` emitted the existing upstream Material/MkDocs 2.0
-  warning, but the build succeeded and this review did not change that surface.
+- No open defects remain in scope for this ticket.
 
 ## Defect Register
 
 | # | Category | Lintable | Description |
 |---|----------|----------|-------------|
-| 1 | verification-gap | no | `design-final.md` required `make spec-pr` and `make test-contracts`, but the implementation replay only covered targeted docs pytest and `make check`; review ran the missing gates and confirmed they pass. |
+| 1 | weak-assertion | yes | List-page tests only checked for heading presence, so duplicate help blocks shipped unnoticed. |
+| 2 | missing-test | yes | Design required MCP resource coverage for the worked-example catalog on the Streamable HTTP path; no matching transport test existed. |
+| 3 | validation-gap | yes | `gene_disease_focus()` accepted overly broad first-token input and misclassified `discover "what does OPA1 do"` as gene+disease orientation. |

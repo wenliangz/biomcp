@@ -15,6 +15,22 @@ New to BioMCP? Try:
 - `search trial -c melanoma` - find clinical trials
 - `search all --gene BRAF --disease melanoma` - cross-entity summary card
 
+## When to Use What
+
+| You want to know... | Start with |
+|---|---|
+| What drugs treat a disease | `search drug --indication "<disease>" --limit 5` |
+| Symptoms or phenotypes of a disease | `get disease <name_or_id> phenotypes` |
+| What a gene does | `get gene <symbol>` |
+| Tissue expression or localization of a gene product | `get gene <symbol> hpa` or `get gene <symbol> protein` |
+| Drug safety or adverse events | `drug adverse-events <name>` or `get drug <name> safety` |
+| Review literature that synthesizes a topic | `search article -k "<query>" --type review --limit 5` |
+| Follow one article into related evidence | `article citations <id> --limit 5` or `article recommendations <id> --limit 5` |
+| I know the entities but not the next pivot | `search all --gene BRAF --disease melanoma` |
+| I only have free text and need routing | `discover "<free text>"` |
+| The same sections for several entities | `batch <entity> <id1,id2,...> --sections <s1,s2,...>` |
+| Enriched pathways or functions for a gene set | `enrich <GENE1,GENE2,...>` |
+
 ## Entities
 
 - gene

@@ -13,6 +13,20 @@ from mcp.shared.exceptions import McpError
 EXPECTED_HELP_RESOURCE = ("biomcp://help", "BioMCP Overview")
 
 
+def _expected_skill_resources() -> list[tuple[str, str]]:
+    repo = Path(__file__).resolve().parents[1]
+    resources: list[tuple[str, str]] = []
+    for path in sorted((repo / "skills" / "use-cases").glob("[0-9][0-9]-*.md")):
+        title = next(
+            line.removeprefix("# ").strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("# ")
+        )
+        name = title if title.lower().startswith("pattern:") else f"Pattern: {title}"
+        resources.append((f"biomcp://skill/{path.stem[3:]}", name))
+    return resources
+
+
 def _mime_type(content: object) -> str | None:
     return getattr(content, "mimeType", getattr(content, "mime_type", None))
 
@@ -94,7 +108,7 @@ async def test_list_resources_returns_expected_inventory(
         result = await session.list_resources()
         actual = [(str(resource.uri), resource.name) for resource in result.resources]
 
-        assert actual == [EXPECTED_HELP_RESOURCE]
+        assert actual == [EXPECTED_HELP_RESOURCE, *_expected_skill_resources()]
 
 
 @pytest.mark.asyncio

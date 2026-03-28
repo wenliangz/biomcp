@@ -13,6 +13,10 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     readme = _read("README.md")
     docs_index = _read("docs/index.md")
     skill_file = _read("skills/SKILL.md")
+    treatment_use_case = _read("skills/use-cases/01-treatment-lookup.md")
+    symptom_use_case = _read("skills/use-cases/02-symptom-phenotype.md")
+    orientation_use_case = _read("skills/use-cases/03-gene-disease-orientation.md")
+    article_follow_up = _read("skills/use-cases/04-article-follow-up.md")
     skills = _read("docs/getting-started/skills.md")
     reproduce = _read("docs/how-to/reproduce-papers.md")
     cli_reference = _read("docs/user-guide/cli-reference.md")
@@ -36,17 +40,18 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
 
     assert "# Skills" in skills
     assert "biomcp skill" in skills
-    assert "biomcp skill install ~/.claude" in skills
+    assert "biomcp skill list" in skills
+    assert "biomcp skill article-follow-up" in skills
     assert "SKILL.md" in skills
+    assert "use-cases/" in skills
     assert "jq-examples.md" in skills
     assert "examples/" in skills
     assert "schemas/" in skills
-    assert "Legacy compatibility note" in skills
-    assert "biomcp skill list" in skills
-    assert "biomcp skill 03" in skills
-    assert "biomcp skill variant-to-treatment" in skills
-    assert "Skill topics included" not in skills
-    assert "biomcp://skill/<slug>" not in skills
+    assert "Legacy compatibility note" not in skills
+    assert "No skills found" not in skills
+
+    assert "# Skills" in skills
+    assert "biomcp skill install ~/.claude" in skills
 
     assert "biomcp skill list" not in reproduce
     assert "biomcp skill gene-function-lookup" not in reproduce
@@ -58,7 +63,7 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
 
     assert "biomcp skill [list|install|<name>]" not in cli_reference
     assert "biomcp skill install [dir]" in cli_reference
-    assert "biomcp skill list                 # legacy compatibility alias" in cli_reference
+    assert "biomcp skill list                 # list embedded worked examples" in cli_reference
     assert "biomcp serve-sse                  # removed compatibility command; use serve-http" not in cli_reference
     assert (
         "`biomcp serve-sse` remains available only as a hidden compatibility "
@@ -68,9 +73,9 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "Streamable HTTP" in cli_reference
     assert "/mcp" in cli_reference
 
-    assert "one markdown resource per registered skill use-case" not in mcp_server
+    assert "one markdown resource per embedded skill use-case" in mcp_server
     assert "biomcp://help" in mcp_server
-    assert "No `biomcp://skill/<slug>` resources are currently listed" in mcp_server
+    assert "biomcp://skill/<slug>" in mcp_server
     assert "Streamable HTTP" in mcp_server
     assert "`biomcp serve-http`" in mcp_server
     assert "`/mcp`" in mcp_server
@@ -78,20 +83,27 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "`/readyz`" in mcp_server
     assert "`/`" in mcp_server
 
-    assert "one resource per installed skill" not in claude_desktop
+    assert "one markdown resource per embedded BioMCP worked example" in claude_desktop
     assert "biomcp://help" in claude_desktop
-    assert "do not discover a browsable `biomcp://skill/<slug>` catalog" in claude_desktop
+    assert "biomcp://skill/<slug>" in claude_desktop
 
-    assert "biomcp article references 22663011 --limit 3" in skill_file
-    assert "S2_API_KEY" in skill_file
-    assert "publisher elision" in skill_file
-    assert "biomcp enrich BRAF,KRAS,NRAS --limit 10" in skill_file
-    assert "biomcp batch gene BRAF,TP53 --sections pathways,interactions" in skill_file
-    assert "biomcp chart" in skill_file
-    assert "--theme dark" in skill_file
-    assert "--palette wong" in skill_file
+    assert "## Routing rules" in skill_file
+    assert "## Section reference" in skill_file
+    assert "## Cross-entity pivot rules" in skill_file
+    assert "## Output and evidence rules" in skill_file
+    assert 'biomcp search drug --indication "<disease>"' in skill_file
+    assert 'biomcp discover "<free text>"' in skill_file
     assert "_meta.next_commands" in skill_file
-    assert "FDA label interaction text" in skill_file
+    assert "Run `biomcp skill list` for worked examples" in skill_file
+
+    assert "# Pattern: Treatment / approved-drug lookup" in treatment_use_case
+    assert 'biomcp search drug --indication "myasthenia gravis" --limit 5' in treatment_use_case
+    assert "# Pattern: Symptom / phenotype lookup" in symptom_use_case
+    assert 'biomcp get disease "Marfan syndrome" phenotypes' in symptom_use_case
+    assert "# Pattern: Gene-in-disease orientation" in orientation_use_case
+    assert 'biomcp search all --gene BRAF --disease "melanoma"' in orientation_use_case
+    assert "# Pattern: Article follow-up via citations and recommendations" in article_follow_up
+    assert "biomcp article citations 22663011 --limit 5" in article_follow_up
 
     assert "publisher elision" in article_guide
     assert "next_commands" in article_guide

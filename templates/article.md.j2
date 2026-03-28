@@ -31,6 +31,8 @@ _Note: Entity annotations unavailable for this article (PubTator3 lag). Metadata
 {% if show_annotations_section and annotations -%}
 ## PubTator Annotations
 
+These are PubTator normalized entity mentions for standardized extraction of genes, diseases, drugs, and mutations from the article text.
+
 {% if annotations.genes -%}
 - Genes: {% for m in annotations.genes -%}{{ m.text }} ({{ m.count }}){% if not loop.last %}, {% endif %}{% endfor %}
 {% endif -%}

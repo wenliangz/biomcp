@@ -7,6 +7,7 @@ Genes are a primary anchor in BioMCP and frequently drive downstream trial, arti
 | Symbol search | `search gene BRAF` | Confirms canonical gene lookup |
 | Table structure | `search gene BRAF` | Confirms stable result schema |
 | Detail card | `get gene BRAF` | Confirms rich per-gene card output |
+| Guidance | `get gene OPA1` | Confirms alias explainer and localization follow-up hints |
 | Section expansion | `get gene BRAF pathways` | Confirms progressive disclosure |
 | HPA section | `get gene BRAF hpa` | Confirms protein tissue-expression contract |
 | Druggability section | `get gene EGFR druggability` | Confirms combined DGIdb/OpenTargets contract |
@@ -44,6 +45,18 @@ echo "$out" | mustmatch like "# BRAF ("
 echo "$out" | mustmatch like "Entrez ID: 673"
 ```
 
+## Gene Card Guidance
+
+The base gene card should explain what aliases are for and, when the summary implies localization or structure follow-up, surface executable deepen commands instead of generic guesses.
+
+```bash
+out="$(biomcp get gene OPA1)"
+echo "$out" | mustmatch like "Aliases are alternate names used in literature and databases"
+echo "$out" | mustmatch like "biomcp get gene OPA1 protein"
+echo "$out" | mustmatch like "biomcp get gene OPA1 hpa"
+echo "$out" | mustmatch like "localization"
+```
+
 ## Progressive Disclosure
 
 Section-specific retrieval keeps the output focused while preserving access to deeper context. The pathways section should expose a labeled subsection and pathway table columns.
@@ -71,7 +84,7 @@ echo "$out" | mustmatch like "LOEUF:"
 
 ## Human Protein Atlas Section
 
-The HPA section should expose protein tissue expression, localization context, and stable HPA labels without dumping the raw upstream record.
+The HPA section should expose protein tissue expression, localization context, and stable HPA labels without dumping the raw upstream record. When tissue rows exist, they should appear before the supporting RNA summary text.
 
 ```bash
 out="$(biomcp get gene BRAF hpa)"
@@ -79,6 +92,12 @@ echo "$out" | mustmatch like "## Human Protein Atlas"
 echo "$out" | mustmatch like "Reliability:"
 echo "$out" | mustmatch like "Subcellular"
 echo "$out" | mustmatch like "| Tissue | Level |"
+echo "$out" | mustmatch '/\| [^|]+ \| (High|Medium|Low|Not detected) \|/'
+tissue_line="$(printf '%s\n' "$out" | grep -n '| Tissue | Level |' | cut -d: -f1 | head -n1)"
+rna_line="$(printf '%s\n' "$out" | grep -n 'RNA summary:' | cut -d: -f1 | head -n1)"
+test -n "$tissue_line"
+test -n "$rna_line"
+test "$tissue_line" -lt "$rna_line"
 ```
 
 ## Druggability Section
@@ -119,13 +138,15 @@ echo "$out" | mustmatch like "| PMID | Title |"
 Alias-only symbols should still surface the canonical gene rows. These checks guard the ERBB1 and P53 regressions by asserting that alias queries return EGFR and TP53 rows.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search gene ERBB1 --limit 5)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search gene ERBB1 --limit 5)"
 echo "$out" | mustmatch like "# Genes: ERBB1"
 echo "$out" | mustmatch like "EGFR"
 ```
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search gene P53 --limit 5)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search gene P53 --limit 5)"
 echo "$out" | mustmatch like "# Genes: P53"
 echo "$out" | mustmatch like "TP53"
 ```
@@ -135,12 +156,22 @@ echo "$out" | mustmatch like "TP53"
 DisGeNET scored gene-disease associations require `DISGENET_API_KEY`. The section heading and table schema are stable invariants; individual scores and row counts vary by API tier.
 
 ```bash
-out="$(biomcp get gene TP53 disgenet)"
-echo "$out" | mustmatch like "## DisGeNET"
-echo "$out" | mustmatch like "| Disease | UMLS CUI | Score | PMIDs | Trials | EL | EI |"
+status=0
+out="$(biomcp get gene TP53 disgenet 2>&1)" || status=$?
+if [ "$status" -eq 0 ] && ! printf '%s\n' "$out" | grep -qi '403 Forbidden'; then
+  echo "$out" | mustmatch like "## DisGeNET"
+  echo "$out" | mustmatch like "| Disease | UMLS CUI | Score | PMIDs | Trials | EL | EI |"
+else
+  echo "$out" | mustmatch '/(403 Forbidden|forbidden|DISGENET_API_KEY|Unauthorized)/'
+fi
 ```
 
 ```bash
-out="$(biomcp get gene TP53 disgenet --json)"
-echo "$out" | mustmatch json ".disgenet.associations | length > 0"
+status=0
+out="$(biomcp get gene TP53 disgenet --json 2>&1)" || status=$?
+if [ "$status" -eq 0 ] && ! printf '%s\n' "$out" | grep -qi '403 Forbidden'; then
+  echo "$out" | mustmatch json ".disgenet.associations | length > 0"
+else
+  echo "$out" | mustmatch '/(403 Forbidden|forbidden|DISGENET_API_KEY|Unauthorized)/'
+fi
 ```

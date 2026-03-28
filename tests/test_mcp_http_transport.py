@@ -39,6 +39,19 @@ def _mime_type(content: object) -> str | None:
     return getattr(content, "mimeType", getattr(content, "mime_type", None))
 
 
+def _expected_skill_resources() -> list[tuple[str, str]]:
+    resources: list[tuple[str, str]] = []
+    for path in sorted((REPO_ROOT / "skills" / "use-cases").glob("[0-9][0-9]-*.md")):
+        title = next(
+            line.removeprefix("# ").strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("# ")
+        )
+        name = title if title.lower().startswith("pattern:") else f"Pattern: {title}"
+        resources.append((f"biomcp://skill/{path.stem[3:]}", name))
+    return resources
+
+
 @pytest.fixture
 def http_server_url() -> Iterator[str]:
     binary = _require_release_binary()
@@ -150,6 +163,41 @@ async def test_streamable_http_supports_initialize_list_tools_and_tool_call(
             assert any(
                 "0.8." in text or "biomcp" in text.lower() for text in text_chunks
             )
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_lists_and_reads_help_and_skill_resources(
+    http_server_url: str,
+) -> None:
+    async with streamable_http_client(f"{http_server_url}/mcp") as (
+        read_stream,
+        write_stream,
+        _get_session_id,
+    ):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=timedelta(seconds=20),
+        ) as session:
+            await session.initialize()
+
+            listed = await session.list_resources()
+            actual = [(str(resource.uri), resource.name) for resource in listed.resources]
+            assert actual == [("biomcp://help", "BioMCP Overview"), *_expected_skill_resources()]
+
+            for uri, _name in actual:
+                result = await session.read_resource(uri)
+                assert result.contents, f"{uri} returned no content"
+                text_contents = [
+                    content
+                    for content in result.contents
+                    if isinstance(content, types.TextResourceContents)
+                ]
+                assert text_contents, f"{uri} did not return markdown text"
+                for content in text_contents:
+                    assert str(content.uri) == uri
+                    assert _mime_type(content) == "text/markdown"
+                    assert content.text.strip()
 
 
 @pytest.mark.asyncio

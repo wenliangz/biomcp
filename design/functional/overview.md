@@ -71,24 +71,23 @@ What it adds:
 
 ## Skills Surface
 
-BioMCP ships an embedded agent guide rather than a browsable in-binary skill
-catalog. `biomcp skill` prints the embedded `skills/SKILL.md` overview, and
-`biomcp skill install <dir>` exports that guide plus supporting references
-(`jq-examples.md`) into an agent directory.
+BioMCP ships an embedded agent guide plus worked examples. `biomcp skill`
+prints the embedded `skills/SKILL.md` overview, `biomcp skill list` shows
+embedded worked examples, and `biomcp skill <name>` opens an embedded worked
+example by number or slug. `biomcp skill install <dir>` exports that guide,
+the `use-cases/` catalog, and supporting references into an agent directory.
 
-The current runtime contract is intentionally narrow:
+The current runtime contract is:
 
 - `biomcp skill` shows the BioMCP agent guide
+- `biomcp skill list` shows embedded worked examples
+- `biomcp skill <name>` opens an embedded worked example
 - `biomcp skill install <dir>` installs that guide into `skills/biomcp/`
-- `biomcp skill list` is a legacy compatibility alias and currently prints
-  `No skills found`
-- legacy numeric or slug lookups such as `biomcp skill 03` fail clearly rather
-  than pretending an embedded catalog still exists
+- MCP resource listing includes `biomcp://help` plus `biomcp://skill/<slug>`
+  for each embedded worked example
 
-The durable user value is still guided investigation support for workflows such
-as variant interpretation, trial pivots, drug safety review, and broad
-gene-disease investigation, but those workflows now live inside one maintained
-agent guide instead of 14 separately addressable embedded files.
+The durable user value is guided investigation support with a layered help
+system: overview first, then executable examples on demand.
 
 ## Command Grammar
 
@@ -127,9 +126,9 @@ Named sections extend the output: `biomcp get gene BRAF pathways civic all`.
 - A researcher with no prior BioMCP knowledge can install it, run
   `biomcp health`, install the BioMCP agent guide, and complete a guided
   investigation in one session
-- The embedded BioMCP skill guide examples for core workflows (variant
-  interpretation, trial pivots, drug safety, broad gene-disease investigation)
-  produce correct, well-formatted output against live upstream APIs
+- The embedded BioMCP skill guide plus worked examples for treatment,
+  phenotypes, article follow-up, and broad gene-disease investigation produce
+  correct, well-formatted output against live upstream APIs
 - PyPI package (`biomcp-cli`) is available and installs cleanly
 - Documentation at biomcp.org covers install, quick start, and the
   `biomcp skill` / `biomcp skill install` workflow
@@ -137,7 +136,7 @@ Named sections extend the output: `biomcp get gene BRAF pathways civic all`.
 ### For G003 (v1.0)
 
 - The embedded BioMCP skill guide exports cleanly and references only real
-  commands (no stale embedded use-case catalog)
+  commands
 - `search all` works reliably as the unified entry point
 - CLI help, error messages, and next-step suggestions are accurate
   (no stale command references)
