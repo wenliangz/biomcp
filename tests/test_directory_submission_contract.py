@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -89,6 +91,97 @@ def test_packaging_workspace_is_ignored_and_bundle_payload_is_filtered() -> None
 
     gitignore = _read(".gitignore")
     assert "/server/" in gitignore
+
+    for entry in (".claude/", ".agents/"):
+        assert entry in gitignore
+
+    assert "architecture/" in mcpbignore
+    for removed_entry in ("design/", "demo/", "presentations/"):
+        assert removed_entry not in mcpbignore
+
+
+def test_repo_cleanup_removes_local_artifacts_and_deleted_dirs_from_git() -> None:
+    tracked_files = subprocess.run(
+        ["git", "ls-files"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+
+    assert not [
+        path
+        for path in tracked_files
+        if path.startswith((".march/", ".claude/", ".agents/"))
+    ]
+
+    assert not (REPO_ROOT / "presentations").exists()
+    assert not (REPO_ROOT / "demo").exists()
+    assert not (REPO_ROOT / "design").exists()
+
+    for path in (
+        "architecture/functional/overview.md",
+        "architecture/technical/overview.md",
+        "architecture/technical/source-integration.md",
+        "architecture/technical/staging-demo.md",
+        "architecture/ux/cli-reference.md",
+    ):
+        assert (REPO_ROOT / path).is_file()
+
+    for path in (
+        "examples/test-predictions-output.md",
+        "examples/test-predictions-prompt.md",
+        "examples/test-predictions-stderr.log",
+    ):
+        assert not (REPO_ROOT / path).exists()
+
+
+def test_examples_tree_has_linked_index_and_readmes() -> None:
+    examples_index = _read("examples/README.md")
+    example_dirs = sorted(path for path in (REPO_ROOT / "examples").iterdir() if path.is_dir())
+
+    assert "| [geneagent/](geneagent/README.md) |" in examples_index
+    assert "| [genegpt/](genegpt/README.md) |" in examples_index
+    assert "| [pubmed-beyond/](pubmed-beyond/README.md) |" in examples_index
+    assert "| [trialgpt/](trialgpt/README.md) |" in examples_index
+    assert "| [streamable-http/](streamable-http/README.md) |" in examples_index
+
+    for path in example_dirs:
+        assert (path / "README.md").is_file()
+
+
+def test_example_scripts_pass_minimum_syntax_validation() -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "py_compile",
+            "examples/streamable-http/streamable_http_client.py",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            "-n",
+            "examples/geneagent/run.sh",
+            "examples/geneagent/score.sh",
+            "examples/genegpt/run.sh",
+            "examples/genegpt/score.sh",
+            "examples/pubmed-beyond/run.sh",
+            "examples/pubmed-beyond/score.sh",
+            "examples/trialgpt/run.sh",
+            "examples/trialgpt/score.sh",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_readme_is_directory_review_complete() -> None:

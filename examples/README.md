@@ -20,25 +20,25 @@ biomcp skill <number-or-slug>
 
 | Example folder | Canonical skill |
 |----------------|-----------------|
-| `genegpt/` | `09-gene-function-lookup` |
-| `geneagent/` | `10-gene-set-analysis` |
-| `trialgpt/` | `03-trial-searching` (patient matching section) |
-| `pubmed-beyond/` | `11-literature-synthesis` |
+| [genegpt/](genegpt/README.md) | `09-gene-function-lookup` |
+| [geneagent/](geneagent/README.md) | `10-gene-set-analysis` |
+| [trialgpt/](trialgpt/README.md) | `03-trial-searching` (patient matching section) |
+| [pubmed-beyond/](pubmed-beyond/README.md) | `11-literature-synthesis` |
 
 ## Example Index
 
 | Example folder | What it does |
 |----------------|--------------|
-| `geneagent/` | Replays a gene-set-analysis workflow with prompt, run, and scoring assets. |
-| `genegpt/` | Reproduces a gene-function lookup workflow with captured benchmark harness files. |
-| `pubmed-beyond/` | Replays a literature-synthesis workflow over BioMCP with benchmark assets. |
-| `trialgpt/` | Reproduces a patient-matching and trial-search workflow with benchmark assets. |
+| [geneagent/](geneagent/README.md) | Replays a gene-set-analysis workflow with prompt, run, and scoring assets. |
+| [genegpt/](genegpt/README.md) | Reproduces a gene-function lookup workflow with captured benchmark harness files. |
+| [pubmed-beyond/](pubmed-beyond/README.md) | Replays a literature-synthesis workflow over BioMCP with benchmark assets. |
+| [trialgpt/](trialgpt/README.md) | Reproduces a patient-matching and trial-search workflow with benchmark assets. |
 
 ## Standalone Examples
 
 | Example folder | What it does |
 |----------------|--------------|
-| `streamable-http/` | Runs a Streamable HTTP client against `biomcp serve-http` and proves the remote `biomcp` MCP tool can complete a three-step BRAF workflow. |
+| [streamable-http/](streamable-http/README.md) | Runs a Streamable HTTP client against `biomcp serve-http` and proves the remote `biomcp` MCP tool can complete a three-step BRAF workflow. |
 
 ## When to Use This Folder
 
