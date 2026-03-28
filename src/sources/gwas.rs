@@ -94,7 +94,10 @@ impl GwasClient {
             ("size", &limit.to_string()),
         ]);
 
-        let Some(resp): Option<GwasAssociationsResponse> = self.get_json_optional(req).await?
+        let Some(resp): Option<GwasAssociationsResponse> = self
+            .get_json_optional(req)
+            .await
+            .map_err(remap_gwas_error)?
         else {
             return Ok(Vec::new());
         };
@@ -117,7 +120,11 @@ impl GwasClient {
             ("size", &limit.to_string()),
         ]);
 
-        let Some(resp): Option<GwasSnpsResponse> = self.get_json_optional(req).await? else {
+        let Some(resp): Option<GwasSnpsResponse> = self
+            .get_json_optional(req)
+            .await
+            .map_err(remap_gwas_error)?
+        else {
             return Ok(Vec::new());
         };
 
@@ -139,7 +146,11 @@ impl GwasClient {
             ("size", &limit.to_string()),
         ]);
 
-        let Some(resp): Option<GwasSnpsResponse> = self.get_json_optional(req).await? else {
+        let Some(resp): Option<GwasSnpsResponse> = self
+            .get_json_optional(req)
+            .await
+            .map_err(remap_gwas_error)?
+        else {
             return Ok(Vec::new());
         };
 
@@ -161,7 +172,11 @@ impl GwasClient {
             ("size", &limit.to_string()),
         ]);
 
-        let Some(resp): Option<GwasStudiesResponse> = self.get_json_optional(req).await? else {
+        let Some(resp): Option<GwasStudiesResponse> = self
+            .get_json_optional(req)
+            .await
+            .map_err(remap_gwas_error)?
+        else {
             return Ok(Vec::new());
         };
 
@@ -186,7 +201,8 @@ impl GwasClient {
 
         if let Some(search_resp) = self
             .get_json_optional::<GwasAssociationsResponse>(search_req)
-            .await?
+            .await
+            .map_err(remap_gwas_error)?
             && !search_resp.embedded.associations.is_empty()
         {
             return Ok(search_resp.embedded.associations);
@@ -199,14 +215,55 @@ impl GwasClient {
             ("size", &limit.to_string()),
         ]);
 
-        let Some(fallback_resp): Option<GwasAssociationsResponse> =
-            self.get_json_optional(fallback_req).await?
+        let Some(fallback_resp): Option<GwasAssociationsResponse> = self
+            .get_json_optional(fallback_req)
+            .await
+            .map_err(remap_gwas_error)?
         else {
             return Ok(Vec::new());
         };
 
         Ok(fallback_resp.embedded.associations)
     }
+}
+
+fn remap_gwas_error(err: BioMcpError) -> BioMcpError {
+    match err {
+        BioMcpError::ApiJson { api, .. } if api == GWAS_API => BioMcpError::SourceUnavailable {
+            source_name: "GWAS Catalog".to_string(),
+            reason: "GWAS Catalog returned a response BioMCP could not decode.".to_string(),
+            suggestion: "Retry later: biomcp get variant <id> gwas".to_string(),
+        },
+        BioMcpError::Http(source) if source.is_timeout() || source.is_connect() => {
+            BioMcpError::SourceUnavailable {
+                source_name: "GWAS Catalog".to_string(),
+                reason: "GWAS Catalog is temporarily unavailable.".to_string(),
+                suggestion: "Retry later: biomcp get variant <id> gwas".to_string(),
+            }
+        }
+        BioMcpError::Api { api, message }
+            if api == GWAS_API && gwas_status_is_transient(&message) =>
+        {
+            BioMcpError::SourceUnavailable {
+                source_name: "GWAS Catalog".to_string(),
+                reason: "GWAS Catalog is temporarily unavailable.".to_string(),
+                suggestion: "Retry later: biomcp get variant <id> gwas".to_string(),
+            }
+        }
+        other => other,
+    }
+}
+
+fn gwas_status_is_transient(message: &str) -> bool {
+    let Some(status) = message
+        .strip_prefix("HTTP ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|code| code.parse::<u16>().ok())
+    else {
+        return false;
+    };
+
+    status == 408 || status == 429 || (500..=599).contains(&status)
 }
 
 fn normalize_rsid(value: &str) -> Result<String, BioMcpError> {
@@ -526,5 +583,67 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].pvalue, Some(1.0e-8));
+    }
+
+    #[tokio::test]
+    async fn associations_by_rsid_remaps_decode_failures_to_source_unavailable() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/singleNucleotidePolymorphisms/rs7903146/associations",
+            ))
+            .and(query_param("projection", "associationByStudy"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("{not-json"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = GwasClient::new_for_test(server.uri()).expect("client");
+        let err = client
+            .associations_by_rsid("rs7903146", 5)
+            .await
+            .expect_err("decode failure should be remapped");
+
+        assert!(matches!(
+            err,
+            BioMcpError::SourceUnavailable {
+                ref source_name,
+                ref reason,
+                ..
+            } if source_name == "GWAS Catalog"
+                && reason.contains("could not decode")
+        ));
+    }
+
+    #[tokio::test]
+    async fn associations_by_rsid_remaps_transient_http_failures_to_source_unavailable() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/singleNucleotidePolymorphisms/rs7903146/associations",
+            ))
+            .and(query_param("projection", "associationByStudy"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("maintenance"))
+            .mount(&server)
+            .await;
+
+        let client = GwasClient::new_for_test(server.uri()).expect("client");
+        let err = client
+            .associations_by_rsid("rs7903146", 5)
+            .await
+            .expect_err("503 should be remapped");
+
+        assert!(matches!(
+            err,
+            BioMcpError::SourceUnavailable {
+                ref source_name,
+                ref reason,
+                ..
+            } if source_name == "GWAS Catalog"
+                && reason.contains("temporarily unavailable")
+        ));
     }
 }

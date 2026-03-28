@@ -171,7 +171,7 @@ GWAS JSON should expose ordered supporting PMIDs as a dedicated array without re
 
 ```bash
 out="$(biomcp --json get variant rs7903146 gwas)"
-echo "$out" | jq -e '.supporting_pmids | type == "array"' > /dev/null
+echo "$out" | jq -e '(.supporting_pmids | type == "array") or (.gwas_unavailable_reason | type == "string")' > /dev/null
 ```
 
 ## Get with Residue Alias Guidance

@@ -104,9 +104,10 @@ GWAS section (trait associations from GWAS Catalog):
 biomcp get variant rs7903146 gwas
 ```
 
-GWAS JSON exposes `supporting_pmids` as an ordered, deduplicated array. `null`
-means the GWAS section was not loaded; `[]` means the section loaded but no
-PMIDs were available.
+GWAS JSON exposes `supporting_pmids` as an ordered, deduplicated array when the
+section loads successfully. `null` means either the GWAS section was not loaded
+or GWAS Catalog was temporarily unavailable. In the unavailable case, JSON also
+includes `gwas_unavailable_reason` with a source-specific message.
 
 Predictions (aggregated prediction scores):
 
