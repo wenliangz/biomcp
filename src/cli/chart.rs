@@ -11,17 +11,29 @@ struct EmbeddedCharts;
 
 #[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartCommand {
+    /// Categorical counts as vertical bars
     Bar,
+    /// Mutation-grouped sample counts split by outcome
     StackedBar,
+    /// Proportional distribution of categories
     Pie,
+    /// Ranked per-sample mutation burden
     Waterfall,
+    /// Pairwise co-occurrence matrix
     Heatmap,
+    /// Binned distribution of a continuous value
     Histogram,
+    /// Smoothed distribution estimate
     Density,
+    /// Median, IQR, and whiskers for group comparison
     Box,
+    /// Full distribution shape for group comparison
     Violin,
+    /// Stacked density comparison across groups
     Ridgeline,
+    /// Paired expression values for two genes
     Scatter,
+    /// Kaplan-Meier survival curves
     Survival,
 }
 

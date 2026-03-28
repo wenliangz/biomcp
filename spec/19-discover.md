@@ -93,7 +93,8 @@ echo "$out" | mustmatch like "UMLS enrichment unavailable"
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" --json discover Keytruda)"
 echo "$out" | mustmatch like '"concepts": ['
-echo "$out" | mustmatch like '"next_commands": ['
+echo "$out" | jq -e '._meta.next_commands | type == "array" and length > 0' > /dev/null
+echo "$out" | jq -e 'has("next_commands") | not' > /dev/null
 echo "$out" | mustmatch like '"section_sources": ['
 echo "$out" | mustmatch like '"discovery_sources": ['
 echo "$out" | mustmatch like '"evidence_urls": ['

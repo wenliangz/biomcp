@@ -4,76 +4,69 @@
 
 ```bash
 checkpoint status
+rg --files .march
 sed -n '1,220p' .march/ticket.md
-sed -n '1,220p' .march/design-draft.md
+sed -n '1,260p' .march/design-draft.md
 sed -n '1,260p' .march/design-final.md
-rg -n "to_entity_json|to_pretty\\(&results\\)|Commands::Batch|batch_gene_json|next_commands_json_property|evidence-urls" src spec Cargo.toml
-sed -n '1,260p' src/render/json.rs
-sed -n '4980,5285p' src/cli/mod.rs
-sed -n '10120,10720p' src/cli/mod.rs
-sed -n '1,260p' spec/11-evidence-urls.md
-cargo test batch_gene_json_includes_meta_per_item
-cargo test to_entity_json_value_adds_meta_and_flattens_entity
-cargo test batch_protein_json_omits_requested_section_from_next_commands
-cargo test batch_adverse_event_json_uses_variant_specific_meta
-cargo test batch_gene_json_includes_meta_per_item
-cargo fmt --all
-./bin/lint
+rg --files
+sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/cli-design/SKILL.md
+sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/testing-mindset/SKILL.md
+sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/rust-standards/SKILL.md
+rg -n "render_.*help|long_help|ChartCommand|to_discover_json_adds_discover_meta_aliases|next_commands" src tests spec
+checkpoint done 1
+checkpoint note "Using cli-design, testing-mindset, and rust-standards. Scope follows design-final: only search article alias visibility changes; discover JSON keeps _meta.next_commands only; chart and trial help get explicit descriptions."
+sed -n '7200,7365p' src/cli/mod.rs
+sed -n '660,740p' src/render/json.rs
+sed -n '1,120p' src/cli/chart.rs
+sed -n '1,80p' src/entities/discover.rs
+sed -n '1,220p' spec/06-article.md
+sed -n '1,220p' spec/04-trial.md
+sed -n '1,220p' spec/13-study.md
+sed -n '1,180p' spec/19-discover.md
+sed -n '720,980p' src/cli/mod.rs
+sed -n '420,500p' src/cli/mod.rs
+checkpoint done 2
+cargo test help_
+cargo test to_discover_json_adds_discover_meta_aliases
+cargo run --bin biomcp -- search article --help
+cargo test help_
+cargo test to_discover_json_adds_discover_meta_aliases
 cargo test
-python3 -m pytest spec/11-evidence-urls.md --mustmatch-lang bash --mustmatch-timeout 60 -v
-uv run --extra dev sh -c 'PATH="$(pwd)/target/debug:$PATH" pytest spec/11-evidence-urls.md --mustmatch-lang bash --mustmatch-timeout 60 -v'
-ps -ef | rg "pytest spec/11-evidence-urls|uv run --extra dev|mustmatch"
-kill 1949837
+git diff -- src/cli/mod.rs src/cli/chart.rs src/entities/discover.rs src/render/json.rs spec/04-trial.md spec/06-article.md spec/13-study.md spec/19-discover.md
 git status --short
+cargo fmt --all
+checkpoint done 3
 ```
 
 ## What changed
 
-- Added `to_entity_json_value` in `src/render/json.rs` and refactored
-  `to_entity_json` to pretty-print that typed value so batch JSON can reuse the
-  exact single-entity `_meta` contract without string round-trips.
-- Added `render_batch_json` in `src/cli/mod.rs`.
-- Updated every `Commands::Batch` JSON branch to wrap each item with the same
-  evidence URL, next-command, and section-source helpers used by the matching
-  `get` command.
-- Preserved the array root shape for `batch --json`.
-- Kept markdown batch rendering unchanged.
-- Added focused Rust tests for:
-  - typed entity JSON value rendering
-  - end-to-end `batch gene --json` metadata contract
-  - protein batch next-command filtering for requested sections
-  - adverse-event batch variant-specific metadata
-- Added a spec section to `spec/11-evidence-urls.md` covering the batch JSON
-  metadata contract.
+- Changed `search article` date flags in `src/cli/mod.rs` from hidden aliases to visible aliases so help now advertises `--since` and `--until`.
+- Clarified `search trial --phase` help in `src/cli/mod.rs` to distinguish canonical numeric CLI forms from accepted `PHASE*` aliases while preserving the existing `1/2` explanation.
+- Added one-line clap doc comments to every `ChartCommand` variant in `src/cli/chart.rs` so `biomcp chart --help` lists a purpose for each chart topic.
+- Added `#[serde(skip)]` to `DiscoverResult.next_commands` in `src/entities/discover.rs` so `discover --json` exposes follow-up commands only under `_meta.next_commands`.
+- Strengthened Rust proof in `src/cli/mod.rs` and `src/render/json.rs` to cover the visible aliases, phase canonical note, chart help descriptions, and discover JSON de-duplication.
+- Updated executable specs in `spec/04-trial.md`, `spec/06-article.md`, `spec/13-study.md`, and `spec/19-discover.md` to match the approved user-visible contract.
 
 ## Proof added or updated
 
-- `render::json::tests::to_entity_json_value_adds_meta_and_flattens_entity`
-- `cli::tests::batch_gene_json_includes_meta_per_item`
-- `cli::next_commands_json_property::batch_protein_json_omits_requested_section_from_next_commands`
-- `cli::next_commands_json_property::batch_adverse_event_json_uses_variant_specific_meta`
-- `spec/11-evidence-urls.md` section `Batch JSON Metadata Contract`
+- `cli::tests::article_date_help_advertises_shared_accepted_formats`
+- `cli::tests::trial_phase_help_explains_canonical_numeric_forms_and_aliases`
+- `cli::tests::chart_help_lists_descriptions_for_all_chart_topics`
+- `render::json::tests::to_discover_json_adds_discover_meta_aliases`
+- `spec/04-trial.md`
+- `spec/06-article.md`
+- `spec/13-study.md`
+- `spec/19-discover.md`
 
 ## Verification
 
-- `cargo test batch_gene_json_includes_meta_per_item`
-  - initially failed before implementation because batch JSON emitted bare
-    entity objects with no `_meta`
-  - passes after the fix
-- `cargo test to_entity_json_value_adds_meta_and_flattens_entity`
-- `cargo test batch_protein_json_omits_requested_section_from_next_commands`
-- `cargo test batch_adverse_event_json_uses_variant_specific_meta`
+- `cargo test help_`
+- `cargo test to_discover_json_adds_discover_meta_aliases`
+- `cargo run --bin biomcp -- search article --help`
 - `cargo fmt --all`
-- `./bin/lint`
 - `cargo test`
 
 ## Deviations / notes
 
-- The design’s direct spec command used `.venv/bin/python`, but that virtualenv
-  did not exist initially in this worktree.
-- `python3 -m pytest ... --mustmatch-*` failed because the `mustmatch` plugin
-  was not installed in the system interpreter.
-- I retried using the repo’s supported `uv run --extra dev ... pytest ...`
-  command from `Makefile`, which created `.venv` but then hung without producing
-  observable test output in this session, so I terminated that process after the
-  Rust verification had already passed.
+- No design deviations.
+- I did not broaden visible `--since` / `--until` aliases to `search trial` or `search adverse-event`; the implementation follows the final design scope exactly.

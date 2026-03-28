@@ -97,6 +97,8 @@ parser contract: `YYYY`, `YYYY-MM`, and `YYYY-MM-DD`.
 help_out="$(biomcp search article --help)"
 echo "$help_out" | mustmatch like "Published after date (YYYY, YYYY-MM, or YYYY-MM-DD)"
 echo "$help_out" | mustmatch like "Published before date (YYYY, YYYY-MM, or YYYY-MM-DD)"
+echo "$help_out" | mustmatch '/\[aliases: --since\]/'
+echo "$help_out" | mustmatch '/\[aliases: --until\]/'
 
 list_out="$(biomcp list article)"
 echo "$list_out" | mustmatch like "--date-from <YYYY|YYYY-MM|YYYY-MM-DD>"
