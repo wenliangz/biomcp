@@ -7,7 +7,7 @@ Disease commands normalize labels to ontology-backed identifiers and provide cro
 | Disease search | `search disease melanoma` | Confirms disease normalization output |
 | Disease detail | `get disease melanoma` | Confirms canonical disease card |
 | Disease genes | `get disease melanoma genes` | Confirms association section rendering |
-| Sparse phenotype guidance | `get disease MONDO:0007947 phenotypes` | Confirms truthful completeness note and review follow-up |
+| Sparse phenotype guidance | `get disease MONDO:0100605 phenotypes` | Confirms truthful completeness note and review follow-up |
 | Disease to trials | `disease trials melanoma` | Confirms trial helper path |
 | Disease to articles | `disease articles melanoma` | Confirms literature helper path |
 | Disease to drugs | `disease drugs melanoma` | Confirms treatment helper path |
@@ -96,10 +96,10 @@ echo "$out" | mustmatch like "|Name|Mechanism|Target|"
 When phenotype rows are present but limited, BioMCP should say the section is source-backed and may be incomplete for the full disease presentation, then suggest a review-literature follow-up.
 
 ```bash
-out="$(biomcp get disease MONDO:0007947 phenotypes)"
+out="$(biomcp get disease MONDO:0100605 phenotypes)"
 echo "$out" | mustmatch like "source-backed"
 echo "$out" | mustmatch like "may be incomplete for the full disease presentation"
-echo "$out" | mustmatch like 'biomcp search article -d "MONDO:0007947" --type review'
+echo "$out" | mustmatch like 'biomcp search article -d "4H leukodystrophy" --type review --limit 5'
 ```
 
 ## Exact Disease Ranking

@@ -35,6 +35,7 @@ use crate::entities::study::{
     FilterResult as StudyFilterResult, MutationComparisonResult as StudyMutationComparisonResult,
     SampleUniverseBasis as StudySampleUniverseBasis, StudyDownloadCatalog, StudyDownloadResult,
     StudyInfo, StudyQueryResult, SurvivalResult as StudySurvivalResult,
+    TopMutatedGenesResult as StudyTopMutatedGenesResult,
 };
 use crate::entities::trial::{Trial, TrialSearchResult};
 use crate::entities::variant::{
@@ -1354,7 +1355,7 @@ pub(crate) fn related_trial(trial: &Trial) -> Vec<String> {
 }
 
 pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
-    let name = quote_arg(&disease.name);
+    let name = quote_arg(&disease_literature_query(disease));
     if name.is_empty() {
         return Vec::new();
     }
@@ -1368,6 +1369,22 @@ pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
     out.push(format!("biomcp search article -d {name}"));
     out.push(format!("biomcp search drug {name}"));
     dedupe_markdown_commands(out)
+}
+
+fn disease_literature_query(disease: &Disease) -> String {
+    let name = disease.name.trim();
+    if !name.is_empty() && !name.eq_ignore_ascii_case(disease.id.trim()) {
+        return name.to_string();
+    }
+
+    disease
+        .synonyms
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .find(|synonym| !synonym.is_empty())
+        .unwrap_or(disease.id.trim())
+        .to_string()
 }
 
 pub(crate) fn related_pgx(pgx: &Pgx) -> Vec<String> {
@@ -2062,6 +2079,7 @@ pub fn disease_markdown(
         recruiting_trial_count => &disease.recruiting_trial_count,
         pathways => &disease.pathways,
         phenotypes => phenotype_rows,
+        literature_query => disease_literature_query(disease),
         variants => &disease.variants,
         top_variant => &disease.top_variant,
         models => model_rows,
@@ -3668,6 +3686,32 @@ pub fn study_query_markdown(result: &StudyQueryResult) -> String {
     }
 }
 
+pub fn study_top_mutated_markdown(result: &StudyTopMutatedGenesResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# Study Top Mutated Genes: {}\n\n",
+        result.study_id
+    ));
+    out.push_str("| Gene | Mutated Samples | Mutation Events | Total Samples | Mutation Rate |\n");
+    out.push_str("|---|---|---|---|---|\n");
+    if result.rows.is_empty() {
+        out.push_str("| - | 0 | 0 | 0 | 0.000000 |\n");
+        return out;
+    }
+
+    for row in &result.rows {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {:.6} |\n",
+            row.gene,
+            row.mutated_samples,
+            row.mutation_events,
+            result.total_samples,
+            row.mutation_rate
+        ));
+    }
+    out
+}
+
 pub fn study_filter_markdown(result: &StudyFilterResult) -> String {
     const SAMPLE_DISPLAY_LIMIT: usize = 50;
 
@@ -4035,6 +4079,8 @@ mod tests {
         SampleUniverseBasis as StudySampleUniverseBasis, StudyDownloadCatalog, StudyDownloadResult,
         StudyInfo, StudyQueryResult, SurvivalEndpoint as StudySurvivalEndpoint,
         SurvivalGroupResult as StudySurvivalGroupResult, SurvivalResult as StudySurvivalResult,
+        TopMutatedGeneRow as StudyTopMutatedGeneRow,
+        TopMutatedGenesResult as StudyTopMutatedGenesResult,
     };
     use crate::entities::variant::{TreatmentImplication, Variant, VariantOncoKbResult};
 
@@ -5013,6 +5059,79 @@ mod tests {
             "biomcp search article -d \"Marfan syndrome\" --type review --limit 5"
         );
         assert!(related.contains(&"biomcp search trial -c \"Marfan syndrome\"".to_string()));
+    }
+
+    #[test]
+    fn related_disease_uses_synonym_when_name_is_raw_id() {
+        let disease = Disease {
+            id: "MONDO:0100605".to_string(),
+            name: "MONDO:0100605".to_string(),
+            definition: None,
+            synonyms: vec!["4H leukodystrophy".to_string()],
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0001252".to_string(),
+                name: Some("Hypomyelination".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: None,
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: None,
+            }],
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let related = related_disease(&disease);
+        assert_eq!(
+            related[0],
+            "biomcp search article -d \"4H leukodystrophy\" --type review --limit 5"
+        );
+    }
+
+    #[test]
+    fn study_top_mutated_markdown_renders_ranked_table() {
+        let markdown = study_top_mutated_markdown(&StudyTopMutatedGenesResult {
+            study_id: "msk_impact_2017".to_string(),
+            total_samples: 3,
+            rows: vec![
+                StudyTopMutatedGeneRow {
+                    gene: "TP53".to_string(),
+                    mutated_samples: 2,
+                    mutation_events: 2,
+                    mutation_rate: 2.0 / 3.0,
+                },
+                StudyTopMutatedGeneRow {
+                    gene: "KRAS".to_string(),
+                    mutated_samples: 2,
+                    mutation_events: 2,
+                    mutation_rate: 2.0 / 3.0,
+                },
+            ],
+        });
+
+        assert!(markdown.contains("# Study Top Mutated Genes: msk_impact_2017"));
+        assert!(markdown.contains(
+            "| Gene | Mutated Samples | Mutation Events | Total Samples | Mutation Rate |"
+        ));
+        assert!(markdown.contains("| TP53 | 2 | 2 | 3 |"));
+        assert!(markdown.contains("| KRAS | 2 | 2 | 3 |"));
     }
 
     #[test]

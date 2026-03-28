@@ -40,6 +40,21 @@ pub struct MutationFrequencyResult {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TopMutatedGeneRow {
+    pub gene: String,
+    pub mutated_samples: usize,
+    pub mutation_events: usize,
+    pub mutation_rate: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TopMutatedGenesResult {
+    pub study_id: String,
+    pub total_samples: usize,
+    pub rows: Vec<TopMutatedGeneRow>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CnaDistributionResult {
     pub study_id: String,
     pub gene: String,
@@ -359,6 +374,20 @@ pub async fn query_study(
     .await
 }
 
+pub async fn top_mutated_genes(
+    study_id: &str,
+    limit: usize,
+) -> Result<TopMutatedGenesResult, BioMcpError> {
+    let study_id = normalize_study_id(study_id)?;
+    let root = crate::sources::cbioportal_study::resolve_study_root();
+
+    run_blocking(move || {
+        let study_dir = resolve_study_dir(&root, &study_id)?;
+        Ok(crate::sources::cbioportal_study::top_mutated_genes(&study_dir, limit)?.into())
+    })
+    .await
+}
+
 pub async fn expression_values(study_id: &str, gene: &str) -> Result<Vec<f64>, BioMcpError> {
     let study_id = normalize_study_id(study_id)?;
     let gene = normalize_gene(gene)?;
@@ -586,6 +615,27 @@ impl From<crate::sources::cbioportal_study::MutationFrequencyResult> for Mutatio
             frequency: value.frequency,
             top_variant_classes: value.top_variant_classes,
             top_protein_changes: value.top_protein_changes,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::TopMutatedGeneRow> for TopMutatedGeneRow {
+    fn from(value: crate::sources::cbioportal_study::TopMutatedGeneRow) -> Self {
+        Self {
+            gene: value.gene,
+            mutated_samples: value.mutated_samples,
+            mutation_events: value.mutation_events,
+            mutation_rate: value.mutation_rate,
+        }
+    }
+}
+
+impl From<crate::sources::cbioportal_study::TopMutatedGenesResult> for TopMutatedGenesResult {
+    fn from(value: crate::sources::cbioportal_study::TopMutatedGenesResult) -> Self {
+        Self {
+            study_id: value.study_id,
+            total_samples: value.total_samples,
+            rows: value.rows.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -1140,6 +1190,33 @@ mod tests {
             }
             other => panic!("unexpected query result: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn top_mutated_genes_reports_ranked_rows() {
+        let _guard = crate::test_support::env_lock().lock().await;
+        let fixture = TestStudyDir::new("top-mutated");
+        minimal_study_fixture(&fixture.root, "demo_study");
+        write_file(
+            &fixture.root.join("demo_study").join("data_mutations.txt"),
+            "Hugo_Symbol\tTumor_Sample_Barcode\tVariant_Classification\tHGVSp_Short\nTP53\tS1\tMissense_Mutation\tp.R175H\nTP53\tS2\tMissense_Mutation\tp.R248Q\nKRAS\tS2\tMissense_Mutation\tp.G12D\nKRAS\tS3\tMissense_Mutation\tp.G12V\nBRAF\tS1\tMissense_Mutation\tp.V600E\n",
+        );
+        // SAFETY: tests serialize env var mutation through a process-wide mutex.
+        unsafe {
+            std::env::set_var("BIOMCP_STUDY_DIR", &fixture.root);
+        }
+
+        let result = top_mutated_genes("demo_study", 10)
+            .await
+            .expect("top mutated should pass");
+        assert_eq!(result.study_id, "demo_study");
+        assert_eq!(result.total_samples, 3);
+        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows[0].gene, "KRAS");
+        assert_eq!(result.rows[0].mutated_samples, 2);
+        assert_eq!(result.rows[0].mutation_events, 2);
+        assert_eq!(result.rows[1].gene, "TP53");
+        assert_eq!(result.rows[2].gene, "BRAF");
     }
 
     #[tokio::test]
