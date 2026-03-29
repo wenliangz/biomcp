@@ -33,7 +33,7 @@ Keyword search supports broad discovery before narrowing to specific entities. T
 ```bash
 out="$(biomcp search article -k immunotherapy --limit 3)"
 echo "$out" | mustmatch like "keyword=immunotherapy"
-echo "$out" | mustmatch like "PMID"
+echo "$out" | mustmatch like "| PMID | Title | Source(s) | Date | Why | Cit. |"
 ```
 
 ## Invalid Date Fails Before Backend Warnings
@@ -127,8 +127,8 @@ other non-EuropePMC matches when those sources lack retraction metadata.
 
 ```bash
 out="$(biomcp --json search article -q 'alternative microexon splicing metastasis' --limit 5)"
-echo "$out" | mustmatch like "\"matched_sources\": ["
-echo "$out" | mustmatch like "\"pubtator\""
+echo "$out" | mustmatch like '"matched_sources": ['
+echo "$out" | mustmatch like '"matched_sources": ["pubtator"'
 ```
 
 ## Getting Article Details
@@ -138,7 +138,7 @@ The article detail card should preserve stable bibliographic anchors for reprodu
 ```bash
 out="$(biomcp get article 22663011)"
 echo "$out" | mustmatch like "PMID: 22663011"
-echo "$out" | mustmatch like "Journal:"
+echo "$out" | mustmatch '/Journal: .+/'
 ```
 
 ## Article Annotations
@@ -150,7 +150,7 @@ out="$(biomcp get article 22663011 annotations)"
 echo "$out" | mustmatch like "## PubTator Annotations"
 echo "$out" | mustmatch like "normalized entity mentions"
 echo "$out" | mustmatch like "standardized extraction"
-echo "$out" | mustmatch like "Genes:"
+echo "$out" | mustmatch '/Genes: [A-Z0-9]/'
 ```
 
 ## Article Full Text Saved Markdown
@@ -164,7 +164,7 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 out="$(TMPDIR="$tmpdir" biomcp get article 27083046 fulltext)"
 echo "$out" | mustmatch like "## Full Text"
-echo "$out" | mustmatch like "Saved to:"
+echo "$out" | mustmatch '/^Saved to: .+/m'
 path="$(printf '%s\n' "$out" | sed -n 's/^Saved to: //p' | head -n1)"
 test -n "$path"
 test -f "$path"
@@ -188,7 +188,7 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 out="$(TMPDIR="$tmpdir" biomcp get article 25268582 fulltext)"
 echo "$out" | mustmatch like "## Full Text"
-echo "$out" | mustmatch like "Saved to:"
+echo "$out" | mustmatch '/^Saved to: .+/m'
 path="$(printf '%s\n' "$out" | sed -n 's/^Saved to: //p' | head -n1)"
 test -n "$path"
 test -f "$path"
@@ -202,7 +202,7 @@ test -s "$path"
 ```bash
 out="$(biomcp article entities 22663011)"
 echo "$out" | mustmatch like "# Entities in PMID 22663011"
-echo "$out" | mustmatch like "## Genes"
+echo "$out" | mustmatch like "## Genes ("
 ```
 
 ## Article Batch
@@ -215,20 +215,20 @@ without Semantic Scholar TLDR data.
 ```bash
 out="$(biomcp article batch 22663011 24200969)"
 echo "$out" | mustmatch like "# Article Batch (2)"
-echo "$out" | mustmatch like "## 1."
-echo "$out" | mustmatch like "## 2."
+echo "$out" | mustmatch like "## 1. Improved survival with MEK inhibition in BRAF-mutated melanoma."
+echo "$out" | mustmatch like "## 2. Activities of multiple cancer-related pathways are associated"
 echo "$out" | mustmatch like "PMID: 22663011"
 echo "$out" | mustmatch like "PMID: 24200969"
 
 json_out="$(biomcp --json article batch 22663011 24200969)"
-echo "$json_out" | mustmatch like "\"requested_id\": \"22663011\""
-echo "$json_out" | mustmatch like "\"pmid\": \"22663011\""
-echo "$json_out" | mustmatch like "\"title\":"
-echo "$json_out" | mustmatch like "\"year\":"
+echo "$json_out" | mustmatch like '"requested_id": "22663011"'
+echo "$json_out" | mustmatch like '"pmid": "22663011"'
+echo "$json_out" | mustmatch like '"title": "'
+echo "$json_out" | jq -e '.[0].year | type == "number"' > /dev/null
 
 no_key_out="$(env -u S2_API_KEY biomcp --json article batch 22663011)"
-echo "$no_key_out" | mustmatch like "\"requested_id\": \"22663011\""
-echo "$no_key_out" | mustmatch like "\"title\":"
+echo "$no_key_out" | mustmatch like '"requested_id": "22663011"'
+echo "$no_key_out" | mustmatch like '"title": "'
 ```
 
 ## Article Batch Invalid Identifier
@@ -259,7 +259,7 @@ still renders without an API-key gate.
 ```bash
 out="$(env -u S2_API_KEY biomcp get article 22663011)"
 echo "$out" | mustmatch like "PMID: 22663011"
-echo "$out" | mustmatch like "Journal:"
+echo "$out" | mustmatch '/Journal: .+/'
 echo "$out" | mustmatch not like "API key required"
 ```
 
@@ -271,8 +271,8 @@ local relevance policy.
 
 ```bash
 out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --limit 3)"
-echo "$out" | mustmatch like "\"semantic_scholar_enabled\": true"
-echo "$out" | mustmatch like "\"ranking\": {"
+echo "$out" | mustmatch like '"semantic_scholar_enabled": true'
+echo "$out" | mustmatch like '"ranking": {'
 ```
 
 ## Article Search JSON With Semantic Scholar Key
@@ -282,9 +282,9 @@ state and merged source metadata in JSON.
 
 ```bash
 out="$(biomcp --json search article -g BRAF -d melanoma --include-retracted --limit 5)"
-echo "$out" | mustmatch like "\"semantic_scholar_enabled\": true"
-echo "$out" | mustmatch like "\"matched_sources\": ["
-echo "$out" | mustmatch like "\"ranking\": {"
+echo "$out" | mustmatch like '"semantic_scholar_enabled": true'
+echo "$out" | mustmatch like '"matched_sources": ['
+echo "$out" | mustmatch like '"ranking": {'
 ```
 
 ## Article Debug Plan
@@ -295,16 +295,16 @@ markers, and sources in both markdown and JSON without changing default output.
 ```bash
 out="$(env -u S2_API_KEY biomcp search article -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
-echo "$out" | mustmatch like "\"surface\": \"search_article\""
-echo "$out" | mustmatch like "\"planner=federated\""
+echo "$out" | mustmatch like '"surface": "search_article"'
+echo "$out" | mustmatch like '"routing=source_federation"'
 echo "$out" | mustmatch like "Semantic Scholar"
 
 json_out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --debug-plan --limit 3)"
-echo "$json_out" | mustmatch like "\"debug_plan\": {"
-echo "$json_out" | mustmatch like "\"surface\": \"search_article\""
-echo "$json_out" | mustmatch like "\"leg\": \"article\""
-echo "$json_out" | mustmatch like "\"sources\": ["
-echo "$json_out" | mustmatch like "\"Semantic Scholar\""
+echo "$json_out" | mustmatch like '"debug_plan": {'
+echo "$json_out" | mustmatch like '"surface": "search_article"'
+echo "$json_out" | mustmatch like '"leg": "article"'
+echo "$json_out" | mustmatch like '"sources": ['
+echo "$json_out" | mustmatch like '"Semantic Scholar"'
 ```
 
 ## Semantic Scholar TLDR Section
@@ -315,9 +315,9 @@ metrics.
 
 ```bash
 out="$(biomcp get article 22663011 tldr)"
-echo "$out" | mustmatch like "# "
+echo "$out" | mustmatch '/^# .+/'
 echo "$out" | mustmatch like "Semantic Scholar"
-echo "$out" | mustmatch like "TLDR:"
+echo "$out" | mustmatch '/TLDR: .+/'
 echo "$out" | mustmatch like "Influential citations:"
 ```
 
@@ -375,10 +375,8 @@ the error text.
 status=0
 out="$(biomcp get article S1535610826000103 2>&1)" || status=$?
 test "$status" -ne 0
-echo "$out" | mustmatch like "PMID"
-echo "$out" | mustmatch like "PMCID"
-echo "$out" | mustmatch like "DOI"
-echo "$out" | mustmatch like "publisher"
+echo "$out" | mustmatch like "BioMCP resolves PMID (digits only, e.g., 22663011), PMCID (starts with PMC, e.g., PMC9984800), and DOI (starts with 10., e.g., 10.1056/NEJMoa1203421)."
+echo "$out" | mustmatch like "publisher PIIs (e.g., S1535610826000103) are not indexed by PubMed or Europe PMC"
 ```
 
 ## Sort Behavior
@@ -396,7 +394,7 @@ Passing `--sort date` opts into date-based ordering.
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" search article -k melanoma --sort date --limit 3)"
-echo "$out" | mustmatch like "sort=date"
+echo "$out" | mustmatch like "# Articles: keyword=melanoma, exclude_retracted=true, sort=date"
 ```
 
 ## Federated Deep Offset Guard

@@ -21,7 +21,7 @@ The confirmed long-form MAPK phrase should return MAPK-named pathways instead of
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search pathway "mitogen activated protein kinase" --limit 5)"
 echo "$out" | mustmatch like "# Pathways: mitogen activated protein kinase"
 echo "$out" | mustmatch like "| Source | ID | Name |"
-echo "$out" | mustmatch like "MAPK"
+echo "$out" | mustmatch '/MAPK/'
 ```
 
 ## Default KEGG Card Stays Concise
@@ -46,8 +46,9 @@ default-card fix.
 
 ```bash
 out="$(biomcp get pathway hsa05200 genes)"
-echo "$out" | mustmatch like "## Genes"
-echo "$out" | mustmatch like "BRAF"
+echo "$out" | mustmatch like "# Pathways in cancer - Homo sapiens (human) - genes"
+echo "$out" | mustmatch like "## Genes (KEGG)"
+echo "$out" | mustmatch '/(^|, )BRAF(,|$)/'
 ```
 
 ## Exact Title Match Ranks First Across Sources
@@ -105,8 +106,8 @@ unset status
 out="$(biomcp get pathway hsa05200 events 2>&1)" || status=$?
 test "${status:-0}" -eq 1
 echo "$out" | mustmatch like 'Invalid argument: pathway section "events"'
-echo "$out" | mustmatch like "KEGG"
-echo "$out" | mustmatch like "Reactome"
+echo "$out" | mustmatch like "is not available for KEGG pathways"
+echo "$out" | mustmatch like "Use a Reactome pathway ID such as R-HSA-5673001"
 ```
 
 ## Unsupported KEGG Enrichment Section
@@ -119,8 +120,8 @@ unset status
 out="$(biomcp get pathway hsa05200 enrichment 2>&1)" || status=$?
 test "${status:-0}" -eq 1
 echo "$out" | mustmatch like 'Invalid argument: pathway section "enrichment"'
-echo "$out" | mustmatch like "KEGG"
-echo "$out" | mustmatch like "Reactome"
+echo "$out" | mustmatch like "is not available for KEGG pathways"
+echo "$out" | mustmatch like "Use a Reactome pathway ID such as R-HSA-5673001"
 ```
 
 ## WikiPathways Search Presence
@@ -131,7 +132,7 @@ Normal pathway search should include WikiPathways results alongside Reactome and
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search pathway "apoptosis" --limit 10)"
 echo "$out" | mustmatch like "| Source | ID | Name |"
 echo "$out" | mustmatch like "WikiPathways"
-echo "$out" | mustmatch like "WP"
+echo "$out" | mustmatch '/\| WikiPathways \| WP[0-9]+ \|/'
 ```
 
 ## WikiPathways Pathway Detail
@@ -141,7 +142,7 @@ echo "$out" | mustmatch like "WP"
 ```bash
 out="$(biomcp get pathway WP254)"
 echo "$out" | mustmatch like "Source: WikiPathways"
-echo "$out" | mustmatch like "WP254"
+echo "$out" | mustmatch '/WP254/'
 echo "$out" | mustmatch like "Homo sapiens"
 ```
 
@@ -151,8 +152,9 @@ echo "$out" | mustmatch like "Homo sapiens"
 
 ```bash
 out="$(biomcp get pathway WP254 genes)"
-echo "$out" | mustmatch like "## Genes"
-echo "$out" | mustmatch like "WikiPathways"
+echo "$out" | mustmatch like "# Apoptosis - genes"
+echo "$out" | mustmatch like "## Genes (WikiPathways)"
+echo "$out" | mustmatch like "[WikiPathways](https://www.wikipathways.org/pathways/WP254.html)"
 ```
 
 ## Unsupported WikiPathways Events Section
@@ -165,8 +167,8 @@ unset status
 out="$(biomcp get pathway WP254 events 2>&1)" || status=$?
 test "${status:-0}" -eq 1
 echo "$out" | mustmatch like 'Invalid argument: pathway section "events"'
-echo "$out" | mustmatch like "WikiPathways"
-echo "$out" | mustmatch like "Reactome"
+echo "$out" | mustmatch like "is not available for WikiPathways pathways"
+echo "$out" | mustmatch like "Use a Reactome pathway ID such as R-HSA-5673001"
 ```
 
 ## Unsupported WikiPathways Enrichment Section
@@ -179,6 +181,6 @@ unset status
 out="$(biomcp get pathway WP254 enrichment 2>&1)" || status=$?
 test "${status:-0}" -eq 1
 echo "$out" | mustmatch like 'Invalid argument: pathway section "enrichment"'
-echo "$out" | mustmatch like "WikiPathways"
-echo "$out" | mustmatch like "Reactome"
+echo "$out" | mustmatch like "is not available for WikiPathways pathways"
+echo "$out" | mustmatch like "Use a Reactome pathway ID such as R-HSA-5673001"
 ```

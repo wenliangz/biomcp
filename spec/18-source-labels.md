@@ -47,14 +47,14 @@ gene_json="$(biomcp get gene CFTR all --json)"
 echo "$gene_json" | mustmatch like '"section_sources": ['
 echo "$gene_json" | mustmatch like '"key": "summary"'
 echo "$gene_json" | mustmatch like '"key": "identity"'
-echo "$gene_json" | mustmatch like "NCBI Gene"
+echo "$gene_json" | mustmatch like '"label": "NCBI Gene"'
 
 drug_json="$(biomcp get drug ivacaftor all --json)"
 echo "$drug_json" | mustmatch like '"section_sources": ['
 echo "$drug_json" | mustmatch like '"key": "safety"'
 echo "$drug_json" | mustmatch like '"key": "targets"'
 echo "$drug_json" | mustmatch like "OpenFDA FAERS"
-echo "$drug_json" | mustmatch like "ChEMBL"
+echo "$drug_json" | mustmatch like '"label": "ChEMBL"'
 
 disease_json="$(biomcp get disease "cystic fibrosis" all --json)"
 echo "$disease_json" | mustmatch like '"section_sources": ['
@@ -81,7 +81,7 @@ echo "$trial_json" | mustmatch like "ClinicalTrials.gov"
 article_json="$(biomcp get article 22663011 --json)"
 echo "$article_json" | mustmatch like '"section_sources": ['
 echo "$article_json" | mustmatch like '"key": "bibliography"'
-echo "$article_json" | mustmatch like "PubMed"
+echo "$article_json" | mustmatch like '"label": "PubMed"'
 ```
 
 ## JSON section_sources — Pathway, Protein, PGX, Adverse Event
@@ -90,7 +90,7 @@ echo "$article_json" | mustmatch like "PubMed"
 pathway_json="$(biomcp get pathway R-HSA-5358351 all --json)"
 echo "$pathway_json" | mustmatch like '"section_sources": ['
 echo "$pathway_json" | mustmatch like '"key": "identity"'
-echo "$pathway_json" | mustmatch like "Reactome"
+echo "$pathway_json" | mustmatch like '"label": "Reactome"'
 
 wp_json="$(biomcp get pathway WP254 --json)"
 echo "$wp_json" | mustmatch like '"section_sources": ['
@@ -100,16 +100,16 @@ echo "$wp_json" | mustmatch like "WikiPathways"
 protein_json="$(biomcp get protein P15056 --json)"
 echo "$protein_json" | mustmatch like '"section_sources": ['
 echo "$protein_json" | mustmatch like '"key": "identity"'
-echo "$protein_json" | mustmatch like "UniProt"
+echo "$protein_json" | mustmatch like '"label": "UniProt"'
 
 pgx_json="$(biomcp get pgx CYP2D6 --json)"
 echo "$pgx_json" | mustmatch like '"section_sources": ['
-echo "$pgx_json" | mustmatch like "CPIC"
+echo "$pgx_json" | mustmatch like '"label": "CPIC"'
 
 ae_json="$(biomcp get adverse-event 10329882 --json)"
 echo "$ae_json" | mustmatch like '"section_sources": ['
 echo "$ae_json" | mustmatch like '"key": "reactions"'
-echo "$ae_json" | mustmatch like "OpenFDA"
+echo "$ae_json" | mustmatch like '"label": "OpenFDA"'
 ```
 
 ## Backward Compatibility

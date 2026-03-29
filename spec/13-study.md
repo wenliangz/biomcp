@@ -31,7 +31,7 @@ bash fixtures/setup-study-spec-fixture.sh "$PWD"
 . "$PWD/.cache/spec-study-env"
 test -n "${BIOMCP_STUDY_DIR:-}"
 test -d "$BIOMCP_STUDY_DIR"
-echo "$BIOMCP_STUDY_DIR" | mustmatch like "datasets"
+echo "$BIOMCP_STUDY_DIR" | mustmatch like "spec-study-datasets"
 ```
 
 ## Study Listing
@@ -94,9 +94,9 @@ Expression query should show summary statistics fields and source file label.
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study query --study paad_qcmg_uq_2016 --gene KRAS --type expression)"
 echo "$out" | mustmatch like "# Study Expression Distribution: KRAS (paad_qcmg_uq_2016)"
-echo "$out" | mustmatch like "| File |"
+echo "$out" | mustmatch like "| Metric | Value |"
 echo "$out" | mustmatch like "| Sample count |"
-echo "$out" | mustmatch like "| Mean |"
+echo "$out" | mustmatch '/\| Mean \| [0-9.-]+/'
 ```
 
 ## Cohort Split
@@ -110,7 +110,7 @@ echo "$out" | mustmatch like "# Study Cohort: TP53"
 echo "$out" | mustmatch like "| Group | Samples | Patients |"
 echo "$out" | mustmatch like "TP53-mutant"
 echo "$out" | mustmatch like "TP53-wildtype"
-echo "$out" | mustmatch like "| Total |"
+echo "$out" | mustmatch like "| Total | "
 ```
 
 ## Survival Aggregates
@@ -192,7 +192,7 @@ out="$(biomcp study filter --study brca_tcga_pan_can_atlas_2018 --mutated TP53)"
 echo "$out" | mustmatch like "# Study Filter: brca_tcga_pan_can_atlas_2018"
 echo "$out" | mustmatch like "## Criteria"
 echo "$out" | mustmatch like "| Filter | Matching Samples |"
-echo "$out" | mustmatch like "## Result"
+echo "$out" | mustmatch like $'## Criteria\n\n| Filter | Matching Samples |\n|---|---|\n| mutated TP53 |'
 echo "$out" | mustmatch like "| Study Total Samples |"
 ```
 
@@ -438,10 +438,7 @@ Incompatible chart type and query type combinations should fail with a clear err
 ```bash
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart violin --terminal 2>&1 || true)"
-echo "$out" | mustmatch like "violin"
-echo "$out" | mustmatch like "bar"
-echo "$out" | mustmatch like "pie"
-echo "$out" | mustmatch like "waterfall"
+echo "$out" | mustmatch like "chart type 'violin' is not valid for 'study query --type mutations'. Valid types: bar, pie, waterfall"
 ```
 
 ## Chart Flag: Co-occurrence Invalid Chart Type Error
@@ -451,10 +448,7 @@ Incompatible co-occurrence chart types should list the new heatmap option alongs
 ```bash
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study co-occurrence --study msk_impact_2017 --genes TP53,KRAS --chart violin --terminal 2>&1 || true)"
-echo "$out" | mustmatch like "violin"
-echo "$out" | mustmatch like "bar"
-echo "$out" | mustmatch like "pie"
-echo "$out" | mustmatch like "heatmap"
+echo "$out" | mustmatch like "chart type 'violin' is not valid for 'study co-occurrence'. Valid types: bar, pie, heatmap"
 ```
 
 ## Chart Flag: Mutation Compare Invalid Chart Type Error
@@ -464,9 +458,7 @@ Incompatible mutation-comparison chart types should list both `bar` and `stacked
 ```bash
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study compare --study msk_impact_2017 --gene TP53 --type mutations --target KRAS --chart violin --terminal 2>&1 || true)"
-echo "$out" | mustmatch like "violin"
-echo "$out" | mustmatch like "bar"
-echo "$out" | mustmatch like "stacked-bar"
+echo "$out" | mustmatch like "chart type 'violin' is not valid for 'study compare --type mutations'. Valid types: bar, stacked-bar"
 ```
 
 ## Chart Flag: Expression Compare Invalid Chart Type Error
@@ -477,10 +469,7 @@ Incompatible expression-comparison chart types should list `scatter` alongside t
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study compare --study msk_impact_2017 --gene TP53 --type expression --target ERBB2 --chart pie --terminal 2>&1 || true)"
 echo "$out" | mustmatch like "study compare --type expression"
-echo "$out" | mustmatch like "box"
-echo "$out" | mustmatch like "violin"
-echo "$out" | mustmatch like "ridgeline"
-echo "$out" | mustmatch like "scatter"
+echo "$out" | mustmatch like "Valid types: box, violin, ridgeline, scatter"
 ```
 
 ## Chart Subcommand: Documentation
@@ -490,51 +479,50 @@ echo "$out" | mustmatch like "scatter"
 ```bash
 out="$(biomcp chart)"
 test -n "$out"
-echo "$out" | mustmatch like "bar"
-echo "$out" | mustmatch like "heatmap"
-echo "$out" | mustmatch like "stacked-bar"
-echo "$out" | mustmatch like "waterfall"
-echo "$out" | mustmatch like "scatter"
-echo "$out" | mustmatch like "survival"
-echo "$out" | mustmatch like "violin"
+echo "$out" | mustmatch like "## Chart Types by Command"
+echo "$out" | mustmatch like "study query --type mutations"
+echo "$out" | mustmatch like "study co-occurrence"
+echo "$out" | mustmatch like "study compare --type expression"
+echo "$out" | mustmatch like "study survival"
+echo "$out" | mustmatch like "Heatmaps use a fixed continuous colormap."
 ```
 
 ```bash
 out="$(biomcp chart bar)"
 test -n "$out"
-echo "$out" | mustmatch like "Bar"
+echo "$out" | mustmatch like "# Bar Chart"
 ```
 
 ```bash
 out="$(biomcp chart survival)"
 test -n "$out"
-echo "$out" | mustmatch like "Survival"
+echo "$out" | mustmatch like "# Survival Chart"
 ```
 
 ```bash
 out="$(biomcp chart heatmap)"
 test -n "$out"
-echo "$out" | mustmatch like "Heatmap"
-echo "$out" | mustmatch like "palette"
+echo "$out" | mustmatch like "Heatmaps render pairwise co-mutation counts as an NxN matrix"
+echo "$out" | mustmatch like "`--palette` is not supported for heatmaps in this release."
 ```
 
 ```bash
 out="$(biomcp chart stacked-bar)"
 test -n "$out"
-echo "$out" | mustmatch like "Stacked Bar"
+echo "$out" | mustmatch like "# Stacked Bar Chart"
 echo "$out" | mustmatch like "mutation rate"
 ```
 
 ```bash
 out="$(biomcp chart waterfall)"
 test -n "$out"
-echo "$out" | mustmatch like "Waterfall"
+echo "$out" | mustmatch like "# Waterfall"
 echo "$out" | mustmatch like "mutation burden"
 ```
 
 ```bash
 out="$(biomcp chart scatter)"
 test -n "$out"
-echo "$out" | mustmatch like "Scatter"
-echo "$out" | mustmatch like "paired expression"
+echo "$out" | mustmatch like "Scatter plots render paired expression values for two genes"
+echo "$out" | mustmatch like "Only samples with numeric expression values for both genes are plotted."
 ```

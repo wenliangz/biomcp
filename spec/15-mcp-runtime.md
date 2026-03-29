@@ -12,9 +12,9 @@ operators at the canonical HTTP path.
 ```bash
 out="$(biomcp serve-http --help)"
 echo "$out" | mustmatch like "Streamable HTTP"
-echo "$out" | mustmatch like "/mcp"
-echo "$out" | mustmatch like "--host"
-echo "$out" | mustmatch like "--port"
+echo "$out" | mustmatch like "Run the MCP Streamable HTTP server at /mcp"
+echo "$out" | mustmatch like "Host address to bind"
+echo "$out" | mustmatch like "Port to listen on"
 echo "$out" | mustmatch not like "--json"
 echo "$out" | mustmatch not like "--no-cache"
 ```
@@ -37,9 +37,9 @@ echo "$out" | mustmatch not like "serve-sse"
 
 ```bash
 out="$(biomcp serve-sse --help)"
-echo "$out" | mustmatch like "removed"
+echo "$out" | mustmatch like "removed legacy SSE compatibility command"
 echo "$out" | mustmatch like "serve-http"
-echo "$out" | mustmatch like "/mcp"
+echo "$out" | mustmatch like 'connect remote clients to `/mcp` instead.'
 echo "$out" | mustmatch not like "--json"
 echo "$out" | mustmatch not like "--no-cache"
 ```

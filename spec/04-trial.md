@@ -55,12 +55,12 @@ BioMCP's client-side age post-filter.
 
 ```bash timeout=180
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --count-only)"
-echo "$out" | mustmatch like "Total: "
+echo "$out" | mustmatch '/^Total: [0-9]+/'
 echo "$out" | mustmatch like "(approximate, age post-filtered)"
 
 json_out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma -s recruiting --age 51 --count-only --json)"
-echo "$json_out" | mustmatch like "\"total\":"
-echo "$json_out" | mustmatch like "\"approximate\": true"
+echo "$json_out" | jq -e '.total | type == "number"' > /dev/null
+echo "$json_out" | mustmatch like '"approximate": true'
 ```
 
 ## Expensive Count Traversal Cap
@@ -84,7 +84,7 @@ rejected `--age 0.5`.
 
 ```bash timeout=180
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial --age 0.5 --count-only)"
-echo "$out" | mustmatch like "Total: "
+echo "$out" | mustmatch '/^Total: [0-9]+/'
 echo "$out" | grep -qE "^Total: [0-9]+"
 ```
 
@@ -94,7 +94,7 @@ Trial phase helps separate exploratory from confirmatory evidence. The phase-spe
 
 ```bash
 out="$(biomcp search trial -c melanoma -p 3 --limit 3)"
-echo "$out" | mustmatch like "phase=3"
+echo "$out" | mustmatch like "Query: condition=melanoma, phase=3"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 
@@ -104,7 +104,7 @@ The `1/2` shorthand should preserve the raw query echo while broadening to the c
 
 ```bash
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search trial -c melanoma --phase 1/2 --limit 3)"
-echo "$out" | mustmatch like "phase=1/2"
+echo "$out" | mustmatch like "Query: condition=melanoma, phase=1/2"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 
@@ -135,7 +135,7 @@ echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```bash
 out="$(biomcp get trial NCT02576665)"
 echo "$out" | mustmatch like "# NCT02576665"
-echo "$out" | mustmatch like "Status:"
+echo "$out" | mustmatch like "Status: TERMINATED | Phase: PHASE1 | Study Type: INTERVENTIONAL"
 ```
 
 ## Eligibility Section

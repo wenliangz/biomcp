@@ -21,7 +21,7 @@ The heading should echo the query token and the result table should be non-empty
 ```bash
 out="$(biomcp search protein BRAF --limit 3)"
 echo "$out" | mustmatch like "# Proteins: BRAF"
-echo "$out" | mustmatch like "Found "
+echo "$out" | mustmatch '/Found [0-9]+ proteins/'
 ```
 
 ## Search Table Structure
@@ -33,7 +33,7 @@ results, and a usage hint should guide the next step.
 ```bash
 out="$(biomcp search protein BRAF --limit 3)"
 echo "$out" | mustmatch like "| Accession | Name | Gene | Species |"
-echo "$out" | mustmatch like "P15056"
+echo "$out" | mustmatch like "| P15056 | Serine/threonine-protein kinase B-raf | BRAF | Homo sapiens |"
 echo "$out" | mustmatch like "get protein <accession>"
 ```
 
@@ -49,9 +49,9 @@ out="$(biomcp get protein P15056)"
 echo "$out" | mustmatch like "Accession: P15056"
 echo "$out" | mustmatch like "Gene: BRAF"
 echo "$out" | mustmatch like "## Function"
-echo "$out" | mustmatch like "More:"
+echo "$out" | mustmatch like $'More:\n  biomcp get protein P15056 domains'
 echo "$out" | mustmatch like "[UniProt]("
-echo "$out" | mustmatch like "See also:"
+echo "$out" | mustmatch like $'See also:\n  biomcp get protein P15056 structures'
 ```
 
 ## Protein Complexes Section

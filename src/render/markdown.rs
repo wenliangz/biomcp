@@ -5371,6 +5371,7 @@ mod tests {
 
     #[test]
     fn related_disease_oncology_without_local_match_falls_back_to_download_list() {
+        let _guard = crate::test_support::env_lock().blocking_lock();
         let disease = Disease {
             id: "MONDO:0005105".to_string(),
             name: "melanoma".to_string(),
@@ -5418,6 +5419,7 @@ mod tests {
 
     #[test]
     fn related_disease_oncology_with_local_match_prefers_top_mutated() {
+        let _guard = crate::test_support::env_lock().blocking_lock();
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time")
@@ -7035,6 +7037,7 @@ mod tests {
 
     #[test]
     fn related_disease_malformed_study_lookup_falls_back_to_download_list() {
+        let _guard = crate::test_support::env_lock().blocking_lock();
         let disease = Disease {
             id: "MONDO:0005105".to_string(),
             name: "melanoma".to_string(),
