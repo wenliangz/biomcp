@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::entities::variant::{
     ConditionReportCount, PopulationFrequency, Variant, VariantCgiAssociation, VariantCivicSection,
     VariantConservationScores, VariantCosmicContext, VariantPopulationBreakdown, VariantPrediction,
-    VariantPredictionScore, VariantSearchResult,
+    VariantPredictionScore, VariantSearchResult, normalize_protein_change,
 };
 use crate::sources::cbioportal::CBioMutationSummary;
 use crate::sources::civic::CivicEvidenceItem;
@@ -90,6 +90,37 @@ fn pick_hgvsp(dbnsfp: &crate::sources::myvariant::MyVariantDbnsfp) -> Option<Str
 
 fn pick_hgvsc(dbnsfp: &crate::sources::myvariant::MyVariantDbnsfp) -> Option<String> {
     pick_hgvs(vec![dbnsfp.hgvsc.clone()])
+}
+
+fn derive_legacy_name(hit: &MyVariantHit, gene: &str) -> Option<String> {
+    let gene = gene.trim();
+    if gene.is_empty() {
+        return None;
+    }
+
+    let has_clinvar = hit
+        .clinvar
+        .as_ref()
+        .map(|clinvar| clinvar.variant_id.is_some() || !clinvar.rcv.is_empty())
+        .unwrap_or(false);
+    if !has_clinvar {
+        return None;
+    }
+
+    let dbnsfp = hit.dbnsfp.as_ref()?;
+    for alias in dbnsfp.hgvsp.clone().into_vec() {
+        let normalized = match normalize_protein_change(&alias) {
+            Some(value) => value,
+            None => continue,
+        };
+        let legacy = normalized
+            .strip_suffix('*')
+            .map(|prefix| format!("{prefix}stop"))
+            .unwrap_or(normalized);
+        return Some(format!("{gene} {legacy}"));
+    }
+
+    None
 }
 
 fn normalize_consequence(value: &str) -> String {
@@ -870,6 +901,8 @@ pub fn from_myvariant_hit(hit: &MyVariantHit) -> Variant {
             .filter(|s| !s.is_empty());
     }
 
+    let legacy_name = derive_legacy_name(hit, &gene);
+
     let rsid = hit
         .dbsnp
         .as_ref()
@@ -928,6 +961,7 @@ pub fn from_myvariant_hit(hit: &MyVariantHit) -> Variant {
         id: hit.id.clone(),
         gene,
         hgvs_p,
+        legacy_name,
         hgvs_c,
         rsid,
         cosmic_id,
@@ -967,6 +1001,7 @@ pub fn from_myvariant_hit(hit: &MyVariantHit) -> Variant {
 pub fn from_myvariant_search_hit(hit: &MyVariantHit) -> VariantSearchResult {
     let gene = hit.dbnsfp.as_ref().map(pick_gene).unwrap_or_default();
     let hgvs_p = hit.dbnsfp.as_ref().and_then(pick_hgvsp);
+    let legacy_name = derive_legacy_name(hit, &gene);
 
     let significance = hit.clinvar.as_ref().and_then(|c| pick_significance(&c.rcv));
     let clinvar_stars = hit
@@ -989,6 +1024,7 @@ pub fn from_myvariant_search_hit(hit: &MyVariantHit) -> VariantSearchResult {
         id: hit.id.clone(),
         gene,
         hgvs_p,
+        legacy_name,
         significance,
         clinvar_stars,
         gnomad_af,
@@ -1242,5 +1278,58 @@ mod tests {
                 .map(|row| row.condition.as_str()),
             Some("Melanoma")
         );
+    }
+
+    #[test]
+    fn from_myvariant_hit_derives_legacy_name_for_stop_aliases() {
+        let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
+            "_id": "chr6:g.118880200T>G",
+            "dbnsfp": {
+                "genename": "PLN",
+                "hgvsp": ["p.L39X", "p.Leu39Ter", "p.Leu39*"]
+            },
+            "clinvar": {
+                "variant_id": 4472
+            }
+        }))
+        .expect("variant payload should parse");
+
+        let variant = from_myvariant_hit(&hit);
+        assert_eq!(variant.hgvs_p.as_deref(), Some("p.L39X"));
+        assert_eq!(variant.legacy_name.as_deref(), Some("PLN L39stop"));
+    }
+
+    #[test]
+    fn from_myvariant_search_hit_derives_legacy_name_for_missense_aliases() {
+        let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
+            "_id": "chr6:g.118880157C>T",
+            "dbnsfp": {
+                "genename": "PLN",
+                "hgvsp": ["p.R25C", "p.Arg25Cys"]
+            },
+            "clinvar": {
+                "rcv": [{"clinical_significance": "Likely pathogenic"}]
+            }
+        }))
+        .expect("variant payload should parse");
+
+        let variant = from_myvariant_search_hit(&hit);
+        assert_eq!(variant.hgvs_p.as_deref(), Some("p.R25C"));
+        assert_eq!(variant.legacy_name.as_deref(), Some("PLN R25C"));
+    }
+
+    #[test]
+    fn from_myvariant_hit_leaves_legacy_name_empty_without_clinvar() {
+        let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
+            "_id": "chr6:g.118880200T>G",
+            "dbnsfp": {
+                "genename": "PLN",
+                "hgvsp": ["p.L39X", "p.Leu39Ter", "p.Leu39*"]
+            }
+        }))
+        .expect("variant payload should parse");
+
+        let variant = from_myvariant_hit(&hit);
+        assert_eq!(variant.legacy_name, None);
     }
 }

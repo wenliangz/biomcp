@@ -18,7 +18,7 @@ Gene-scoped variant search is the broad intake step before applying mutation-lev
 
 ```bash
 out="$(biomcp search variant -g BRAF --limit 3)"
-echo "$out" | mustmatch like "| ID | Gene | Protein |"
+echo "$out" | mustmatch like "| ID | Gene | Protein | Legacy Name |"
 echo "$out" | mustmatch like "Query: gene=BRAF"
 ```
 
@@ -104,6 +104,27 @@ echo "$out" | mustmatch like "rs113488022"
 echo "$out" | mustmatch like "Significance: Pathogenic"
 ```
 
+## Legacy Name Search for Stop-Gain
+
+PLN stop-gain search results should show the compact legacy label alongside the
+existing HGVS protein value.
+
+```bash
+out="$(biomcp search variant -g PLN --hgvsp L39X --limit 3)"
+echo "$out" | mustmatch like "| ID | Gene | Protein | Legacy Name |"
+echo "$out" | mustmatch like "| chr6:g.118880200T>G | PLN | p.L39X | PLN L39stop |"
+```
+
+## Legacy Name Search for Missense
+
+Legacy-name derivation should also work for non-stop aliases without changing
+the current HGVS field.
+
+```bash
+out="$(biomcp search variant -g PLN --hgvsp R25C --limit 3)"
+echo "$out" | mustmatch like "| chr6:g.118880157C>T | PLN | p.R25C | PLN R25C |"
+```
+
 ## Long-Form Exact Variant Details
 
 Long-form exact input should resolve through the same exact variant path as the
@@ -113,6 +134,17 @@ equivalent short protein change.
 out="$(biomcp get variant "BRAF p.Val600Glu")"
 echo "$out" | mustmatch like "rs113488022"
 echo "$out" | mustmatch like "Significance: Pathogenic"
+```
+
+## Legacy Name in Detail Card
+
+The detail card should keep the existing HGVS protein line and add the compact
+legacy label directly below it for ClinVar-backed PLN hits.
+
+```bash
+out="$(biomcp get variant 'chr6:g.118880200T>G')"
+echo "$out" | mustmatch like "Protein: p.L39X"
+echo "$out" | mustmatch like "Legacy Name: PLN L39stop"
 ```
 
 ## ClinVar Section
@@ -133,6 +165,16 @@ ClinVar output should expose the top ranked disease aggregate directly so agents
 out="$(biomcp --json get variant "BRAF V600E" clinvar)"
 echo "$out" | jq -e '.top_disease.condition | type == "string"' > /dev/null
 echo "$out" | jq -e '.top_disease.reports | type == "number"' > /dev/null
+```
+
+## Legacy Name JSON Contract
+
+JSON output should expose the compact normalized legacy label instead of a raw
+upstream ClinVar title.
+
+```bash
+out="$(biomcp --json get variant 'chr6:g.118880200T>G')"
+echo "$out" | jq -e '.legacy_name == "PLN L39stop"' > /dev/null
 ```
 
 ## Population Frequencies
@@ -253,5 +295,5 @@ Confirmed exon-deletion phrases should resolve to a gene-scoped consequence sear
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "EGFR Exon 19 Deletion" --limit 5)"
 echo "$out" | mustmatch like "Query: gene=EGFR, consequence=inframe_deletion"
 echo "$out" | mustmatch like "consequence=inframe_deletion"
-echo "$out" | mustmatch like "| ID | Gene | Protein | Significance |"
+echo "$out" | mustmatch like "| ID | Gene | Protein | Legacy Name | Significance |"
 ```
