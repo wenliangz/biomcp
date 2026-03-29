@@ -715,6 +715,50 @@ mod tests {
     }
 
     #[test]
+    fn protein_isoforms_fall_back_to_name_when_synonyms_are_missing() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "O15350",
+            "comments": [
+                {
+                    "commentType": "alternative products",
+                    "isoforms": [
+                        {
+                            "name": {"value": "Alpha"},
+                            "synonyms": [],
+                            "isoformSequenceStatus": "displayed"
+                        }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            record.protein_isoforms(),
+            vec![UniProtProteinIsoformSummary {
+                name: "Alpha".to_string(),
+                is_displayed: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn protein_isoforms_return_empty_when_alternative_products_comment_is_missing() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "P15056",
+            "comments": [
+                {
+                    "commentType": "FUNCTION",
+                    "texts": [{"value": "Kinase."}]
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert!(record.protein_isoforms().is_empty());
+    }
+
+    #[test]
     fn normalize_next_page_token_rejects_numeric_only_tokens() {
         let err = normalize_next_page_token(Some("12345")).expect_err("numeric token should fail");
         assert!(err.to_string().contains("--next-page token is invalid"));

@@ -5259,6 +5259,49 @@ mod tests {
     }
 
     #[test]
+    fn gene_markdown_without_isoforms_keeps_protein_lines_contiguous() {
+        let gene = Gene {
+            symbol: "BRAF".to_string(),
+            name: "B-Raf proto-oncogene, serine/threonine kinase".to_string(),
+            entrez_id: "673".to_string(),
+            ensembl_id: Some("ENSG00000157764".to_string()),
+            location: Some("7q34".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P15056".to_string()),
+            summary: None,
+            gene_type: Some("protein-coding".to_string()),
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: Some(crate::entities::gene::GeneProtein {
+                accession: "P15056".to_string(),
+                name: "Serine/threonine-protein kinase B-raf".to_string(),
+                function: Some("Kinase function.".to_string()),
+                length: Some(766),
+                isoforms: Vec::new(),
+            }),
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown = gene_markdown(&gene, &["protein".to_string()]).expect("gene markdown");
+        assert!(markdown.contains("- Length: 766 aa\n- Function: Kinase function."));
+        assert!(!markdown.contains("- Isoforms ("));
+        assert!(!markdown.contains("- Length: 766 aa\n\n- Function:"));
+    }
+
+    #[test]
     fn related_drug_includes_pgx_search() {
         let drug = Drug {
             name: "warfarin".to_string(),
