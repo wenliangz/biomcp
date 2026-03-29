@@ -207,10 +207,8 @@ pub fn extract_definition_key_features(definition: &str) -> Vec<String> {
             continue;
         };
         let mut clause = cleaned[start + cue.len()..].trim_start();
+        clause = clause.trim_start_matches([':', '-', ' ']);
         if let Some(end) = clause.find('.') {
-            clause = &clause[..end];
-        }
-        if let Some(end) = clause.find(':') {
             clause = &clause[..end];
         }
 
@@ -943,6 +941,28 @@ mod tests {
                 "neurodevelopmental delay or regression",
             ]
         );
+    }
+
+    #[test]
+    fn extract_definition_key_features_handles_colon_after_cue() {
+        let definition =
+            "Example syndrome is characterized by: hypotonia, seizures, and developmental delay.";
+
+        assert_eq!(
+            extract_definition_key_features(definition),
+            vec!["hypotonia", "seizures", "developmental delay",]
+        );
+    }
+
+    #[test]
+    fn frequency_rank_prioritizes_high_signal_qualifiers_only() {
+        assert_eq!(frequency_rank(Some("Obligate (100%)")), Some(0));
+        assert_eq!(frequency_rank(Some("Very frequent (80-99%)")), Some(1));
+        assert_eq!(frequency_rank(Some("Frequent (30-79%)")), Some(2));
+        assert_eq!(frequency_rank(Some("Occasional (5-29%)")), None);
+        assert_eq!(frequency_rank(Some("Rare (1-4%)")), None);
+        assert_eq!(frequency_rank(Some("Excluded (0%)")), None);
+        assert_eq!(frequency_rank(None), None);
     }
 
     #[test]

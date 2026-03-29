@@ -5173,6 +5173,50 @@ mod tests {
     }
 
     #[test]
+    fn disease_markdown_phenotypes_section_without_definition_only_shows_completeness_note() {
+        let disease = Disease {
+            id: "MONDO:0002222".to_string(),
+            name: "Undocumented syndrome".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0001250".to_string(),
+                name: Some("Seizure".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: None,
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: None,
+            }],
+            key_features: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown = disease_markdown(&disease, &["phenotypes".to_string()]).expect("markdown");
+        assert!(markdown.contains("source-backed"));
+        assert!(!markdown.contains("Classic features are best summarized"));
+        assert!(!markdown.contains("### Key Features"));
+    }
+
+    #[test]
     fn gene_markdown_renders_hpa_section_details() {
         let gene = Gene {
             symbol: "BRAF".to_string(),
