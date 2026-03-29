@@ -10,7 +10,7 @@ const MYCHEM_BASE: &str = "https://mychem.info/v1";
 const MYCHEM_API: &str = "mychem.info";
 const MYCHEM_BASE_ENV: &str = "BIOMCP_MYCHEM_BASE";
 
-pub(crate) const MYCHEM_FIELDS_SEARCH: &str = "_id,_score,drugbank.id,drugbank.name,chembl.molecule_chembl_id,chembl.molecule_type,chembl.pref_name,chembl.drug_mechanisms.action_type,chembl.drug_mechanisms.target_name,chembl.drug_mechanisms.mechanism_of_action,gtopdb.name,gtopdb.interaction_targets.symbol,unii.unii,unii.display_name,unii.substance_type,ndc.nonproprietaryname,ndc.pharm_classes,chebi.name,openfda.generic_name,openfda.brand_name";
+pub(crate) const MYCHEM_FIELDS_SEARCH: &str = "_id,_score,drugbank.id,drugbank.name,chembl.molecule_chembl_id,chembl.molecule_type,chembl.pref_name,chembl.drug_mechanisms.action_type,chembl.drug_mechanisms.target_name,chembl.drug_mechanisms.mechanism_of_action,chembl.atc_classifications,gtopdb.name,gtopdb.interaction_targets.symbol,unii.unii,unii.display_name,unii.substance_type,ndc.nonproprietaryname,ndc.pharm_classes,chebi.name,openfda.generic_name,openfda.brand_name";
 pub(crate) const MYCHEM_FIELDS_GET: &str = "_id,_score,drugbank.id,drugbank.name,drugbank.synonyms,drugbank.drug_interactions,chembl.molecule_chembl_id,chembl.molecule_type,chembl.pref_name,chembl.drug_mechanisms.action_type,chembl.drug_mechanisms.target_name,chembl.drug_mechanisms.mechanism_of_action,gtopdb.name,gtopdb.interaction_targets.symbol,drugcentral.drug_use.indication.concept_name,drugcentral.approval.agency,drugcentral.approval.date,ndc.nonproprietaryname,ndc.pharm_classes,unii.unii,unii.display_name,unii.substance_type,chebi.name";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -187,6 +187,8 @@ pub struct MyChemChembl {
     pub pref_name: Option<String>,
     #[serde(default, deserialize_with = "de_vec_or_single")]
     pub drug_mechanisms: Vec<MyChemChemblDrugMechanism>,
+    #[serde(default)]
+    pub atc_classifications: StringOrVec,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -416,6 +418,56 @@ mod tests {
         let unii = hit.unii.as_ref().expect("unii");
         assert_eq!(unii.unii(), Some("DEF"));
         assert_eq!(unii.display_name(), Some("Example 2"));
+    }
+
+    #[test]
+    fn atc_classifications_support_string_and_list() {
+        let input = r#"
+        {
+          "total": 2,
+          "hits": [
+            {
+              "_id": "X",
+              "_score": 1.0,
+              "chembl": {
+                "atc_classifications": "L01XX08"
+              }
+            },
+            {
+              "_id": "Y",
+              "_score": 1.0,
+              "chembl": {
+                "atc_classifications": ["L01BB04", "L04AA40"]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let parsed: MyChemQueryResponse = serde_json::from_str(input).expect("parse");
+        let first = parsed.hits.first().expect("first");
+        assert_eq!(
+            first
+                .chembl
+                .as_ref()
+                .expect("chembl")
+                .atc_classifications
+                .clone()
+                .into_vec(),
+            vec!["L01XX08"]
+        );
+
+        let second = parsed.hits.get(1).expect("second");
+        assert_eq!(
+            second
+                .chembl
+                .as_ref()
+                .expect("chembl")
+                .atc_classifications
+                .clone()
+                .into_vec(),
+            vec!["L01BB04", "L04AA40"]
+        );
     }
 
     #[test]

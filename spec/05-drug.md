@@ -326,3 +326,39 @@ echo "$out" | mustmatch '/Resolved.*13\/01\/2026/'
 echo "$out" | mustmatch '/Yes.*13\/01\/2026/'
 echo "$out" | mustmatch like "13/01/2026"
 ```
+
+## Mechanism Filter Finds Purine Analog Drugs
+
+The mechanism filter should surface purine analogs even when the upstream text
+labels only expose the ATC class or a non-purine NDC pharmacology class.
+
+```bash
+out="$(biomcp search drug --mechanism purine --limit 10)"
+echo "$out" | mustmatch like "pentostatin"
+echo "$out" | mustmatch like "nelarabine"
+echo "$out" | mustmatch like "cladribine"
+echo "$out" | mustmatch like "clofarabine"
+echo "$out" | mustmatch like "fludarabine"
+```
+
+## Leukemia Query Keeps Purine Analogs Reachable
+
+Combining indication and mechanism filters should still keep the expected
+purine analog leukemia drugs visible.
+
+```bash
+out="$(biomcp search drug --indication leukemia --mechanism purine --limit 10)"
+echo "$out" | mustmatch like "pentostatin"
+echo "$out" | mustmatch like "nelarabine"
+echo "$out" | mustmatch like "cladribine"
+```
+
+## Deoxycoformycin Resolves To Pentostatin
+
+The alias lookup already works today and should stay covered by executable
+proof so future normalization changes do not break it.
+
+```bash
+out="$(biomcp search drug deoxycoformycin --limit 5)"
+echo "$out" | mustmatch like "pentostatin"
+```

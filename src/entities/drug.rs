@@ -494,22 +494,34 @@ fn build_mychem_query(filters: &DrugSearchFilters) -> Result<String, BioMcpError
 
         let mut clauses = vec![
             format!("chembl.drug_mechanisms.action_type:\"{escaped}\""),
+            format!("chembl.drug_mechanisms.mechanism_of_action:\"{escaped}\""),
             format!("ndc.pharm_classes:\"{escaped}\""),
         ];
 
         if !tokens.is_empty() {
-            let chembl_all_tokens = tokens
-                .iter()
-                .map(|token| format!("chembl.drug_mechanisms.action_type:*{token}*"))
-                .collect::<Vec<_>>()
-                .join(" AND ");
-            let ndc_all_tokens = tokens
-                .iter()
-                .map(|token| format!("ndc.pharm_classes:*{token}*"))
-                .collect::<Vec<_>>()
-                .join(" AND ");
-            clauses.push(format!("({chembl_all_tokens})"));
-            clauses.push(format!("({ndc_all_tokens})"));
+            for field in [
+                "chembl.drug_mechanisms.action_type",
+                "chembl.drug_mechanisms.mechanism_of_action",
+                "ndc.pharm_classes",
+            ] {
+                let all_tokens = tokens
+                    .iter()
+                    .map(|token| format!("{field}:*{token}*"))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                clauses.push(format!("({all_tokens})"));
+            }
+        }
+
+        for expansion in mechanism_atc_expansions(mechanism) {
+            clauses.push(match expansion {
+                AtcExpansion::Prefix(prefix) => {
+                    format!("chembl.atc_classifications:{prefix}*")
+                }
+                AtcExpansion::Exact(code) => {
+                    format!("chembl.atc_classifications:{code}")
+                }
+            });
         }
 
         terms.push(format!("({})", clauses.join(" OR ")));
@@ -745,6 +757,26 @@ fn text_matches_mechanism(candidate: &str, mechanism: &str, tokens: &[&str]) -> 
     tokens.iter().all(|token| candidate_lower.contains(token))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtcExpansion {
+    Prefix(&'static str),
+    Exact(&'static str),
+}
+
+fn mechanism_atc_expansions(mechanism: &str) -> Vec<AtcExpansion> {
+    let normalized = mechanism.trim().to_ascii_lowercase();
+    if normalized
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|token| token == "purine")
+    {
+        return vec![
+            AtcExpansion::Prefix("L01BB"),
+            AtcExpansion::Exact("L01XX08"),
+        ];
+    }
+    Vec::new()
+}
+
 fn hit_mentions_mechanism(hit: &MyChemHit, mechanism: &str) -> bool {
     let mechanism = mechanism.trim().to_ascii_lowercase();
     if mechanism.is_empty() {
@@ -754,15 +786,36 @@ fn hit_mentions_mechanism(hit: &MyChemHit, mechanism: &str) -> bool {
         .split_whitespace()
         .filter(|v| !v.is_empty())
         .collect::<Vec<_>>();
+    let atc_expansions = mechanism_atc_expansions(&mechanism);
 
     if let Some(chembl) = hit.chembl.as_ref() {
         for row in &chembl.drug_mechanisms {
-            let Some(action) = row.action_type.as_deref() else {
-                continue;
-            };
-            if text_matches_mechanism(action, &mechanism, &tokens) {
+            if row
+                .action_type
+                .as_deref()
+                .is_some_and(|action| text_matches_mechanism(action, &mechanism, &tokens))
+                || row
+                    .mechanism_of_action
+                    .as_deref()
+                    .is_some_and(|action| text_matches_mechanism(action, &mechanism, &tokens))
+            {
                 return true;
             }
+        }
+
+        if chembl
+            .atc_classifications
+            .clone()
+            .into_vec()
+            .iter()
+            .any(|code| {
+                atc_expansions.iter().any(|expansion| match expansion {
+                    AtcExpansion::Prefix(prefix) => code.starts_with(prefix),
+                    AtcExpansion::Exact(exact) => code == exact,
+                })
+            })
+        {
+            return true;
         }
     }
 
@@ -2016,6 +2069,34 @@ mod tests {
     }
 
     #[test]
+    fn build_mychem_query_includes_mechanism_of_action_field() {
+        let filters = DrugSearchFilters {
+            mechanism: Some("adenosine deaminase inhibitor".into()),
+            ..Default::default()
+        };
+
+        let q = build_mychem_query(&filters).unwrap();
+        assert!(q.contains("chembl.drug_mechanisms.mechanism_of_action"));
+        assert!(
+            q.contains(
+                "chembl.drug_mechanisms.mechanism_of_action:*adenosine* AND chembl.drug_mechanisms.mechanism_of_action:*deaminase*"
+            )
+        );
+    }
+
+    #[test]
+    fn build_mychem_query_expands_purine_to_atc_codes() {
+        let filters = DrugSearchFilters {
+            mechanism: Some("purine analog".into()),
+            ..Default::default()
+        };
+
+        let q = build_mychem_query(&filters).unwrap();
+        assert!(q.contains("chembl.atc_classifications:L01BB*"));
+        assert!(q.contains("chembl.atc_classifications:L01XX08"));
+    }
+
+    #[test]
     fn build_mychem_query_escapes_free_text_query() {
         let filters = DrugSearchFilters {
             query: Some("EGFR:inhibitor (3rd-gen)".into()),
@@ -2199,6 +2280,34 @@ mod tests {
 
         assert!(!hit_mentions_mechanism(&hit, "kinase inhibitor"));
         assert!(hit_mentions_mechanism(&hit, "protease inhibitor"));
+    }
+
+    #[test]
+    fn hit_mentions_mechanism_matches_atc_purine_hits() {
+        let hit: MyChemHit = serde_json::from_value(serde_json::json!({
+            "_id": "x",
+            "_score": 1.0,
+            "chembl": {
+                "atc_classifications": ["L01BB07"],
+                "drug_mechanisms": []
+            }
+        }))
+        .expect("valid hit");
+
+        assert!(hit_mentions_mechanism(&hit, "purine"));
+        assert!(hit_mentions_mechanism(&hit, "purine analog"));
+    }
+
+    #[test]
+    fn mechanism_atc_expansions_returns_purine_mapping() {
+        assert_eq!(
+            mechanism_atc_expansions("purine analog"),
+            vec![
+                AtcExpansion::Prefix("L01BB"),
+                AtcExpansion::Exact("L01XX08")
+            ]
+        );
+        assert!(mechanism_atc_expansions("kinase inhibitor").is_empty());
     }
 
     #[test]
