@@ -160,7 +160,53 @@ Target-only expansion is useful when the workflow is gene-centric. This check en
 ```bash
 out="$(biomcp get drug pembrolizumab targets)"
 echo "$out" | mustmatch like "## Targets"
-echo "$out" | mustmatch like $'## Targets (ChEMBL / Open Targets)\n\nPDCD1'
+echo "$out" | mustmatch like $'## Targets (ChEMBL / Open Targets)\nPDCD1'
+echo "$out" | mustmatch not like "Family:"
+echo "$out" | mustmatch not like "Members:"
+```
+
+## Drug Target Family
+
+When the displayed targets resolve to a single upstream family, the card should surface that family without hiding the individual members.
+
+```bash
+out="$(biomcp get drug olaparib targets)"
+echo "$out" | mustmatch like "## Targets"
+echo "$out" | mustmatch like "Family: PARP"
+echo "$out" | mustmatch like "Members: PARP1, PARP2, PARP3"
+```
+
+## Drug Target Family JSON
+
+The additive JSON contract should preserve the existing targets list while exposing the family summary when available.
+
+```bash
+out="$(biomcp --json get drug olaparib)"
+echo "$out" | jq -e '.target_family == "PARP"' >/dev/null
+echo "$out" | jq -e '(.targets | index("PARP1")) and (.targets | index("PARP2")) and (.targets | index("PARP3"))' >/dev/null
+echo "$out" | jq -e 'if has("target_family_name") then (.target_family_name | type) == "string" else true end' >/dev/null
+```
+
+## Drug Target Family JSON Omission
+
+Single-target drugs should keep the existing JSON shape and omit the additive family fields entirely.
+
+```bash
+out="$(biomcp --json get drug pembrolizumab)"
+echo "$out" | jq -e 'has("target_family") | not' >/dev/null
+echo "$out" | jq -e 'has("target_family_name") | not' >/dev/null
+```
+
+## Mixed Drug Targets Stay Flat
+
+Drugs with unrelated targets should keep the plain target list without a misleading family summary.
+
+```bash
+out="$(biomcp get drug imatinib targets)"
+echo "$out" | mustmatch like "## Targets"
+echo "$out" | mustmatch like "ABL1, DDR1, DDR2, BCR, KIT, PDGFRB"
+echo "$out" | mustmatch not like "Family:"
+echo "$out" | mustmatch not like "Members:"
 ```
 
 ## Drug Interactions With Public Label Text

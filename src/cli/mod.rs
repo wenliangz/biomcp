@@ -10843,6 +10843,8 @@ mod next_commands_json_property {
             brand_names: Vec::new(),
             route: None,
             targets: vec!["EGFR".to_string()],
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,

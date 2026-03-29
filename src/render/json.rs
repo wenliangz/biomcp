@@ -495,6 +495,8 @@ mod tests {
             brand_names: vec!["Tagrisso".to_string()],
             route: None,
             targets: vec!["EGFR".to_string()],
+            target_family: Some("PARP".to_string()),
+            target_family_name: Some("poly(ADP-ribose) polymerase".to_string()),
             indications: vec!["Non-small cell lung cancer".to_string()],
             interactions: Vec::new(),
             interaction_text: None,
@@ -514,7 +516,50 @@ mod tests {
 
         let json = to_pretty(&drug).expect("drug json");
         assert!(json.contains("\"name\": \"osimertinib\""));
+        assert!(json.contains("\"target_family\": \"PARP\""));
+        assert!(json.contains("\"target_family_name\": \"poly(ADP-ribose) polymerase\""));
         assert!(json.contains("\"targets\""));
+    }
+
+    #[test]
+    fn json_render_drug_entity_omits_family_fields_when_absent() {
+        let drug = Drug {
+            name: "pembrolizumab".to_string(),
+            drugbank_id: Some("DB09037".to_string()),
+            chembl_id: Some("CHEMBL3137343".to_string()),
+            unii: None,
+            drug_type: Some("biologic".to_string()),
+            mechanism: Some("Inhibitor of Programmed cell death protein 1".to_string()),
+            mechanisms: vec!["Inhibitor of Programmed cell death protein 1".to_string()],
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: vec!["PDCD1".to_string()],
+            target_family: None,
+            target_family_name: None,
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let json = to_pretty(&drug).expect("drug json");
+        assert!(!json.contains("\"target_family\""));
+        assert!(!json.contains("\"target_family_name\""));
     }
 
     #[test]

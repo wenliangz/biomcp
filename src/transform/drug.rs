@@ -599,6 +599,8 @@ pub fn merge_mychem_hits(hits: &[&MyChemHit], requested_name: &str) -> Drug {
         brand_names,
         route: None,
         targets,
+        target_family: None,
+        target_family_name: None,
         indications,
         interactions,
         interaction_text: None,
