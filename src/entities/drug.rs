@@ -2097,6 +2097,18 @@ mod tests {
     }
 
     #[test]
+    fn build_mychem_query_keeps_atc_filter_exact() {
+        let filters = DrugSearchFilters {
+            atc: Some("L01BB".into()),
+            ..Default::default()
+        };
+
+        let q = build_mychem_query(&filters).unwrap();
+        assert!(q.contains("chembl.atc_classifications:L01BB"));
+        assert!(!q.contains("chembl.atc_classifications:L01BB*"));
+    }
+
+    #[test]
     fn build_mychem_query_escapes_free_text_query() {
         let filters = DrugSearchFilters {
             query: Some("EGFR:inhibitor (3rd-gen)".into()),
@@ -2296,6 +2308,26 @@ mod tests {
 
         assert!(hit_mentions_mechanism(&hit, "purine"));
         assert!(hit_mentions_mechanism(&hit, "purine analog"));
+    }
+
+    #[test]
+    fn hit_mentions_mechanism_matches_mechanism_of_action_text() {
+        let hit: MyChemHit = serde_json::from_value(serde_json::json!({
+            "_id": "x",
+            "_score": 1.0,
+            "chembl": {
+                "drug_mechanisms": [{
+                    "mechanism_of_action": "Adenosine deaminase inhibitor"
+                }]
+            }
+        }))
+        .expect("valid hit");
+
+        assert!(hit_mentions_mechanism(
+            &hit,
+            "adenosine deaminase inhibitor"
+        ));
+        assert!(hit_mentions_mechanism(&hit, "deaminase inhibitor"));
     }
 
     #[test]
