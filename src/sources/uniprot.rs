@@ -329,6 +329,23 @@ pub struct UniProtComment {
     pub comment_type: Option<String>,
     #[serde(default)]
     pub texts: Vec<UniProtTextValue>,
+    #[serde(default)]
+    pub isoforms: Vec<UniProtIsoform>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UniProtIsoform {
+    pub name: UniProtTextValue,
+    #[serde(default)]
+    pub synonyms: Vec<UniProtTextValue>,
+    pub isoform_sequence_status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UniProtProteinIsoformSummary {
+    pub name: String,
+    pub is_displayed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -394,6 +411,41 @@ impl UniProtRecord {
             .and_then(|c| c.texts.first())
             .map(|v| v.value.trim().to_string())
             .filter(|v| !v.is_empty())
+    }
+
+    pub fn protein_isoforms(&self) -> Vec<UniProtProteinIsoformSummary> {
+        let Some(comment) = self.comments.iter().find(|c| {
+            c.comment_type
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|v| v.eq_ignore_ascii_case("alternative products"))
+        }) else {
+            return Vec::new();
+        };
+
+        comment
+            .isoforms
+            .iter()
+            .filter_map(|isoform| {
+                let name = isoform
+                    .synonyms
+                    .iter()
+                    .find_map(|synonym| {
+                        let value = synonym.value.trim();
+                        (!value.is_empty()).then(|| value.to_string())
+                    })
+                    .or_else(|| {
+                        let value = isoform.name.value.trim();
+                        (!value.is_empty()).then(|| value.to_string())
+                    })?;
+                let is_displayed = isoform
+                    .isoform_sequence_status
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|v| v.eq_ignore_ascii_case("displayed"));
+                Some(UniProtProteinIsoformSummary { name, is_displayed })
+            })
+            .collect()
     }
 
     pub fn structure_ids(&self) -> Vec<String> {
@@ -616,6 +668,94 @@ mod tests {
                 "AF-P15056-F1 (AlphaFold model)".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn protein_isoforms_prefer_synonyms_and_track_displayed_status() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "P01116",
+            "comments": [
+                {
+                    "commentType": "ALTERNATIVE PRODUCTS",
+                    "isoforms": [
+                        {
+                            "name": {"value": "2A"},
+                            "synonyms": [{"value": "K-Ras4A"}],
+                            "isoformSequenceStatus": "Displayed"
+                        },
+                        {
+                            "name": {"value": "Beta"},
+                            "synonyms": [],
+                            "isoformSequenceStatus": "described"
+                        },
+                        {
+                            "name": {"value": "  "},
+                            "synonyms": [{"value": " "}],
+                            "isoformSequenceStatus": "Displayed"
+                        }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            record.protein_isoforms(),
+            vec![
+                UniProtProteinIsoformSummary {
+                    name: "K-Ras4A".to_string(),
+                    is_displayed: true,
+                },
+                UniProtProteinIsoformSummary {
+                    name: "Beta".to_string(),
+                    is_displayed: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn protein_isoforms_fall_back_to_name_when_synonyms_are_missing() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "O15350",
+            "comments": [
+                {
+                    "commentType": "alternative products",
+                    "isoforms": [
+                        {
+                            "name": {"value": "Alpha"},
+                            "synonyms": [],
+                            "isoformSequenceStatus": "displayed"
+                        }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            record.protein_isoforms(),
+            vec![UniProtProteinIsoformSummary {
+                name: "Alpha".to_string(),
+                is_displayed: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn protein_isoforms_return_empty_when_alternative_products_comment_is_missing() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "P15056",
+            "comments": [
+                {
+                    "commentType": "FUNCTION",
+                    "texts": [{"value": "Kinase."}]
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert!(record.protein_isoforms().is_empty());
     }
 
     #[test]

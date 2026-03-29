@@ -90,6 +90,7 @@ mod tests {
                 texts: vec![UniProtTextValue {
                     value: "Protein kinase involved in MAPK signaling.".to_string(),
                 }],
+                isoforms: Vec::new(),
             }],
             uni_prot_kb_cross_references: vec![UniProtCrossReference {
                 database: Some("PDB".to_string()),

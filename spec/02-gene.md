@@ -99,6 +99,43 @@ test -n "$rna_line"
 test "$tissue_line" -lt "$rna_line"
 ```
 
+## Gene Protein Isoforms
+
+The UniProt-backed gene protein section should surface isoform names when UniProt provides alternative products, while staying absent for genes without isoform annotations. The line includes a count and only the displayed isoform length.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene KRAS protein)"
+echo "$out" | mustmatch like "## Protein (UniProt)"
+echo "$out" | mustmatch like "- Isoforms (2):"
+echo "$out" | mustmatch like "K-Ras4A (189 aa)"
+echo "$out" | mustmatch like "K-Ras4A (189 aa), K-Ras4B"
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene TP73 protein)"
+echo "$out" | mustmatch '/- Isoforms \([0-9]+\):/'
+echo "$out" | mustmatch like "- Isoforms (12): Alpha (636 aa), Beta"
+echo "$out" | mustmatch like "Gamma, Delta, Epsilon"
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene BRAF protein)"
+echo "$out" | mustmatch not like "- Isoforms ("
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene KRAS protein --json)"
+echo "$out" | jq -e '
+  .protein.isoforms | length >= 2
+  and any(.[]; .name == "K-Ras4A" and .length == 189)
+  and any(.[]; .name == "K-Ras4B")
+' > /dev/null
+```
+
 ## Druggability Section
 
 The druggability section should stay as one section while exposing OpenTargets tractability markers and safety-liability context alongside DGIdb interaction data.

@@ -36,7 +36,9 @@ Returns a protein card with accession, gene, function, and UniProt evidence link
 biomcp get gene BRAF protein
 ```
 
-Returns a gene detail view with a `Protein (UniProt)` section.
+Returns a gene detail view with a `Protein (UniProt)` section. When UniProt
+annotates alternative products, that section includes an `Isoforms (N)` line with
+isoform names and the displayed isoform length from the canonical record.
 
 ```bash
 biomcp get protein P15056 structures
