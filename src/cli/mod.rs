@@ -10732,6 +10732,7 @@ mod next_commands_json_property {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),

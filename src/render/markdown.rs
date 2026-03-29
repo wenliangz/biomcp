@@ -2230,6 +2230,8 @@ pub fn disease_markdown(
         recruiting_trial_count => &disease.recruiting_trial_count,
         pathways => &disease.pathways,
         phenotypes => phenotype_rows,
+        key_features => &disease.key_features,
+        has_definition => disease.definition.is_some(),
         literature_query => disease_literature_query(disease),
         variants => &disease.variants,
         top_variant => &disease.top_variant,
@@ -4479,6 +4481,7 @@ mod tests {
                 name: "Ion channel transport".to_string(),
             }],
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5011,6 +5014,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5052,6 +5056,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5067,6 +5072,148 @@ mod tests {
         assert!(markdown.contains("hypogonadotropic hypogonadism"));
         assert!(markdown.contains("neurodevelopmental delay or regression"));
         assert!(!markdown.contains("It is characterized by the association of…"));
+    }
+
+    #[test]
+    fn disease_markdown_phenotypes_section_renders_key_features() {
+        let disease = Disease {
+            id: "MONDO:0008222".to_string(),
+            name: "Andersen-Tawil syndrome".to_string(),
+            definition: Some(
+                "A potassium channel disorder characterized by periodic paralysis, prolonged QT interval, and ventricular arrhythmias."
+                    .to_string(),
+            ),
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0000001".to_string(),
+                name: Some("Periodic paralysis".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: Some("Very frequent (80-99%)".to_string()),
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: None,
+            }],
+            key_features: vec![
+                "periodic paralysis".to_string(),
+                "prolonged QT interval".to_string(),
+                "ventricular arrhythmias".to_string(),
+            ],
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown = disease_markdown(&disease, &["phenotypes".to_string()]).expect("markdown");
+        assert!(markdown.contains("### Key Features"));
+        assert!(markdown.contains("- periodic paralysis"));
+        assert!(markdown.contains("These summarize the classic presentation; the table below is the comprehensive HPO annotation list."));
+        assert!(markdown.contains("source-backed"));
+    }
+
+    #[test]
+    fn disease_markdown_phenotypes_section_renders_definition_hint_when_key_features_missing() {
+        let disease = Disease {
+            id: "MONDO:0001111".to_string(),
+            name: "Example syndrome".to_string(),
+            definition: Some("Example syndrome is a rare inherited condition.".to_string()),
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0001250".to_string(),
+                name: Some("Seizure".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: None,
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: None,
+            }],
+            key_features: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown = disease_markdown(&disease, &["phenotypes".to_string()]).expect("markdown");
+        assert!(markdown.contains(
+            "Classic features are best summarized in the disease definition. Run `biomcp get disease MONDO:0001111` to review the definition; the table below is the comprehensive HPO annotation list."
+        ));
+        assert!(markdown.contains("source-backed"));
+        assert!(!markdown.contains("### Key Features"));
+    }
+
+    #[test]
+    fn disease_markdown_phenotypes_section_without_definition_only_shows_completeness_note() {
+        let disease = Disease {
+            id: "MONDO:0002222".to_string(),
+            name: "Undocumented syndrome".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![crate::entities::disease::DiseasePhenotype {
+                hpo_id: "HP:0001250".to_string(),
+                name: Some("Seizure".to_string()),
+                evidence: None,
+                frequency: None,
+                frequency_qualifier: None,
+                onset_qualifier: None,
+                sex_qualifier: None,
+                stage_qualifier: None,
+                qualifiers: Vec::new(),
+                source: None,
+            }],
+            key_features: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown = disease_markdown(&disease, &["phenotypes".to_string()]).expect("markdown");
+        assert!(markdown.contains("source-backed"));
+        assert!(!markdown.contains("Classic features are best summarized"));
+        assert!(!markdown.contains("### Key Features"));
     }
 
     #[test]
@@ -5520,6 +5667,7 @@ mod tests {
                     source: None,
                 },
             ],
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5568,6 +5716,7 @@ mod tests {
                 qualifiers: Vec::new(),
                 source: None,
             }],
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5601,6 +5750,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5632,6 +5782,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -5714,6 +5865,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -6203,6 +6355,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: vec![DiseaseVariantAssociation {
                 variant: "BRAF V600E".to_string(),
                 relationship: Some("associated with disease".to_string()),
@@ -6541,6 +6694,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -6586,6 +6740,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),
@@ -6702,6 +6857,7 @@ mod tests {
                 qualifiers: Vec::new(),
                 source: Some("infores:omim".to_string()),
             }],
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: vec![crate::entities::disease::DiseaseModelAssociation {
@@ -6765,6 +6921,7 @@ mod tests {
                 qualifiers: Vec::new(),
                 source: Some("infores:omim".to_string()),
             }],
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: vec![crate::entities::disease::DiseaseModelAssociation {
@@ -7437,6 +7594,7 @@ mod tests {
             recruiting_trial_count: None,
             pathways: Vec::new(),
             phenotypes: Vec::new(),
+            key_features: Vec::new(),
             variants: Vec::new(),
             top_variant: None,
             models: Vec::new(),

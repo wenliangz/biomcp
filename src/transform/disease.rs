@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use crate::entities::disease::{Disease, DiseasePhenotype, DiseaseSearchResult};
 use crate::sources::mydisease::MyDiseaseHit;
+use regex::Regex;
 
 fn clean_definition(value: &str) -> String {
     let mut s = value.trim().to_string();
@@ -15,6 +17,21 @@ fn clean_definition(value: &str) -> String {
         s = s.trim_end_matches('\"').to_string();
     }
     s.trim().to_string()
+}
+
+fn parenthetical_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\([^)]*\)").expect("valid parenthetical regex"))
+}
+
+fn citation_fragment_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\[[^\]]*\]").expect("valid citation regex"))
+}
+
+fn sentence_whitespace_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\s+").expect("valid whitespace regex"))
 }
 
 fn first_string(value: &serde_json::Value) -> Option<String> {
@@ -80,6 +97,194 @@ fn push_unique(out: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str, max
     if seen.insert(key) {
         out.push(v.to_string());
     }
+}
+
+fn normalize_feature_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn trim_clause_prefixes(value: &str) -> String {
+    let mut trimmed = value.trim();
+    for prefix in [
+        "the association of",
+        "association of",
+        "a triad of",
+        "triad of",
+        "classic triad of",
+        "features including",
+        "clinical features including",
+    ] {
+        if trimmed.len() >= prefix.len() && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            trimmed = trimmed[prefix.len()..].trim_start();
+            break;
+        }
+    }
+    trimmed.to_string()
+}
+
+fn trim_feature_noise(value: &str) -> String {
+    let value = citation_fragment_re().replace_all(value, "");
+    let value = parenthetical_re().replace_all(&value, "");
+    let mut trimmed = sentence_whitespace_re()
+        .replace_all(&value, " ")
+        .to_string();
+    trimmed = trimmed
+        .trim_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '.' | ' '))
+        .to_string();
+
+    for prefix in ["the ", "a ", "an "] {
+        if trimmed.len() >= prefix.len() && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            trimmed = trimmed[prefix.len()..].trim_start().to_string();
+            break;
+        }
+    }
+
+    for suffix in [
+        " are common",
+        " is common",
+        " are typical",
+        " is typical",
+        " may occur",
+        " can occur",
+    ] {
+        if trimmed.len() >= suffix.len()
+            && trimmed[trimmed.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+        {
+            trimmed.truncate(trimmed.len() - suffix.len());
+            trimmed = trimmed.trim().to_string();
+            break;
+        }
+    }
+
+    trimmed
+}
+
+fn split_feature_candidates(clause: &str) -> Vec<String> {
+    let mut normalized = clause.replace(';', ",");
+    if let Some(idx) = normalized.to_ascii_lowercase().rfind(" and ") {
+        normalized.replace_range(idx..idx + 5, ", ");
+    }
+
+    normalized
+        .split(',')
+        .map(trim_feature_noise)
+        .filter(|candidate| {
+            let key = normalize_feature_key(candidate);
+            !key.is_empty() && key.len() >= 4
+        })
+        .collect()
+}
+
+pub fn extract_definition_key_features(definition: &str) -> Vec<String> {
+    let cleaned = clean_definition(definition);
+    let lower = cleaned.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    for cue in [
+        "characterized by",
+        "characterised by",
+        "defined by",
+        "presents with",
+        "marked by",
+        "classic triad of",
+        "triad of",
+        "association of",
+    ] {
+        let Some(start) = lower.find(cue) else {
+            continue;
+        };
+        let mut clause = cleaned[start + cue.len()..].trim_start();
+        clause = clause.trim_start_matches([':', '-', ' ']);
+        if let Some(end) = clause.find('.') {
+            clause = &clause[..end];
+        }
+
+        let clause = trim_clause_prefixes(clause);
+        for candidate in split_feature_candidates(&clause) {
+            let key = normalize_feature_key(&candidate);
+            if seen.insert(key) {
+                out.push(candidate);
+                if out.len() >= 5 {
+                    break;
+                }
+            }
+        }
+        if out.len() >= 2 {
+            return out;
+        }
+        out.clear();
+        seen.clear();
+    }
+
+    Vec::new()
+}
+
+fn frequency_rank(qualifier: Option<&str>) -> Option<u8> {
+    let qualifier = qualifier
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_ascii_lowercase();
+
+    if qualifier.contains("obligate") {
+        Some(0)
+    } else if qualifier.contains("very frequent") {
+        Some(1)
+    } else if qualifier.contains("frequent") && !qualifier.contains("infrequent") {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+pub fn derive_key_features(disease: &Disease) -> Vec<String> {
+    let mut out = disease
+        .definition
+        .as_deref()
+        .map(extract_definition_key_features)
+        .unwrap_or_default();
+    let mut seen: HashSet<String> = out.iter().map(|item| normalize_feature_key(item)).collect();
+
+    if out.len() < 3 {
+        for rank in 0..=2 {
+            for phenotype in &disease.phenotypes {
+                if frequency_rank(phenotype.frequency_qualifier.as_deref()) != Some(rank) {
+                    continue;
+                }
+                let Some(name) = phenotype
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let key = normalize_feature_key(name);
+                if key.is_empty() || !seen.insert(key) {
+                    continue;
+                }
+                out.push(name.to_string());
+                if out.len() >= 5 {
+                    return out;
+                }
+            }
+        }
+    }
+
+    out.truncate(5);
+    out
 }
 
 fn collect_strings(
@@ -494,8 +699,7 @@ pub fn from_mydisease_hit(hit: MyDiseaseHit) -> Disease {
         hit.disease_ontology.as_ref(),
         hit.umls.as_ref(),
     );
-
-    Disease {
+    let mut disease = Disease {
         id: hit.id,
         name,
         definition,
@@ -509,6 +713,7 @@ pub fn from_mydisease_hit(hit: MyDiseaseHit) -> Disease {
         recruiting_trial_count: None,
         pathways: Vec::new(),
         phenotypes,
+        key_features: Vec::new(),
         variants: Vec::new(),
         top_variant: None,
         models: Vec::new(),
@@ -517,7 +722,10 @@ pub fn from_mydisease_hit(hit: MyDiseaseHit) -> Disease {
         civic: None,
         disgenet: None,
         xrefs,
-    }
+    };
+    disease.key_features = derive_key_features(&disease);
+
+    disease
 }
 
 pub fn from_mydisease_search_hit(hit: &MyDiseaseHit) -> DiseaseSearchResult {
@@ -697,5 +905,128 @@ mod tests {
 
         assert_eq!(xrefs.get("Orphanet").map(String::as_str), Some("586"));
         assert_eq!(xrefs.get("OMIM").map(String::as_str), Some("219700"));
+    }
+
+    #[test]
+    fn extract_definition_key_features_characterized_by_clause() {
+        let definition = concat!(
+            "Andersen-Tawil syndrome is characterized by periodic muscle paralysis, ",
+            "prolonged QT interval, ventricular arrhythmias, and distinctive facial features."
+        );
+
+        assert_eq!(
+            extract_definition_key_features(definition),
+            vec![
+                "periodic muscle paralysis",
+                "prolonged QT interval",
+                "ventricular arrhythmias",
+                "distinctive facial features",
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_definition_key_features_association_clause() {
+        let definition = concat!(
+            "It is characterized by the association of hypomyelination, hypodontia, ",
+            "hypogonadotropic hypogonadism, and neurodevelopmental delay or regression."
+        );
+
+        assert_eq!(
+            extract_definition_key_features(definition),
+            vec![
+                "hypomyelination",
+                "hypodontia",
+                "hypogonadotropic hypogonadism",
+                "neurodevelopmental delay or regression",
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_definition_key_features_handles_colon_after_cue() {
+        let definition =
+            "Example syndrome is characterized by: hypotonia, seizures, and developmental delay.";
+
+        assert_eq!(
+            extract_definition_key_features(definition),
+            vec!["hypotonia", "seizures", "developmental delay",]
+        );
+    }
+
+    #[test]
+    fn frequency_rank_prioritizes_high_signal_qualifiers_only() {
+        assert_eq!(frequency_rank(Some("Obligate (100%)")), Some(0));
+        assert_eq!(frequency_rank(Some("Very frequent (80-99%)")), Some(1));
+        assert_eq!(frequency_rank(Some("Frequent (30-79%)")), Some(2));
+        assert_eq!(frequency_rank(Some("Occasional (5-29%)")), None);
+        assert_eq!(frequency_rank(Some("Rare (1-4%)")), None);
+        assert_eq!(frequency_rank(Some("Excluded (0%)")), None);
+        assert_eq!(frequency_rank(None), None);
+    }
+
+    #[test]
+    fn derive_key_features_supplements_definition_with_high_frequency_phenotypes() {
+        let disease = Disease {
+            id: "MONDO:0008222".to_string(),
+            name: "Andersen-Tawil syndrome".to_string(),
+            definition: Some(
+                "Andersen-Tawil syndrome is characterized by periodic paralysis and prolonged QT interval."
+                    .to_string(),
+            ),
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: vec![
+                DiseasePhenotype {
+                    hpo_id: "HP:0000001".to_string(),
+                    name: Some("Periodic paralysis".to_string()),
+                    evidence: None,
+                    frequency: None,
+                    frequency_qualifier: Some("Obligate (100%)".to_string()),
+                    onset_qualifier: None,
+                    sex_qualifier: None,
+                    stage_qualifier: None,
+                    qualifiers: Vec::new(),
+                    source: None,
+                },
+                DiseasePhenotype {
+                    hpo_id: "HP:0001644".to_string(),
+                    name: Some("Ventricular arrhythmia".to_string()),
+                    evidence: None,
+                    frequency: None,
+                    frequency_qualifier: Some("Very frequent (80-99%)".to_string()),
+                    onset_qualifier: None,
+                    sex_qualifier: None,
+                    stage_qualifier: None,
+                    qualifiers: Vec::new(),
+                    source: None,
+                },
+            ],
+            key_features: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: HashMap::new(),
+        };
+
+        assert_eq!(
+            derive_key_features(&disease),
+            vec![
+                "periodic paralysis",
+                "prolonged QT interval",
+                "Ventricular arrhythmia",
+            ]
+        );
     }
 }
