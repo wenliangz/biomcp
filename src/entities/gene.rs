@@ -91,6 +91,15 @@ pub struct GeneProtein {
     pub function: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub isoforms: Vec<GeneProteinIsoform>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneProteinIsoform {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -557,11 +566,24 @@ async fn fetch_protein_section(
 
     let record = UniProtClient::new()?.get_record(&accession).await?;
     let accession = record.primary_accession.clone();
+    let length = record
+        .sequence
+        .as_ref()
+        .and_then(|sequence| sequence.length);
+    let isoforms = record
+        .protein_isoforms()
+        .into_iter()
+        .map(|isoform| GeneProteinIsoform {
+            name: isoform.name,
+            length: isoform.is_displayed.then_some(length).flatten(),
+        })
+        .collect();
     Ok(Some(GeneProtein {
         accession,
         name: record.display_name(),
         function: record.function_summary(),
-        length: record.sequence.and_then(|s| s.length),
+        length,
+        isoforms,
     }))
 }
 

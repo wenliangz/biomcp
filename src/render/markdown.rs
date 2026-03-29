@@ -4381,6 +4381,7 @@ mod tests {
                 name: "CFTR".to_string(),
                 function: Some("ATP-binding cassette transporter.".to_string()),
                 length: Some(1480),
+                isoforms: Vec::new(),
             }),
             go: Some(vec![crate::entities::gene::GeneGoTerm {
                 id: "GO:0006811".to_string(),
@@ -5174,6 +5175,7 @@ mod tests {
                 name: "Dynamin-like 120 kDa protein, mitochondrial".to_string(),
                 function: None,
                 length: None,
+                isoforms: Vec::new(),
             }),
             go: None,
             interactions: None,
@@ -5201,6 +5203,59 @@ mod tests {
         assert_eq!(related[1], "biomcp get gene OPA1 hpa");
         assert!(related.contains(&"biomcp search pgx -g OPA1".to_string()));
         assert!(related.contains(&"biomcp search variant -g OPA1".to_string()));
+    }
+
+    #[test]
+    fn gene_markdown_renders_protein_isoforms_with_count_and_displayed_length() {
+        let gene = Gene {
+            symbol: "KRAS".to_string(),
+            name: "KRAS proto-oncogene, GTPase".to_string(),
+            entrez_id: "3845".to_string(),
+            ensembl_id: Some("ENSG00000133703".to_string()),
+            location: Some("12p12.1".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("P01116".to_string()),
+            summary: None,
+            gene_type: Some("protein-coding".to_string()),
+            aliases: vec!["K-RAS2A".to_string(), "K-RAS2B".to_string()],
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: Some(crate::entities::gene::GeneProtein {
+                accession: "P01116".to_string(),
+                name: "GTPase KRas".to_string(),
+                function: Some("Small GTPase involved in signal transduction.".to_string()),
+                length: Some(189),
+                isoforms: vec![
+                    crate::entities::gene::GeneProteinIsoform {
+                        name: "K-Ras4A".to_string(),
+                        length: Some(189),
+                    },
+                    crate::entities::gene::GeneProteinIsoform {
+                        name: "K-Ras4B".to_string(),
+                        length: None,
+                    },
+                ],
+            }),
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown = gene_markdown(&gene, &["protein".to_string()]).expect("gene markdown");
+        assert!(markdown.contains("## Protein (UniProt)"));
+        assert!(markdown.contains("- Length: 189 aa"));
+        assert!(markdown.contains("- Isoforms (2): K-Ras4A (189 aa), K-Ras4B"));
+        assert!(markdown.contains("- Function: Small GTPase involved in signal transduction."));
     }
 
     #[test]
