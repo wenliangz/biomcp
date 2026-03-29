@@ -26,21 +26,21 @@ out="$(biomcp get gene ERBB1 2>&1)" || status=$?
 test "${status}" -eq 1
 echo "$out" | mustmatch like "BioMCP could not map 'ERBB1' to a single gene."
 echo "$out" | mustmatch like "biomcp discover ERBB1"
-echo "$out" | mustmatch like "EGFR"
+echo "$out" | mustmatch like "- EGFR (Gene, HGNC:3236)"
 
 status=0
 out="$(biomcp get gene P53 2>&1)" || status=$?
 test "${status}" -eq 1
 echo "$out" | mustmatch like "BioMCP could not map 'P53' to a single gene."
 echo "$out" | mustmatch like "biomcp discover P53"
-echo "$out" | mustmatch like "TP53"
+echo "$out" | mustmatch like "- TP53 (Gene, HGNC:11998)"
 
 status=0
 out="$(biomcp get gene HER2 2>&1)" || status=$?
 test "${status}" -eq 1
 echo "$out" | mustmatch like "BioMCP could not map 'HER2' to a single gene."
 echo "$out" | mustmatch like "biomcp discover HER2"
-echo "$out" | mustmatch like "ERBB2"
+echo "$out" | mustmatch like "- ERBB2 (Gene, HGNC:3430)"
 ```
 
 ## Drug Brand Passthrough
@@ -73,7 +73,7 @@ echo "$out" | mustmatch like "biomcp search gene -q V600E"
 
 ```bash
 out="$(biomcp get gene TP53)"
-echo "$out" | mustmatch like "# TP53"
+echo "$out" | mustmatch like "# TP53 (tumor protein p53)"
 echo "$out" | mustmatch not like "Did you mean:"
 
 out="$(biomcp get drug imatinib)"
@@ -93,7 +93,7 @@ out="$(biomcp --json get gene ERBB1)" || status=$?
 test "${status}" -eq 1
 echo "$out" | mustmatch like '"alias_resolution": {'
 echo "$out" | mustmatch like '"kind": "ambiguous"'
-echo "$out" | mustmatch like '"EGFR"'
+echo "$out" | grep -q '"EGFR"'
 echo "$out" | mustmatch like '"next_commands": ['
 echo "$out" | mustmatch like '"biomcp discover ERBB1"'
 ```

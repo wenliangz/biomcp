@@ -31,8 +31,7 @@ Search rows should preserve a consistent table layout so downstream readers can 
 ```bash
 out="$(biomcp search gene BRAF --limit 3)"
 echo "$out" | mustmatch like "| Symbol | Name | Entrez ID |"
-echo "$out" | mustmatch like "Use "
-echo "$out" | mustmatch like "get gene <symbol>"
+echo "$out" | mustmatch like 'Use `get gene <symbol>` for details.'
 ```
 
 ## Getting Gene Details
@@ -41,7 +40,7 @@ echo "$out" | mustmatch like "get gene <symbol>"
 
 ```bash
 out="$(biomcp get gene BRAF)"
-echo "$out" | mustmatch like "# BRAF ("
+echo "$out" | mustmatch like "# BRAF (B-Raf proto-oncogene"
 echo "$out" | mustmatch like "Entrez ID: 673"
 ```
 
@@ -78,8 +77,8 @@ echo "$out" | mustmatch like "Source: gnomAD"
 echo "$out" | mustmatch like "Version: v4"
 echo "$out" | mustmatch like "Reference genome: GRCh38"
 echo "$out" | mustmatch like "Transcript:"
-echo "$out" | mustmatch like "pLI:"
-echo "$out" | mustmatch like "LOEUF:"
+echo "$out" | mustmatch '/- pLI: [0-9.]+/'
+echo "$out" | mustmatch like "- LOEUF: 0."
 ```
 
 ## Human Protein Atlas Section
@@ -109,7 +108,7 @@ out="$(biomcp get gene EGFR druggability)"
 echo "$out" | mustmatch like "## Druggability"
 echo "$out" | mustmatch like "OpenTargets tractability"
 echo "$out" | mustmatch like "small molecule"
-echo "$out" | mustmatch like "antibody"
+echo "$out" | mustmatch like "| antibody | yes | Approved Drug"
 echo "$out" | mustmatch like "OpenTargets safety liabilities"
 ```
 
@@ -141,14 +140,14 @@ Alias-only symbols should still surface the canonical gene rows. These checks gu
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" search gene ERBB1 --limit 5)"
 echo "$out" | mustmatch like "# Genes: ERBB1"
-echo "$out" | mustmatch like "EGFR"
+echo "$out" | mustmatch like "| EGFR | epidermal growth factor receptor |"
 ```
 
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" search gene P53 --limit 5)"
 echo "$out" | mustmatch like "# Genes: P53"
-echo "$out" | mustmatch like "TP53"
+echo "$out" | mustmatch like "| TP53 | tumor protein p53 |"
 ```
 
 ## Gene DisGeNET Associations
@@ -170,7 +169,7 @@ fi
 status=0
 out="$(biomcp get gene TP53 disgenet --json 2>&1)" || status=$?
 if [ "$status" -eq 0 ] && ! printf '%s\n' "$out" | grep -qi '403 Forbidden'; then
-  echo "$out" | mustmatch json ".disgenet.associations | length > 0"
+  echo "$out" | jq -e '.disgenet.associations | length > 0' > /dev/null
 else
   echo "$out" | mustmatch '/(403 Forbidden|forbidden|DISGENET_API_KEY|Unauthorized)/'
 fi

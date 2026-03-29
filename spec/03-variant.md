@@ -29,7 +29,7 @@ Adding `--hgvsp` should constrain the result set to a precise protein change. We
 ```bash
 out="$(biomcp search variant -g BRAF --hgvsp V600E --limit 3)"
 echo "$out" | mustmatch like "hgvsp=V600E"
-echo "$out" | mustmatch like "V600E"
+echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF | p.V600E |"
 ```
 
 ## Long-Form Protein Filter
@@ -39,9 +39,9 @@ the short form instead of being passed through as raw text.
 
 ```bash
 out="$(biomcp search variant -g BRAF --hgvsp p.Val600Glu --limit 3)"
-echo "$out" | mustmatch like "gene=BRAF"
+echo "$out" | mustmatch like "Query: gene=BRAF, hgvsp=V600E"
 echo "$out" | mustmatch like "hgvsp=V600E"
-echo "$out" | mustmatch like "V600E"
+echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF | p.V600E |"
 ```
 
 ## Residue Alias Search
@@ -142,7 +142,7 @@ Population frequency context helps distinguish rare versus common variation. We 
 ```bash
 out="$(biomcp get variant "BRAF V600E" population)"
 echo "$out" | mustmatch like "## Population"
-echo "$out" | mustmatch like "gnomAD AF"
+echo "$out" | mustmatch like "## Population (gnomAD via MyVariant.info)"
 ```
 
 ## Population Compact Fields
@@ -161,8 +161,7 @@ The markdown population line should keep the raw AF and append the compact perce
 
 ```bash
 out="$(biomcp get variant "BRAF V600E" population)"
-echo "$out" | mustmatch like "gnomAD AF:"
-echo "$out" | mustmatch like "%"
+echo "$out" | mustmatch '/gnomAD AF: .*%/'
 ```
 
 ## GWAS Supporting PMIDs
@@ -232,7 +231,7 @@ rsID positional queries should normalize to an exact rsID search instead of fall
 ```bash
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant rs113488022 --limit 5)"
 echo "$out" | mustmatch like "Query: rsid=rs113488022"
-echo "$out" | mustmatch like "BRAF"
+echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF | p.V600E |"
 ```
 
 ## Searching by c.HGVS
@@ -241,9 +240,9 @@ Gene plus c.HGVS shorthand should map to exact gene and coding-change filters. T
 
 ```bash
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "BRAF c.1799T>A" --limit 5)"
-echo "$out" | mustmatch like "gene=BRAF"
+echo "$out" | mustmatch like "Query: gene=BRAF, hgvsc=c.1799T>A"
 echo "$out" | mustmatch like "hgvsc=c.1799T>A"
-echo "$out" | mustmatch like "BRAF"
+echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF |"
 ```
 
 ## Exon Deletion Phrase Search
@@ -252,7 +251,7 @@ Confirmed exon-deletion phrases should resolve to a gene-scoped consequence sear
 
 ```bash
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "EGFR Exon 19 Deletion" --limit 5)"
-echo "$out" | mustmatch like "gene=EGFR"
+echo "$out" | mustmatch like "Query: gene=EGFR, consequence=inframe_deletion"
 echo "$out" | mustmatch like "consequence=inframe_deletion"
-echo "$out" | mustmatch like "EGFR"
+echo "$out" | mustmatch like "| ID | Gene | Protein | Significance |"
 ```

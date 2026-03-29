@@ -16,8 +16,7 @@ Version output is the fastest smoke test because it exercises local binary start
 
 ```bash
 out="$(biomcp version)"
-echo "$out" | mustmatch like "biomcp"
-echo "$out" | mustmatch '/[0-9]+\.[0-9]+\.[0-9]+/'
+echo "$out" | mustmatch '/^biomcp [0-9]+\.[0-9]+\.[0-9]+/'
 ```
 
 ## Health Check
@@ -30,7 +29,7 @@ echo "$out" | mustmatch like "| API | Status | Latency |"
 echo "$out" | mustmatch not like "EMA local data ("
 echo "$out" | mustmatch not like "Cache dir ("
 echo "$out" | mustmatch not like "(key:"
-echo "$out" | mustmatch like "Status:"
+echo "$out" | mustmatch '/Status: [0-9]+ ok, [0-9]+ error, [0-9]+ excluded/'
 
 json_out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY biomcp --json health --apis-only)"
 echo "$json_out" | jq -e 'all(.rows[]; (.status | type) == "string")' > /dev/null
@@ -55,8 +54,7 @@ echo "$out" | mustmatch like "batch <entity> <id1,id2,...>"
 echo "$out" | mustmatch like "enrich <GENE1,GENE2,...>"
 echo "$out" | mustmatch like "- `discover <query>`"
 echo "$out" | mustmatch like "- `ema sync`"
-echo "$out" | mustmatch like "- variant"
-echo "$out" | mustmatch like "- trial"
+echo "$out" | mustmatch like $'## Entities\n\n- gene\n- variant\n- article\n- trial'
 ```
 
 ## Entity Help

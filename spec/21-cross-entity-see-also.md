@@ -56,7 +56,7 @@ top follow-up trio to stay `pathways`, `ontology`, and `diseases`.
 
 ```bash
 out="$(biomcp get gene NANOG)"
-echo "$out" | mustmatch like "More:"
+echo "$out" | mustmatch like $'More:\n  biomcp get gene NANOG pathways'
 echo "$out" | mustmatch like "biomcp get gene NANOG pathways"
 echo "$out" | mustmatch like "biomcp get gene NANOG ontology"
 echo "$out" | mustmatch like "biomcp get gene NANOG diseases"

@@ -23,7 +23,7 @@ Unquoted multi-token input should parse and normalize to the same query shape as
 
 ```bash
 out="$(biomcp search variant BRAF V600E --limit 3)"
-echo "$out" | mustmatch like "gene=BRAF"
+echo "$out" | mustmatch like "Query: gene=BRAF, hgvsp=V600E"
 echo "$out" | mustmatch like "hgvsp=V600E"
 ```
 
@@ -33,7 +33,7 @@ Quoted `GENE CHANGE` input should resolve through the same normalization path an
 
 ```bash
 out="$(biomcp search variant "BRAF V600E" --limit 3)"
-echo "$out" | mustmatch like "gene=BRAF"
+echo "$out" | mustmatch like "Query: gene=BRAF, hgvsp=V600E"
 echo "$out" | mustmatch like "hgvsp=V600E"
 ```
 
@@ -44,7 +44,7 @@ the short one-letter form.
 
 ```bash
 out="$(biomcp search variant BRAF p.Val600Glu --limit 3)"
-echo "$out" | mustmatch like "gene=BRAF"
+echo "$out" | mustmatch like "Query: gene=BRAF, hgvsp=V600E"
 echo "$out" | mustmatch like "hgvsp=V600E"
 ```
 
@@ -54,7 +54,7 @@ Complex clinical phrases should remain in filter search space, not exact-ID look
 
 ```bash
 out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "EGFR Exon 19 Deletion" --limit 3)"
-echo "$out" | mustmatch like "gene=EGFR"
+echo "$out" | mustmatch like "Query: gene=EGFR, consequence=inframe_deletion"
 echo "$out" | mustmatch like "consequence=inframe_deletion"
 echo "$out" | mustmatch like "# Variant Search Results"
 ```
@@ -65,7 +65,7 @@ Positional query tokens must still allow regular options that follow.
 
 ```bash
 out="$(biomcp search variant BRAF V600E --limit 5)"
-echo "$out" | mustmatch like "gene=BRAF"
+echo "$out" | mustmatch like "Query: gene=BRAF, hgvsp=V600E"
 echo "$out" | mustmatch like "hgvsp=V600E"
 ```
 

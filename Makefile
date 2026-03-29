@@ -1,4 +1,4 @@
-.PHONY: build test lint check run clean spec spec-pr validate-skills test-contracts install
+.PHONY: build test lint check check-quality-ratchet run clean spec spec-pr validate-skills test-contracts install
 
 # Volatile live-network spec headings. These headings fan out across article
 # search backends or have repeated timeout history in GitHub Actions, so they
@@ -49,7 +49,10 @@ test-contracts:
 lint:
 	./bin/lint
 
-check: lint test
+check: lint test check-quality-ratchet
+
+check-quality-ratchet:
+	@bash tools/check-quality-ratchet.sh
 
 run:
 	cargo run --

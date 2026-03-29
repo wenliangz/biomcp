@@ -111,11 +111,8 @@ supported typed sections, including the regional EMA additions.
 
 ```bash
 out="$(biomcp get drug --help)"
-echo "$out" | mustmatch like "approvals"
-echo "$out" | mustmatch like "civic"
-echo "$out" | mustmatch like "label"
-echo "$out" | mustmatch like "regulatory"
-echo "$out" | mustmatch like "safety"
+echo "$out" | mustmatch like "Sections to include (label, regulatory, safety, shortage, targets, indications, interactions, civic, approvals, all)"
+echo "$out" | mustmatch like "Data region for regional sections"
 echo "$out" | mustmatch like "--region <REGION>"
 echo "$out" | mustmatch like "biomcp get drug pembrolizumab approvals"
 echo "$out" | mustmatch like "biomcp get drug Keytruda regulatory --region eu"
@@ -163,7 +160,7 @@ Target-only expansion is useful when the workflow is gene-centric. This check en
 ```bash
 out="$(biomcp get drug pembrolizumab targets)"
 echo "$out" | mustmatch like "## Targets"
-echo "$out" | mustmatch like "PDCD1"
+echo "$out" | mustmatch like $'## Targets (ChEMBL / Open Targets)\n\nPDCD1'
 ```
 
 ## Drug Interactions With Public Label Text
@@ -246,7 +243,7 @@ bash fixtures/setup-ema-spec-fixture.sh "$PWD"
 out="$(biomcp search drug Keytruda --region eu --limit 5)"
 echo "$out" | mustmatch like "# Drugs: Keytruda"
 echo "$out" | mustmatch like "|Name|Active Substance|EMA Number|Status|"
-echo "$out" | mustmatch like "Keytruda"
+echo "$out" | mustmatch like "|Keytruda|pembrolizumab|EMEA/H/C/003820|Authorised|"
 echo "$out" | mustmatch like "pembrolizumab"
 echo "$out" | mustmatch like "EMEA/H/C/003820"
 echo "$out" | mustmatch like "Authorised"
@@ -307,7 +304,7 @@ bash fixtures/setup-ema-spec-fixture.sh "$PWD"
 . "$PWD/.cache/spec-ema-env"
 out="$(biomcp get drug Ozempic safety --region eu)"
 echo "$out" | mustmatch like "## Safety (EU"
-echo "$out" | mustmatch like "### DHPCs"
+echo "$out" | mustmatch like "| Medicine | Type | Outcome | First Published | Last Updated |"
 echo "$out" | mustmatch like "Medicine shortage"
 echo "$out" | mustmatch like "### Referrals"
 echo "$out" | mustmatch like "No data found (EMA)"
@@ -325,7 +322,7 @@ bash fixtures/setup-ema-spec-fixture.sh "$PWD"
 . "$PWD/.cache/spec-ema-env"
 out="$(biomcp get drug Ozempic shortage --region eu)"
 echo "$out" | mustmatch like "## Shortage (EU"
-echo "$out" | mustmatch like "Resolved"
-echo "$out" | mustmatch like "Yes"
+echo "$out" | mustmatch '/Resolved.*13\/01\/2026/'
+echo "$out" | mustmatch '/Yes.*13\/01\/2026/'
 echo "$out" | mustmatch like "13/01/2026"
 ```

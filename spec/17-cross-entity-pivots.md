@@ -25,10 +25,8 @@ root="$(git rev-parse --show-toplevel)"
 out="$(cat "$root/docs/how-to/cross-entity-pivots.md")"
 echo "$out" | mustmatch like "# How to: use cross-entity pivots"
 echo "$out" | mustmatch like "## When to use a pivot helper vs. a fresh search"
-echo "$out" | mustmatch like "already have a specific entity identifier or label"
-echo "$out" | mustmatch like "--status"
-echo "$out" | mustmatch like "--phase"
-echo "$out" | mustmatch like "--since"
+echo "$out" | mustmatch like "you already know the entity you"
+echo "$out" | mustmatch like 'richer downstream filters such as `--status`, `--phase`, or'
 echo "$out" | mustmatch like "## Variant pivots"
 echo "$out" | mustmatch like "## Drug pivots"
 echo "$out" | mustmatch like "## Disease pivots"
@@ -37,6 +35,7 @@ echo "$out" | mustmatch like "biomcp variant trials \"BRAF V600E\" --limit 5"
 echo "$out" | mustmatch like "biomcp drug adverse-events pembrolizumab --limit 5"
 echo "$out" | mustmatch like "biomcp disease articles \"Lynch syndrome\" --limit 5"
 echo "$out" | mustmatch like "biomcp gene pathways BRAF --limit 5"
+echo "$out" | mustmatch like "## Other pivot helpers"
 ```
 
 ## Docs navigation

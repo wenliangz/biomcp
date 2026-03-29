@@ -17,25 +17,25 @@ Representative markdown cards should include evidence URLs and follow-up helper 
 ```bash
 gene_out="$(biomcp get gene BRAF)"
 echo "$gene_out" | mustmatch like "[NCBI Gene]("
-echo "$gene_out" | mustmatch like "See also:"
+echo "$gene_out" | mustmatch like $'See also:\n  biomcp get pgx BRAF'
 
 variant_out="$(biomcp get variant "BRAF V600E")"
-echo "$variant_out" | mustmatch like "[dbSNP]("
-echo "$variant_out" | mustmatch like "[COSMIC]("
-echo "$variant_out" | mustmatch like "See also:"
+echo "$variant_out" | mustmatch like "[dbSNP](https://www.ncbi.nlm.nih.gov/snp/rs113488022)"
+echo "$variant_out" | mustmatch like "[COSMIC](https://cancer.sanger.ac.uk/cosmic/mutation/overview?id=COSM476)"
+echo "$variant_out" | mustmatch like $'See also:\n  biomcp get gene BRAF'
 
 trial_out="$(biomcp get trial NCT02576665)"
 echo "$trial_out" | mustmatch like "[ClinicalTrials.gov]("
-echo "$trial_out" | mustmatch like "See also:"
+echo "$trial_out" | mustmatch like $'See also:\n  biomcp search trial'
 
 pgx_out="$(biomcp get pgx CYP2D6)"
 echo "$pgx_out" | mustmatch like "[CPIC](https://cpicpgx.org/genes/"
 echo "$pgx_out" | mustmatch like "[PharmGKB](https://www.pharmgkb.org/"
-echo "$pgx_out" | mustmatch like "See also:"
+echo "$pgx_out" | mustmatch like $'See also:\n  biomcp get gene CYP2D6'
 
 ae_out="$(biomcp get adverse-event 10222779)"
 echo "$ae_out" | mustmatch like "[OpenFDA]("
-echo "$ae_out" | mustmatch like "See also:"
+echo "$ae_out" | mustmatch like $'See also:\n  biomcp search adverse-event'
 ```
 
 ## Repaired Variant, Disease, and Drug Gaps

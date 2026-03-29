@@ -225,7 +225,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "missing_article_filters_is_clean_usage_error" in article_usage
 
     assert "CI (`.github/workflows/ci.yml`) runs five parallel jobs" in technical
-    assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)" in technical
+    assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `make check-quality-ratchet`)" in technical
     assert "`version-sync` (`bash scripts/check-version-sync.sh`)" in technical
     assert "`climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`)" in technical
     assert (
@@ -555,7 +555,7 @@ def test_pull_request_contract_gate_matches_release_validation() -> None:
 def test_makefile_spec_split_contract_is_documented_and_executable() -> None:
     makefile = _read_repo("Makefile")
 
-    assert ".PHONY: build test lint check run clean spec spec-pr validate-skills test-contracts install" in makefile
+    assert ".PHONY: build test lint check check-quality-ratchet run clean spec spec-pr validate-skills test-contracts install" in makefile
     assert "Volatile live-network spec headings." in makefile
     assert "PR gate: repo-local checks plus live-backed headings that have been stable" in makefile
     assert "Smoke lane: `search article`, `gene articles`, `variant articles`," in makefile

@@ -30,7 +30,7 @@ The disease detail card should resolve the query label to a normalized concept. 
 out="$(biomcp get disease melanoma)"
 echo "$out" | mustmatch like "# melanoma"
 echo "$out" | mustmatch like "ID: MONDO:0005105"
-echo "$out" | mustmatch like "OT "
+echo "$out" | mustmatch like "Genes (Open Targets): CDKN2A (OT"
 ```
 
 ## Disease Genes
@@ -41,7 +41,7 @@ Associated-gene expansion is central for translating phenotype-level queries int
 out="$(biomcp get disease melanoma genes)"
 echo "$out" | mustmatch like "## Associated Genes"
 echo "$out" | mustmatch like "| Gene | Relationship | Source | OpenTargets |"
-echo "$out" | mustmatch like "overall "
+echo "$out" | mustmatch '/overall [0-9.]+/'
 ```
 
 ## Disease Top Variant Summary
@@ -132,7 +132,7 @@ fi
 status=0
 out="$(biomcp get disease melanoma disgenet --json 2>&1)" || status=$?
 if [ "$status" -eq 0 ] && ! printf '%s\n' "$out" | grep -qi '403 Forbidden'; then
-  echo "$out" | mustmatch json ".disgenet.associations | length > 0"
+  echo "$out" | jq -e '.disgenet.associations | length > 0' > /dev/null
 else
   echo "$out" | mustmatch '/(403 Forbidden|forbidden|DISGENET_API_KEY|Unauthorized)/'
 fi

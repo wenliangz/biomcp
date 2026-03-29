@@ -16,7 +16,7 @@ Combining typed slots is the recommended way to orient a workflow quickly. We as
 ```bash
 out="$(biomcp search all -g BRAF -d melanoma --limit 3)"
 echo "$out" | mustmatch like "# Search All: gene=BRAF disease=melanoma"
-echo "$out" | mustmatch like "## Genes"
+echo "$out" | mustmatch like $'# Search All: gene=BRAF disease=melanoma\n\n## Genes'
 echo "$out" | mustmatch like "## Variants"
 ```
 
@@ -28,8 +28,8 @@ Counts-only output is useful for low-noise planning before fetching rows. The st
 out="$(biomcp search all -g BRAF --counts-only)"
 echo "$out" | mustmatch like "Rows omitted ("
 echo "$out" | mustmatch like "--counts-only"
-echo "$out" | mustmatch like "## Variants"
-echo "$out" | mustmatch like "## Trials"
+echo "$out" | mustmatch '/## Variants \([0-9]+\)/'
+echo "$out" | mustmatch '/## Trials \([0-9]+\)/'
 ```
 
 ## Single Gene Search
@@ -39,7 +39,7 @@ A single typed slot should still return a multi-entity orientation card. We veri
 ```bash
 out="$(biomcp search all -g BRAF --limit 3)"
 echo "$out" | mustmatch like "# Search All: gene=BRAF"
-echo "$out" | mustmatch like "## Trials"
+echo "$out" | mustmatch like $'# Search All: gene=BRAF\n\n## Genes'
 ```
 
 ## Keyword Search
@@ -59,9 +59,9 @@ pipeline rather than flattening away row-level source and ranking metadata.
 
 ```bash
 out="$(biomcp --json search all -g BRAF --limit 3)"
-echo "$out" | mustmatch like "\"entity\": \"article\""
-echo "$out" | mustmatch like "\"source\":"
-echo "$out" | mustmatch like "\"ranking\": {"
+echo "$out" | mustmatch like '"entity": "article"'
+echo "$out" | mustmatch like '"source": "'
+echo "$out" | mustmatch like '"ranking": {'
 ```
 
 ## Debug Plan
@@ -72,15 +72,15 @@ explicitly requested.
 ```bash
 out="$(biomcp search all -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
-echo "$out" | mustmatch like "\"surface\": \"search_all\""
-echo "$out" | mustmatch like "\"anchor\": \"gene\""
-echo "$out" | mustmatch like "\"anchor=gene\""
+echo "$out" | mustmatch like '"surface": "search_all"'
+echo "$out" | mustmatch like '"anchor": "gene"'
+echo "$out" | mustmatch like '"anchor=gene"'
 
 json_out="$(biomcp --json search all -g BRAF --debug-plan --limit 3)"
-echo "$json_out" | mustmatch like "\"debug_plan\": {"
-echo "$json_out" | mustmatch like "\"surface\": \"search_all\""
-echo "$json_out" | mustmatch like "\"anchor\": \"gene\""
-echo "$json_out" | mustmatch like "\"legs\": ["
+echo "$json_out" | mustmatch like '"debug_plan": {'
+echo "$json_out" | mustmatch like '"surface": "search_all"'
+echo "$json_out" | mustmatch like '"anchor": "gene"'
+echo "$json_out" | jq -e '.debug_plan.legs | type == "array"' > /dev/null
 ```
 
 ## Shared Disease And Keyword Token
@@ -93,8 +93,8 @@ leg keyword-driven, and avoid duplicated follow-up commands.
 out="$(biomcp search all -d cancer -k cancer --debug-plan --counts-only)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like "fallback=shared_disease_keyword_orientation"
-echo "$out" | mustmatch like "\"filters\": ["
-echo "$out" | mustmatch like "\"keyword=cancer\""
+echo "$out" | mustmatch like '"filters": ['
+echo "$out" | mustmatch like '"keyword=cancer"'
 echo "$out" | mustmatch not like "cancer cancer"
 echo "$out" | mustmatch not like "--disease cancer --keyword cancer"
 ```
@@ -108,7 +108,7 @@ they should not be cross-routed into typed trial queries.
 out="$(biomcp search all -d melanoma -k BRAF --debug-plan --counts-only)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like "--disease melanoma --keyword BRAF"
-echo "$out" | mustmatch like "\"condition=melanoma\""
+echo "$out" | mustmatch like '"condition=melanoma"'
 echo "$out" | mustmatch not like "condition=melanoma BRAF"
 echo "$out" | mustmatch not like "fallback=shared_disease_keyword_orientation"
 ```

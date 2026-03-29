@@ -176,7 +176,7 @@ rebuild path, not a second source of release truth.
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
-   - CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and `contracts` (`cargo build --release --locked`, `uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`, then `make spec-pr`).
+   - CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `make check-quality-ratchet`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and `contracts` (`cargo build --release --locked`, `uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`, then `make spec-pr`).
    - Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`,
      which runs the full `make spec` suite on a schedule and by manual dispatch.
    - Release validation runs the Rust checks again, then
@@ -221,7 +221,7 @@ BioMCP has six distinct verification and operator-inspection surfaces.
 ### 1. CI and Repo Gates
 
 - `make check` is the required local ticket gate. In the current `Makefile`,
-  that means `lint` plus `test`.
+  that means `lint`, `test`, and `check-quality-ratchet`.
 - CI in `.github/workflows/ci.yml` runs the broader repo baseline in parallel:
   `check`, `version-sync`, `climb-hygiene`, `contracts`, and `spec-stable`.
 - Docs-site validation and Python contract tests do not run under `make check`;

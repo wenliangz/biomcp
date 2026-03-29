@@ -25,7 +25,7 @@ examples against stable structural markers and suggestion contracts.
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" discover ERBB1)"
 echo "$out" | mustmatch like "# Discover: ERBB1"
-echo "$out" | mustmatch like "EGFR"
+echo "$out" | mustmatch like '- **EGFR** (`HGNC:3236`)'
 echo "$out" | mustmatch like "biomcp get gene EGFR"
 ```
 
@@ -81,9 +81,9 @@ echo "$out" | jq -e '._meta.next_commands[0] == "biomcp search all --gene BRAF -
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" discover diabetes)"
 echo "$out" | mustmatch like "## Concepts"
-echo "$out" | mustmatch like "1."
-echo "$out" | mustmatch like "Type 1"
-echo "$out" | mustmatch like "Type 2"
+echo "$out" | mustmatch like $'## Suggested Commands\n1. '
+echo "$out" | mustmatch like "Type 1 diabetes mellitus"
+echo "$out" | mustmatch like "Type 2 diabetes mellitus"
 ```
 
 ## Pathway Query
@@ -91,7 +91,7 @@ echo "$out" | mustmatch like "Type 2"
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" discover "MAPK signaling")"
-echo "$out" | mustmatch like "Pathway"
+echo "$out" | mustmatch like "### Pathway"
 echo "$out" | mustmatch like "biomcp search pathway -q \"MAPK signaling\" --limit 5"
 ```
 
@@ -100,7 +100,7 @@ echo "$out" | mustmatch like "biomcp search pathway -q \"MAPK signaling\" --limi
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" discover V600E)"
-echo "$out" | mustmatch like "Variant"
+echo "$out" | mustmatch like "### Variant"
 echo "$out" | mustmatch not like "biomcp get gene "
 echo "$out" | mustmatch not like "## Plain Language"
 ```
@@ -110,7 +110,7 @@ echo "$out" | mustmatch not like "## Plain Language"
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$(env -u UMLS_API_KEY "$bin" discover BRCA1)"
-echo "$out" | mustmatch like "BRCA1"
+echo "$out" | mustmatch like "# Discover: BRCA1"
 echo "$out" | mustmatch like "UMLS enrichment unavailable"
 ```
 
