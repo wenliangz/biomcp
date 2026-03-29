@@ -62,6 +62,23 @@ No pathways found from active sources.
 ## Phenotypes
 
 {% if phenotypes -%}
+{% if key_features -%}
+### Key Features
+
+{% for feature in key_features -%}
+- {{ feature }}
+{% endfor -%}
+
+These summarize the classic presentation; the table below is the comprehensive HPO annotation list.
+
+{% elif has_definition -%}
+{% if section_only -%}
+Classic features are best summarized in the disease definition. Run `biomcp get disease {{ id }}` to review the definition; the table below is the comprehensive HPO annotation list.
+{% else -%}
+Classic features are best summarized in the disease definition above; the table below is the comprehensive HPO annotation list.
+{% endif -%}
+
+{% endif -%}
 This phenotype section is source-backed and may be incomplete for the full disease presentation. Supplement with `biomcp search article -d "{{ literature_query }}" --type review --limit 5` when you need broader review coverage.
 
 | HPO ID | Name | Evidence | Frequency | Onset | Sex | Stage | Source |

@@ -122,6 +122,30 @@ echo "$out" | mustmatch like "may be incomplete for the full disease presentatio
 echo "$out" | mustmatch like 'biomcp search article -d "4H leukodystrophy" --type review --limit 5'
 ```
 
+## Disease Phenotype Key Features
+
+Section-only phenotype output should distinguish the classic disease summary from the comprehensive HPO table.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0008222 phenotypes)"
+echo "$out" | mustmatch like "### Key Features"
+echo "$out" | mustmatch '/periodic muscle paralysis/i'
+echo "$out" | mustmatch '/QT interval/i'
+echo "$out" | mustmatch like "source-backed"
+```
+
+## Disease Phenotype Key Features JSON
+
+Structured disease output should expose the same compact summary as `key_features`.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json get disease MONDO:0008222 phenotypes)"
+echo "$out" | jq -e '.key_features | length >= 3' > /dev/null
+echo "$out" | jq -e '.key_features | any(test("periodic muscle paralysis"; "i"))' > /dev/null
+```
+
 ## Exact Disease Ranking
 
 Exact disease labels should be reranked to the front of the returned page even when upstream ordering is noisy. This regression checks that the canonical colorectal cancer node appears in the surfaced result set.

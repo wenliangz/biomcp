@@ -47,6 +47,8 @@ pub struct Disease {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phenotypes: Vec<DiseasePhenotype>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_features: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<DiseaseVariantAssociation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_variant: Option<DiseaseVariantAssociation>,
@@ -1346,6 +1348,8 @@ async fn apply_requested_sections(
     if !sections.include_disgenet {
         disease.disgenet = None;
     }
+
+    disease.key_features = transform::disease::derive_key_features(disease);
 
     Ok(())
 }

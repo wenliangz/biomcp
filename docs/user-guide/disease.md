@@ -36,11 +36,16 @@ Genes (Monarch-backed associations with relationship/source when available, augm
 biomcp get disease MONDO:0005105 genes
 ```
 
-Phenotypes (HPO phenotypes with qualifiers):
+Phenotypes (compact `Key Features` summary plus the comprehensive HPO annotation list):
 
 ```bash
 biomcp get disease MONDO:0005105 phenotypes
 ```
+
+When BioMCP can extract a reliable disease summary, the phenotype section renders
+`### Key Features` above the HPO table. That summary is also exposed as
+`key_features[]` in `--json` output. The table remains the comprehensive phenotype
+annotation list, and the existing completeness note still applies.
 
 Variants (CIViC disease-associated variants):
 
