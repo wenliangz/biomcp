@@ -289,7 +289,7 @@ echo "$out" | mustmatch not like "# Study Co-occurrence"
 ```bash
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart bar --cols 40 --rows 12)"
-OUT="$out" python - <<'PY'
+OUT="$out" python3 - <<'PY'
 import os
 import re
 
