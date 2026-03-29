@@ -102,10 +102,30 @@ impl ChemblClient {
                 target: target.to_string(),
                 action: action.to_string(),
                 mechanism,
+                target_chembl_id: row.target_chembl_id,
             });
         }
 
         Ok(out)
+    }
+
+    pub async fn target_summary(
+        &self,
+        target_chembl_id: &str,
+    ) -> Result<ChemblTargetSummary, BioMcpError> {
+        let target_chembl_id = target_chembl_id.trim();
+        if target_chembl_id.is_empty() {
+            return Err(BioMcpError::InvalidArgument(
+                "ChEMBL target ID is required".into(),
+            ));
+        }
+
+        let url = self.endpoint(&format!("target/{target_chembl_id}.json"));
+        let resp: ChemblTargetSummaryResponse = self.get_json(self.client.get(&url)).await?;
+        Ok(ChemblTargetSummary {
+            pref_name: resp.pref_name.unwrap_or_default().trim().to_string(),
+            target_type: resp.target_type.unwrap_or_default().trim().to_string(),
+        })
     }
 }
 
@@ -120,6 +140,13 @@ struct ChemblMechanism {
     target_pref_name: Option<String>,
     action_type: Option<String>,
     mechanism_of_action: Option<String>,
+    target_chembl_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ChemblTargetSummaryResponse {
+    pref_name: Option<String>,
+    target_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +154,13 @@ pub struct ChemblTarget {
     pub target: String,
     pub action: String,
     pub mechanism: Option<String>,
+    pub target_chembl_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChemblTargetSummary {
+    pub pref_name: String,
+    pub target_type: String,
 }
 
 #[cfg(test)]
@@ -145,7 +179,11 @@ mod tests {
             .and(query_param("limit", "3"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "mechanisms": [
-                    {"target_pref_name": "BRAF", "action_type": "INHIBITOR"},
+                    {
+                        "target_pref_name": "BRAF",
+                        "action_type": "INHIBITOR",
+                        "target_chembl_id": "CHEMBL1824"
+                    },
                     {"target_pref_name": null, "action_type": null}
                 ]
             })))
@@ -158,8 +196,28 @@ mod tests {
         assert_eq!(targets[0].target, "BRAF");
         assert_eq!(targets[0].action, "INHIBITOR");
         assert!(targets[0].mechanism.is_none());
+        assert_eq!(targets[0].target_chembl_id.as_deref(), Some("CHEMBL1824"));
         assert_eq!(targets[1].target, "Unknown target");
         assert_eq!(targets[1].action, "Mechanism");
+    }
+
+    #[tokio::test]
+    async fn target_summary_returns_pref_name_and_target_type() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/target/CHEMBL3390820.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "pref_name": "PARP 1, 2 and 3",
+                "target_type": "PROTEIN FAMILY"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = ChemblClient::new_for_test(server.uri()).unwrap();
+        let summary = client.target_summary("CHEMBL3390820").await.unwrap();
+        assert_eq!(summary.pref_name, "PARP 1, 2 and 3");
+        assert_eq!(summary.target_type, "PROTEIN FAMILY");
     }
 
     #[tokio::test]

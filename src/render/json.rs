@@ -495,6 +495,8 @@ mod tests {
             brand_names: vec!["Tagrisso".to_string()],
             route: None,
             targets: vec!["EGFR".to_string()],
+            target_family: Some("PARP".to_string()),
+            target_family_name: Some("poly(ADP-ribose) polymerase".to_string()),
             indications: vec!["Non-small cell lung cancer".to_string()],
             interactions: Vec::new(),
             interaction_text: None,
@@ -514,6 +516,8 @@ mod tests {
 
         let json = to_pretty(&drug).expect("drug json");
         assert!(json.contains("\"name\": \"osimertinib\""));
+        assert!(json.contains("\"target_family\": \"PARP\""));
+        assert!(json.contains("\"target_family_name\": \"poly(ADP-ribose) polymerase\""));
         assert!(json.contains("\"targets\""));
     }
 

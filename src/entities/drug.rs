@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use crate::sources::mychem::{
     MYCHEM_FIELDS_GET, MYCHEM_FIELDS_SEARCH, MyChemClient, MyChemHit, MyChemNdcField,
 };
 use crate::sources::openfda::{DrugsFdaResult, OpenFdaClient, OpenFdaResponse};
-use crate::sources::opentargets::OpenTargetsClient;
+use crate::sources::opentargets::{OpenTargetsClient, OpenTargetsTarget};
 use crate::transform;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +45,10 @@ pub struct Drug {
     pub route: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_family_name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub indications: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -863,6 +867,7 @@ struct DrugSections {
 fn parse_sections(sections: &[String]) -> Result<DrugSections, BioMcpError> {
     let mut out = DrugSections::default();
     let mut include_all = false;
+    let mut any_section = false;
 
     for raw in sections {
         let section = raw.trim().to_ascii_lowercase();
@@ -872,6 +877,7 @@ fn parse_sections(sections: &[String]) -> Result<DrugSections, BioMcpError> {
         if section == "--json" || section == "-j" {
             continue;
         }
+        any_section = true;
         match section.as_str() {
             DRUG_SECTION_LABEL => {
                 out.include_label = true;
@@ -903,6 +909,8 @@ fn parse_sections(sections: &[String]) -> Result<DrugSections, BioMcpError> {
         out.include_indications = true;
         out.include_interactions = true;
         out.include_civic = true;
+    } else if !any_section {
+        out.include_targets = true;
     }
 
     Ok(out)
@@ -1497,6 +1505,7 @@ async fn enrich_targets(drug: &mut Drug) {
         return;
     };
 
+    let mut chembl_rows = Vec::new();
     match ChemblClient::new() {
         Ok(client) => match client.drug_targets(chembl_id, 15).await {
             Ok(rows) => {
@@ -1508,29 +1517,33 @@ async fn enrich_targets(drug: &mut Drug) {
                 merge_unique_casefold(&mut drug.targets, targets);
 
                 let mechanisms = rows
-                    .into_iter()
+                    .iter()
                     .filter(|row| !row.target.eq_ignore_ascii_case("Unknown target"))
                     .map(|row| {
                         row.mechanism
+                            .clone()
                             .unwrap_or_else(|| format!("{} of {}", row.action, row.target))
                     })
                     .collect::<Vec<_>>();
                 merge_unique_casefold(&mut drug.mechanisms, mechanisms);
+                chembl_rows = rows;
             }
             Err(err) => warn!("ChEMBL unavailable for drug targets section: {err}"),
         },
         Err(err) => warn!("ChEMBL client init failed: {err}"),
     }
 
+    let mut opentargets_targets = Vec::new();
     match OpenTargetsClient::new() {
         Ok(client) => match client.drug_sections(chembl_id, 15).await {
             Ok(sections) => {
                 let targets = sections
                     .targets
-                    .into_iter()
-                    .map(|t| t.approved_symbol)
+                    .iter()
+                    .map(|t| t.approved_symbol.clone())
                     .collect::<Vec<_>>();
                 merge_unique_casefold(&mut drug.targets, targets);
+                opentargets_targets = sections.targets;
             }
             Err(err) => warn!("OpenTargets unavailable for drug targets section: {err}"),
         },
@@ -1538,10 +1551,168 @@ async fn enrich_targets(drug: &mut Drug) {
     }
 
     drug.targets.truncate(12);
+    drug.target_family = None;
+    drug.target_family_name = None;
+
+    if drug.targets.len() >= 2
+        && let Some(target_chembl_id) = family_target_chembl_id(&chembl_rows, &drug.targets)
+    {
+        match ChemblClient::new() {
+            Ok(client) => match client.target_summary(&target_chembl_id).await {
+                Ok(summary) if summary.target_type.eq_ignore_ascii_case("PROTEIN FAMILY") => {
+                    let _family_pref_name = summary.pref_name.trim();
+                    drug.target_family = strict_target_family_label(&drug.targets);
+                    drug.target_family_name =
+                        derive_target_family_name(&drug.targets, &opentargets_targets);
+                }
+                Ok(_) => {}
+                Err(err) => warn!("ChEMBL unavailable for drug target family summary: {err}"),
+            },
+            Err(err) => warn!("ChEMBL client init failed: {err}"),
+        }
+    }
+
     if !drug.mechanisms.is_empty() {
         drug.mechanism = drug.mechanisms.first().cloned();
     }
     drug.mechanisms.truncate(6);
+}
+
+fn family_target_chembl_id(
+    chembl_rows: &[crate::sources::chembl::ChemblTarget],
+    displayed_targets: &[String],
+) -> Option<String> {
+    let displayed = displayed_targets
+        .iter()
+        .map(|target| target.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let target_ids = chembl_rows
+        .iter()
+        .filter(|row| {
+            displayed.contains(&row.target.to_ascii_lowercase())
+                || row
+                    .mechanism
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|value| !value.is_empty())
+        })
+        .filter_map(|row| row.target_chembl_id.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    if target_ids.len() == 1 {
+        target_ids.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn strict_target_family_label(targets: &[String]) -> Option<String> {
+    let distinct = targets
+        .iter()
+        .map(|target| target.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if distinct.len() < 2 {
+        return None;
+    }
+
+    let prefix_len = common_prefix_len_casefold(targets)?;
+    if prefix_len < 2 {
+        return None;
+    }
+
+    let prefix = &targets[0][..prefix_len];
+    let all_numeric_suffixes = targets.iter().all(|target| {
+        let Some(suffix) = target.get(prefix_len..) else {
+            return false;
+        };
+        !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit())
+    });
+    if all_numeric_suffixes {
+        Some(prefix.to_string())
+    } else {
+        None
+    }
+}
+
+fn derive_target_family_name(
+    displayed_targets: &[String],
+    opentargets_targets: &[OpenTargetsTarget],
+) -> Option<String> {
+    let names_by_symbol = opentargets_targets
+        .iter()
+        .filter_map(|target| {
+            let approved_name = target.approved_name.as_deref()?.trim();
+            if approved_name.is_empty() {
+                return None;
+            }
+            Some((
+                target.approved_symbol.to_ascii_lowercase(),
+                approved_name.to_string(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    let names = displayed_targets
+        .iter()
+        .map(|target| names_by_symbol.get(&target.to_ascii_lowercase()).cloned())
+        .collect::<Option<Vec<_>>>()?;
+    common_name_stem(&names)
+}
+
+fn common_name_stem(names: &[String]) -> Option<String> {
+    if names.len() < 2 {
+        return None;
+    }
+
+    let prefix_len = common_prefix_len_casefold(names)?;
+    if prefix_len < 6 {
+        return None;
+    }
+
+    let prefix = &names[0][..prefix_len];
+    let boundary_aligned = prefix
+        .chars()
+        .last()
+        .is_some_and(|ch| !ch.is_alphanumeric());
+    let mut candidate = prefix.trim_end();
+    if !boundary_aligned {
+        candidate = trim_to_word_boundary(candidate);
+    }
+    candidate = candidate.trim_end_matches(|ch: char| ch.is_whitespace() || ",;:-/".contains(ch));
+    if candidate.len() < 6 || !candidate.chars().any(|ch| ch.is_alphabetic()) {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn trim_to_word_boundary(value: &str) -> &str {
+    let mut end = value.len();
+    while end > 0 {
+        let Some(ch) = value[..end].chars().last() else {
+            break;
+        };
+        if !ch.is_alphanumeric() && ch != ')' && ch != ']' {
+            break;
+        }
+        end -= ch.len_utf8();
+    }
+    value[..end].trim_end()
+}
+
+fn common_prefix_len_casefold(values: &[String]) -> Option<usize> {
+    let first = values.first()?;
+    let mut prefix_len = first.len();
+    for value in &values[1..] {
+        let common_len = first
+            .bytes()
+            .zip(value.bytes())
+            .take_while(|(left, right)| left.eq_ignore_ascii_case(right))
+            .count();
+        prefix_len = prefix_len.min(common_len);
+    }
+    Some(prefix_len)
 }
 
 async fn enrich_indications(drug: &mut Drug) {
@@ -2366,6 +2537,12 @@ mod tests {
     }
 
     #[test]
+    fn parse_sections_default_card_includes_targets_enrichment() {
+        let flags = parse_sections(&[]).unwrap();
+        assert!(flags.include_targets);
+    }
+
+    #[test]
     fn validate_region_usage_rejects_approvals_with_explicit_region() {
         let flags = parse_sections(&["approvals".to_string()]).unwrap();
         let err = validate_region_usage(&flags, true).unwrap_err();
@@ -2541,5 +2718,110 @@ mod tests {
 
         // When MyChem already returned rows, no fallback regardless of offset.
         assert!(!should_attempt_openfda_fallback(&[dummy], 0, &name_filters));
+    }
+
+    #[test]
+    fn strict_target_family_label_accepts_numeric_suffix_family() {
+        let targets = vec![
+            "PARP1".to_string(),
+            "PARP2".to_string(),
+            "PARP3".to_string(),
+        ];
+        assert_eq!(
+            strict_target_family_label(&targets).as_deref(),
+            Some("PARP")
+        );
+    }
+
+    #[test]
+    fn strict_target_family_label_handles_embedded_digits() {
+        let targets = vec!["CYP2C9".to_string(), "CYP2C19".to_string()];
+        assert_eq!(
+            strict_target_family_label(&targets).as_deref(),
+            Some("CYP2C")
+        );
+    }
+
+    #[test]
+    fn strict_target_family_label_rejects_mixed_targets() {
+        let targets = vec!["ABL1".to_string(), "KIT".to_string(), "PDGFRB".to_string()];
+        assert!(strict_target_family_label(&targets).is_none());
+    }
+
+    #[test]
+    fn family_target_chembl_id_requires_single_matching_target_id() {
+        let rows = vec![
+            crate::sources::chembl::ChemblTarget {
+                target: "PARP1".to_string(),
+                action: "INHIBITOR".to_string(),
+                mechanism: None,
+                target_chembl_id: Some("CHEMBL3390820".to_string()),
+            },
+            crate::sources::chembl::ChemblTarget {
+                target: "PARP2".to_string(),
+                action: "INHIBITOR".to_string(),
+                mechanism: None,
+                target_chembl_id: Some("CHEMBL3390820".to_string()),
+            },
+        ];
+        let displayed_targets = vec!["PARP1".to_string(), "PARP2".to_string()];
+        assert_eq!(
+            family_target_chembl_id(&rows, &displayed_targets).as_deref(),
+            Some("CHEMBL3390820")
+        );
+    }
+
+    #[test]
+    fn family_target_chembl_id_accepts_mechanism_only_family_row() {
+        let rows = vec![crate::sources::chembl::ChemblTarget {
+            target: "Unknown target".to_string(),
+            action: "INHIBITOR".to_string(),
+            mechanism: Some("PARP 1, 2 and 3 inhibitor".to_string()),
+            target_chembl_id: Some("CHEMBL3390820".to_string()),
+        }];
+        let displayed_targets = vec![
+            "PARP1".to_string(),
+            "PARP2".to_string(),
+            "PARP3".to_string(),
+        ];
+        assert_eq!(
+            family_target_chembl_id(&rows, &displayed_targets).as_deref(),
+            Some("CHEMBL3390820")
+        );
+    }
+
+    #[test]
+    fn derive_target_family_name_requires_complete_member_names() {
+        let displayed_targets = vec!["PARP1".to_string(), "PARP2".to_string()];
+        let opentargets_targets = vec![
+            OpenTargetsTarget {
+                approved_symbol: "PARP1".to_string(),
+                approved_name: Some("poly(ADP-ribose) polymerase 1".to_string()),
+            },
+            OpenTargetsTarget {
+                approved_symbol: "PARP2".to_string(),
+                approved_name: None,
+            },
+        ];
+        assert!(derive_target_family_name(&displayed_targets, &opentargets_targets).is_none());
+    }
+
+    #[test]
+    fn derive_target_family_name_trims_numeric_member_suffix() {
+        let displayed_targets = vec!["PARP1".to_string(), "PARP2".to_string()];
+        let opentargets_targets = vec![
+            OpenTargetsTarget {
+                approved_symbol: "PARP1".to_string(),
+                approved_name: Some("poly(ADP-ribose) polymerase 1".to_string()),
+            },
+            OpenTargetsTarget {
+                approved_symbol: "PARP2".to_string(),
+                approved_name: Some("poly(ADP-ribose) polymerase 2".to_string()),
+            },
+        ];
+        assert_eq!(
+            derive_target_family_name(&displayed_targets, &opentargets_targets).as_deref(),
+            Some("poly(ADP-ribose) polymerase")
+        );
     }
 }

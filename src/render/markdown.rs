@@ -3171,6 +3171,8 @@ pub fn drug_markdown_with_region(
         show_us_header => show_us_header,
         top_adverse_events => &drug.top_adverse_events,
         targets => &drug.targets,
+        target_family => &drug.target_family,
+        target_family_name => &drug.target_family_name,
         indications => &drug.indications,
         interactions => &drug.interactions,
         interaction_text => &drug.interaction_text,
@@ -4426,6 +4428,8 @@ mod tests {
             brand_names: vec!["Kalydeco".to_string()],
             route: Some("Oral".to_string()),
             targets: vec!["CFTR".to_string()],
+            target_family: None,
+            target_family_name: None,
             indications: vec!["Cystic fibrosis".to_string()],
             interactions: vec![crate::entities::drug::DrugInteraction {
                 drug: "rifampin".to_string(),
@@ -5318,6 +5322,8 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -5645,6 +5651,8 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -6671,6 +6679,8 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -6712,6 +6722,8 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -6764,6 +6776,8 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: Some(
@@ -6806,6 +6820,8 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -6829,6 +6845,51 @@ mod tests {
     }
 
     #[test]
+    fn drug_markdown_shows_target_family_and_members_when_present() {
+        let drug = Drug {
+            name: "olaparib".to_string(),
+            drugbank_id: Some("DB09074".to_string()),
+            chembl_id: Some("CHEMBL1789941".to_string()),
+            unii: None,
+            drug_type: Some("small molecule".to_string()),
+            mechanism: Some("PARP inhibitor".to_string()),
+            mechanisms: vec!["PARP inhibitor".to_string()],
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: vec![
+                "PARP1".to_string(),
+                "PARP2".to_string(),
+                "PARP3".to_string(),
+            ],
+            target_family: Some("PARP".to_string()),
+            target_family_name: Some("poly(ADP-ribose) polymerase".to_string()),
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let markdown = drug_markdown(&drug, &["targets".to_string()]).expect("markdown");
+        assert!(markdown.contains("Family: PARP (poly(ADP-ribose) polymerase)"));
+        assert!(markdown.contains("Members: PARP1, PARP2, PARP3"));
+    }
+
+    #[test]
     fn drug_markdown_with_region_all_keeps_us_and_eu_blocks_separate() {
         let drug = Drug {
             name: "pembrolizumab".to_string(),
@@ -6845,6 +6906,8 @@ mod tests {
             brand_names: vec!["Keytruda".to_string()],
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -6936,6 +6999,8 @@ mod tests {
             brand_names: vec!["Keytruda".to_string()],
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,
@@ -6999,6 +7064,8 @@ mod tests {
             brand_names: vec!["Ozempic".to_string()],
             route: None,
             targets: Vec::new(),
+            target_family: None,
+            target_family_name: None,
             indications: Vec::new(),
             interactions: Vec::new(),
             interaction_text: None,

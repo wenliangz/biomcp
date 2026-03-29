@@ -101,6 +101,7 @@ query DrugSections($chemblId: String!) {
       rows {
         targets {
           approvedSymbol
+          approvedName
         }
       }
     }
@@ -169,6 +170,10 @@ query DrugSections($chemblId: String!) {
                 }
                 targets.push(OpenTargetsTarget {
                     approved_symbol: symbol,
+                    approved_name: row
+                        .approved_name
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty()),
                 });
             }
         } else {
@@ -819,6 +824,7 @@ pub struct OpenTargetsIndication {
 #[derive(Debug, Clone)]
 pub struct OpenTargetsTarget {
     pub approved_symbol: String,
+    pub approved_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -927,6 +933,7 @@ struct MechanismOfActionRow {
 #[serde(rename_all = "camelCase")]
 struct TargetNode {
     approved_symbol: Option<String>,
+    approved_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1346,12 +1353,18 @@ mod tests {
                             "rows": [
                                 {
                                     "targets": [
-                                        {"approvedSymbol": "BRAF"}
+                                        {
+                                            "approvedSymbol": "BRAF",
+                                            "approvedName": "B-Raf proto-oncogene serine/threonine-protein kinase"
+                                        }
                                     ]
                                 },
                                 {
                                     "targets": [
-                                        {"approvedSymbol": "MAP2K1"}
+                                        {
+                                            "approvedSymbol": "MAP2K1",
+                                            "approvedName": "Dual specificity mitogen-activated protein kinase kinase 1"
+                                        }
                                     ]
                                 }
                             ]
@@ -1372,7 +1385,15 @@ mod tests {
         );
         assert_eq!(sections.targets.len(), 2);
         assert_eq!(sections.targets[0].approved_symbol, "BRAF");
+        assert_eq!(
+            sections.targets[0].approved_name.as_deref(),
+            Some("B-Raf proto-oncogene serine/threonine-protein kinase")
+        );
         assert_eq!(sections.targets[1].approved_symbol, "MAP2K1");
+        assert_eq!(
+            sections.targets[1].approved_name.as_deref(),
+            Some("Dual specificity mitogen-activated protein kinase kinase 1")
+        );
     }
 
     #[tokio::test]

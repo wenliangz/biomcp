@@ -163,6 +163,28 @@ echo "$out" | mustmatch like "## Targets"
 echo "$out" | mustmatch like $'## Targets (ChEMBL / Open Targets)\n\nPDCD1'
 ```
 
+## Drug Target Family
+
+When the displayed targets resolve to a single upstream family, the card should surface that family without hiding the individual members.
+
+```bash
+out="$(biomcp get drug olaparib targets)"
+echo "$out" | mustmatch like "## Targets"
+echo "$out" | mustmatch like "Family: PARP"
+echo "$out" | mustmatch like "Members: PARP1, PARP2, PARP3"
+```
+
+## Drug Target Family JSON
+
+The additive JSON contract should preserve the existing targets list while exposing the family summary when available.
+
+```bash
+out="$(biomcp --json get drug olaparib)"
+echo "$out" | jq -e '.target_family == "PARP"' >/dev/null
+echo "$out" | jq -e '(.targets | index("PARP1")) and (.targets | index("PARP2")) and (.targets | index("PARP3"))' >/dev/null
+echo "$out" | jq -e 'if has("target_family_name") then (.target_family_name | type) == "string" else true end' >/dev/null
+```
+
 ## Drug Interactions With Public Label Text
 
 The public MyChem payload does not reliably expose structured DrugBank interaction rows, so BioMCP should render OpenFDA label text when it exists instead of claiming no interactions are known.
