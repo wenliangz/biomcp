@@ -293,12 +293,16 @@ pub struct UniProtRecord {
 pub struct UniProtProteinDescription {
     pub recommended_name: Option<UniProtNameContainer>,
     pub submission_names: Option<Vec<UniProtNameContainer>>,
+    #[serde(default)]
+    pub alternative_names: Vec<UniProtNameContainer>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UniProtNameContainer {
     pub full_name: Option<UniProtTextValue>,
+    #[serde(default)]
+    pub short_names: Vec<UniProtTextValue>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -446,6 +450,47 @@ impl UniProtRecord {
                 Some(UniProtProteinIsoformSummary { name, is_displayed })
             })
             .collect()
+    }
+
+    pub fn alternative_protein_names(&self) -> Vec<String> {
+        let Some(desc) = self.protein_description.as_ref() else {
+            return Vec::new();
+        };
+
+        let display_name = self.display_name();
+        let display_name = display_name.trim();
+        let mut names = Vec::new();
+
+        for alt in &desc.alternative_names {
+            for short_name in &alt.short_names {
+                let value = short_name.value.trim();
+                if value.is_empty()
+                    || value.eq_ignore_ascii_case(display_name)
+                    || names
+                        .iter()
+                        .any(|name: &String| name.eq_ignore_ascii_case(value))
+                {
+                    continue;
+                }
+                names.push(value.to_string());
+            }
+
+            let Some(full_name) = alt.full_name.as_ref() else {
+                continue;
+            };
+            let value = full_name.value.trim();
+            if value.is_empty()
+                || value.eq_ignore_ascii_case(display_name)
+                || names
+                    .iter()
+                    .any(|name: &String| name.eq_ignore_ascii_case(value))
+            {
+                continue;
+            }
+            names.push(value.to_string());
+        }
+
+        names
     }
 
     pub fn structure_ids(&self) -> Vec<String> {
@@ -756,6 +801,86 @@ mod tests {
         .unwrap();
 
         assert!(record.protein_isoforms().is_empty());
+    }
+
+    #[test]
+    fn alternative_protein_names_flatten_short_and_full_names_in_source_order() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "Q99541",
+            "proteinDescription": {
+                "recommendedName": {
+                    "fullName": {"value": "Perilipin-2"}
+                },
+                "alternativeNames": [
+                    {
+                        "fullName": {"value": "Adipophilin"}
+                    },
+                    {
+                        "fullName": {"value": "Adipose differentiation-related protein"},
+                        "shortNames": [{"value": "ADRP"}]
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            record.alternative_protein_names(),
+            vec![
+                "Adipophilin".to_string(),
+                "ADRP".to_string(),
+                "Adipose differentiation-related protein".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn alternative_protein_names_trim_deduplicate_and_skip_recommended_name() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "O60240",
+            "proteinDescription": {
+                "recommendedName": {
+                    "fullName": {"value": "Perilipin-1"}
+                },
+                "alternativeNames": [
+                    {
+                        "fullName": {"value": "  Perilipin-1  "},
+                        "shortNames": [
+                            {"value": "  "},
+                            {"value": "PERI"}
+                        ]
+                    },
+                    {
+                        "fullName": {"value": "Lipid droplet-associated protein"},
+                        "shortNames": [{"value": "peri"}]
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            record.alternative_protein_names(),
+            vec![
+                "PERI".to_string(),
+                "Lipid droplet-associated protein".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn alternative_protein_names_return_empty_when_alternative_names_are_missing() {
+        let record: UniProtRecord = serde_json::from_value(serde_json::json!({
+            "primaryAccession": "P15056",
+            "proteinDescription": {
+                "recommendedName": {
+                    "fullName": {"value": "Serine/threonine-protein kinase B-raf"}
+                }
+            }
+        }))
+        .unwrap();
+
+        assert!(record.alternative_protein_names().is_empty());
     }
 
     #[test]

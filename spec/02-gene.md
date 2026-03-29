@@ -136,6 +136,35 @@ echo "$out" | jq -e '
 ' > /dev/null
 ```
 
+## Gene Protein Alternative Names
+
+Legacy protein names remain common in literature and BioASQ-style answer keys, so the UniProt-backed gene protein section should expose those names alongside the canonical protein name in both markdown and JSON output.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene PLIN2 protein)"
+echo "$out" | mustmatch like "## Protein (UniProt)"
+echo "$out" | mustmatch like "- Name: Perilipin-2"
+echo "$out" | mustmatch like "- Also known as:"
+echo "$out" | mustmatch like "Adipophilin, ADRP"
+echo "$out" | mustmatch like "Adipose differentiation-related protein"
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene PLIN1 protein)"
+echo "$out" | mustmatch like "- Name: Perilipin-1"
+echo "$out" | mustmatch like "Lipid droplet-associated protein"
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene PLIN2 protein --json)"
+echo "$out" | jq -e '
+  (.protein.alternative_names // []) | index("ADRP")
+' > /dev/null
+```
+
 ## Druggability Section
 
 The druggability section should stay as one section while exposing OpenTargets tractability markers and safety-liability context alongside DGIdb interaction data.
