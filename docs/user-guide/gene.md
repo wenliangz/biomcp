@@ -55,9 +55,11 @@ Protein summary:
 biomcp get gene BRAF protein
 ```
 
-When UniProt exposes alternative products, the protein section also includes an
-`Isoforms (N)` line with isoform names and the displayed isoform length when that
-length is available from the base UniProt record.
+When UniProt exposes legacy protein names, the protein section includes an
+`Also known as:` line with alternative full names and short names from UniProt.
+When UniProt exposes alternative products, the same section also includes an
+`Isoforms (N)` line with isoform names and the displayed isoform length when
+that length is available from the base UniProt record.
 
 GO terms and interactions:
 

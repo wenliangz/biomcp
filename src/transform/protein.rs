@@ -73,8 +73,10 @@ mod tests {
                     full_name: Some(UniProtTextValue {
                         value: "Serine/threonine-protein kinase B-raf".to_string(),
                     }),
+                    short_names: Vec::new(),
                 }),
                 submission_names: None,
+                alternative_names: Vec::new(),
             }),
             genes: vec![UniProtGene {
                 gene_name: Some(UniProtTextValue {
@@ -156,8 +158,10 @@ mod tests {
                 full_name: Some(UniProtTextValue {
                     value: "Epidermal growth factor receptor".to_string(),
                 }),
+                short_names: Vec::new(),
             }),
             submission_names: None,
+            alternative_names: Vec::new(),
         });
         record.genes = vec![UniProtGene {
             gene_name: Some(UniProtTextValue {
@@ -181,8 +185,10 @@ mod tests {
                 full_name: Some(UniProtTextValue {
                     value: "Cellular tumor antigen p53".to_string(),
                 }),
+                short_names: Vec::new(),
             }),
             submission_names: None,
+            alternative_names: Vec::new(),
         });
         record.genes = vec![UniProtGene {
             gene_name: Some(UniProtTextValue {

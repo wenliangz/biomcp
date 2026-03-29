@@ -93,6 +93,8 @@ pub struct GeneProtein {
     pub length: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub isoforms: Vec<GeneProteinIsoform>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternative_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -578,12 +580,14 @@ async fn fetch_protein_section(
             length: isoform.is_displayed.then_some(length).flatten(),
         })
         .collect();
+    let alternative_names = record.alternative_protein_names();
     Ok(Some(GeneProtein {
         accession,
         name: record.display_name(),
         function: record.function_summary(),
         length,
         isoforms,
+        alternative_names,
     }))
 }
 
