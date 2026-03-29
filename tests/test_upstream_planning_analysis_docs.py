@@ -133,6 +133,8 @@ def test_functional_overview_preserves_readme_surface_and_study_family() -> None
     assert "`biomcp skill list` shows embedded worked examples" in functional
     assert "`biomcp skill <name>` opens an embedded worked example" in functional
     assert "`biomcp://skill/<slug>`" in functional
+    assert "discover <query>" in functional
+    assert "free-text concept resolution into typed follow-up commands" in functional
     assert "search all [slot filters]" in functional
     assert "biomcp search all --gene BRAF --disease melanoma" in functional
     assert "biomcp search all BRAF" in functional
@@ -148,6 +150,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     release_workflow = _read_repo(".github/workflows/release.yml")
     install_script = _read_repo("install.sh")
     technical_ws = _normalize_ws(technical)
+    ux_ws = _normalize_ws(ux)
     article_guide_ws = _normalize_ws(article_guide)
     data_sources_ws = _normalize_ws(data_sources)
     article_validation_section = _normalize_ws(
@@ -225,7 +228,12 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "missing_article_filters_is_clean_usage_error" in article_usage
 
     assert "CI (`.github/workflows/ci.yml`) runs five parallel jobs" in technical
-    assert "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `make check-quality-ratchet`)" in technical
+    assert (
+        "`check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`)"
+        in technical_ws
+    )
+    assert "`make check` is the required local ticket gate" in technical
+    assert "that means `lint`, `test`, and `check-quality-ratchet`" in technical
     assert "`version-sync` (`bash scripts/check-version-sync.sh`)" in technical
     assert "`climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`)" in technical
     assert (
@@ -264,6 +272,8 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
         "tag-to-binary and tag-to-docs parity"
         in release_pipeline_section
     )
+    assert "tag=\"${BIOMCP_TAG:?set BIOMCP_TAG to the published release tag, e.g. v0.8.19}\"" in technical
+    assert 'version="${tag#v}"' in technical
     assert "`workflow_dispatch` can replay a specified tag" in release_pipeline_section
     assert "Release validation runs the Rust checks again" in technical
     assert "workflow_dispatch:" in release_workflow
@@ -283,6 +293,15 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "remote `shell`" not in technical
 
     assert "`search all` Contract" in ux
+    assert "biomcp discover <query>" in ux
+    assert "## See Also and Next Commands" in ux
+    assert "`_meta.next_commands`" in ux
+    assert "`discover_try_line()`" in ux
+    assert "degrade by omission, not by emitting dead commands" in ux
+    assert (
+        "runtime-generated per-record `next_commands` remain outside the static list contract"
+        in ux_ws
+    )
     assert "typed slots first" in ux
     assert "biomcp search all --gene BRAF --disease melanoma" in ux
     assert 'biomcp search all --keyword "checkpoint inhibitor"' in ux

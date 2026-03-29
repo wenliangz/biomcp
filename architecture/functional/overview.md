@@ -95,6 +95,7 @@ system: overview first, then executable examples on demand.
 search <entity> [filters]    → discovery across a source type
 get <entity> <id> [sections] → focused detail with progressive disclosure
 <entity> <helper> <id>       → cross-entity pivot
+discover <query>            → free-text concept resolution into typed follow-up commands
 enrich <GENE1,GENE2,...>     → gene-set enrichment
 batch <entity> <id1,id2,...> → parallel gets
 search all [slot filters]    → unified fan-out across all entities

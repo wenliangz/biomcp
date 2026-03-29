@@ -10,6 +10,7 @@ documentation, and verification work — not a user manual.
 biomcp search <entity> [filters]      → discovery queries
 biomcp get <entity> <id> [sections]   → focused detail
 biomcp <entity> <helper> <id>         → cross-entity pivot
+biomcp discover <query>               → free-text concept resolution into typed follow-up commands
 biomcp enrich <GENE1,GENE2,...>        → gene-set enrichment
 biomcp batch <entity> <id1,id2,...>    → parallel gets
 biomcp search all [slot filters]      → unified fan-out
@@ -200,8 +201,10 @@ biomcp serve-http --host 0.0.0.0 --port 8080
 
 These properties should be preserved across releases:
 
-1. **`biomcp list`** shows all entities and commands — must not reference
-   stale or removed commands
+1. **`biomcp list`** shows all entities and top-level commands, including
+   `discover` and the major command families — it must not reference stale or
+   removed commands, but runtime-generated per-record `next_commands` remain
+   outside the static list contract
 2. **`biomcp list <entity>`** shows entity-specific filters and examples —
    examples must be runnable
 3. **JSON output** (`--json` flag) is available on all query commands and
@@ -211,6 +214,28 @@ These properties should be preserved across releases:
    stay visible in output even though the command currently exits 0
 5. **Error messages** include suggested next steps — suggestions must name
    real commands
+
+## See Also and Next Commands
+
+BioMCP uses result-local guidance to teach the next executable step directly
+from the current output.
+
+- Entity-card markdown uses `related_*()` helpers in `src/render/markdown.rs`
+  plus `format_related_block()` to render `See also:` follow-up commands at
+  the bottom of `get` cards.
+- Structured output carries the same follow-up contract in
+  `_meta.next_commands` from `src/render/json.rs` for agent and script
+  consumers.
+- Zero-result disease and drug searches use `discover_try_line()` to emit
+  `Try: biomcp discover ...` routing. That is related next-step guidance, but
+  it is not the same renderer as the entity-card `See also:` block.
+- The contract is executability, not string presence: output should teach the
+  next executable step; degrade by omission, not by emitting dead commands.
+- This guidance is data-driven. `related_*()` helpers only emit commands when
+  the supporting data or capability exists for the current record and runtime.
+- Proof lives in `spec/11-evidence-urls.md`,
+  `spec/21-cross-entity-see-also.md`, and the parser-level
+  `next_commands_validity` tests in `src/cli/mod.rs`.
 
 ## Skills Quick Reference
 

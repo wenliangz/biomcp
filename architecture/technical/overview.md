@@ -176,7 +176,14 @@ rebuild path, not a second source of release truth.
 2. Commit and push to `main`
 3. Cut a GitHub release with a semver tag
 4. GitHub Actions validates and publishes:
-   - CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check` (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `make check-quality-ratchet`), `version-sync` (`bash scripts/check-version-sync.sh`), `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`), and `contracts` (`cargo build --release --locked`, `uv sync --extra dev`, `uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`, `uv run mkdocs build --strict`), and `spec-stable` (`cargo build --release --locked`, then `make spec-pr`).
+   - CI (`.github/workflows/ci.yml`) runs five parallel jobs: `check`
+     (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`),
+     `version-sync` (`bash scripts/check-version-sync.sh`),
+     `climb-hygiene` (`bash scripts/check-no-climb-tracked.sh`),
+     `contracts` (`cargo build --release --locked`, `uv sync --extra dev`,
+     `uv run pytest tests/ -v --mcp-cmd "./target/release/biomcp serve"`,
+     `uv run mkdocs build --strict`), and `spec-stable`
+     (`cargo build --release --locked`, then `make spec-pr`).
    - Volatile live-network headings run separately in `.github/workflows/spec-smoke.yml`,
      which runs the full `make spec` suite on a schedule and by manual dispatch.
    - Release validation runs the Rust checks again, then
@@ -188,13 +195,14 @@ rebuild path, not a second source of release truth.
 
 ### Post-tag public proof
 
-After the `v0.8.18` tag is published, hand these commands to the verify/devops
-pass so release-visible version identity and docs parity are checked against
-the live surfaces:
+After the new tag is published, hand these commands to the verify/devops pass
+so release-visible version identity and docs parity are checked against the
+live surfaces:
 
 ```bash
-curl -fsSL https://api.github.com/repos/genomoncology/biomcp/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])"
-tmpdir="$(mktemp -d)" && BIOMCP_INSTALL_DIR="$tmpdir" BIOMCP_VERSION=v0.8.18 bash install.sh >/tmp/biomcp-install.log && "$tmpdir/biomcp" version | head -n 1
+tag="${BIOMCP_TAG:?set BIOMCP_TAG to the published release tag, e.g. v0.8.19}"
+version="${tag#v}"
+tmpdir="$(mktemp -d)" && BIOMCP_INSTALL_DIR="$tmpdir" BIOMCP_VERSION="$tag" bash install.sh >/tmp/biomcp-install.log && "$tmpdir/biomcp" version | head -n 1
 bioasq_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/reference/bioasq-benchmark/ >"$bioasq_page" && rg -q 'hf-public-pre2026' "$bioasq_page" && rg -q 'Phase A\+' "$bioasq_page" && rg -q 'Phase B' "$bioasq_page"
 api_keys_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/getting-started/api-keys/ >"$api_keys_page" && rg -q 'shared Semantic Scholar pool at 1 req/2sec' "$api_keys_page" && rg -q 'authenticated quota at 1 req/sec' "$api_keys_page"
 drug_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/user-guide/drug/ >"$drug_page" && rg -q 'Keytruda regulatory --region eu' "$drug_page" && rg -q 'EMA local data setup' "$drug_page" && rg -q 'available \(default path\)' "$drug_page"
@@ -202,8 +210,8 @@ drug_page="$(mktemp)" && curl -fsSL -A 'Mozilla/5.0' https://biomcp.org/user-gui
 
 Expected markers:
 
-- latest release tag is `v0.8.18`
-- installed binary starts with `biomcp 0.8.18`
+- published tag matches `$tag`
+- installed binary starts with `biomcp $version`
 - BioASQ route returns all shipped benchmark page markers
 - live API Keys docs show both shared-pool and authenticated Semantic Scholar
   guidance
