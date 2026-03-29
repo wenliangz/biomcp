@@ -68,7 +68,7 @@ Note: single-gene Enrichr p-values are exploratory and should be interpreted cau
 - Name: {{ protein.name }}
 {% if protein.length %}- Length: {{ protein.length }} aa{% endif %}{% if protein.isoforms %}
 - Isoforms ({{ protein.isoforms | length }}): {% for iso in protein.isoforms %}{{ iso.name }}{% if iso.length %} ({{ iso.length }} aa){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
-{% endif %}
+{%- endif %}
 {% if protein.function %}- Function: {{ protein.function | truncate(260) }}{% endif %}
 {% endif -%}
 {% if go_terms -%}
