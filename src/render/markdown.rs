@@ -4491,6 +4491,7 @@ mod tests {
         let disease_markdown =
             disease_markdown(&disease, &["all".to_string()]).expect("disease markdown");
         assert!(disease_markdown.contains("## Definition (MyDisease.info)"));
+        assert!(disease_markdown.contains("Inherited disease affecting chloride transport."));
         assert!(disease_markdown.contains("Genes (Open Targets): CFTR"));
         assert!(disease_markdown.contains("Treatments (MyChem.info indication search): ivacaftor"));
         assert!(disease_markdown.contains("Recruiting Trials (ClinicalTrials.gov): 4"));
@@ -5027,6 +5028,45 @@ mod tests {
         assert!(genes.contains("| Gene | Relationship | Source | OpenTargets |"));
         assert!(genes.contains("overall 0.912; GWAS 0.321; rare 0.654; somatic 0.876"));
         assert!(genes.contains("| NRAS | associated | CIViC | - |"));
+    }
+
+    #[test]
+    fn disease_markdown_preserves_full_definition_text() {
+        let full_definition = concat!(
+            "A rare hypomyelinating leukodystrophy disorder in which the cause of the disease is ",
+            "a variation in any of the POLR genes, including POLR1C, POLR3A or POLR3B. ",
+            "It is characterized by the association of hypomyelination, hypodontia, ",
+            "hypogonadotropic hypogonadism, and neurodevelopmental delay or regression."
+        );
+        let disease = Disease {
+            id: "MONDO:0100605".to_string(),
+            name: "4H leukodystrophy".to_string(),
+            definition: Some(full_definition.to_string()),
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let markdown = disease_markdown(&disease, &[]).expect("rendered markdown");
+        assert!(markdown.contains(full_definition));
+        assert!(markdown.contains("hypogonadotropic hypogonadism"));
+        assert!(markdown.contains("neurodevelopmental delay or regression"));
+        assert!(!markdown.contains("It is characterized by the association of…"));
     }
 
     #[test]
