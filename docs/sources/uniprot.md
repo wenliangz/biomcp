@@ -37,7 +37,9 @@ biomcp get gene BRAF protein
 ```
 
 Returns a gene detail view with a `Protein (UniProt)` section. When UniProt
-annotates alternative products, that section includes an `Isoforms (N)` line with
+annotates legacy protein names, that section includes an `Also known as:` line
+with alternative full names and short names from UniProt. When UniProt annotates
+alternative products, the same section also includes an `Isoforms (N)` line with
 isoform names and the displayed isoform length from the canonical record.
 
 ```bash
