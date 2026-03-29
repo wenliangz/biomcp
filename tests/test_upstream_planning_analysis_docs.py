@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,11 @@ DEFAULT_PLANNING_ROOT = REPO_ROOT / "tests" / "fixtures" / "planning" / "biomcp"
 
 def _read_repo(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def _current_release_tag_example() -> str:
+    cargo = tomllib.loads(_read_repo("Cargo.toml"))
+    return f"v{cargo['package']['version']}"
 
 
 def _planning_root() -> Path:
@@ -151,6 +157,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     install_script = _read_repo("install.sh")
     technical_ws = _normalize_ws(technical)
     ux_ws = _normalize_ws(ux)
+    example_tag = _current_release_tag_example()
     article_guide_ws = _normalize_ws(article_guide)
     data_sources_ws = _normalize_ws(data_sources)
     article_validation_section = _normalize_ws(
@@ -272,7 +279,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
         "tag-to-binary and tag-to-docs parity"
         in release_pipeline_section
     )
-    assert "tag=\"${BIOMCP_TAG:?set BIOMCP_TAG to the published release tag, e.g. v0.8.19}\"" in technical
+    assert f'tag="${{BIOMCP_TAG:?set BIOMCP_TAG to the published release tag, e.g. {example_tag}}}"' in technical
     assert 'version="${tag#v}"' in technical
     assert "`workflow_dispatch` can replay a specified tag" in release_pipeline_section
     assert "Release validation runs the Rust checks again" in technical
