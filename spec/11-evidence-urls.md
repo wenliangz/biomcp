@@ -17,7 +17,7 @@ Representative markdown cards should include evidence URLs and follow-up helper 
 ```bash
 gene_out="$(biomcp get gene BRAF)"
 echo "$gene_out" | mustmatch like "[NCBI Gene]("
-echo "$gene_out" | mustmatch like $'See also:\n  biomcp get pgx BRAF'
+echo "$gene_out" | mustmatch like $'See also:\n  biomcp search pgx -g BRAF'
 
 variant_out="$(biomcp get variant "BRAF V600E")"
 echo "$variant_out" | mustmatch like "[dbSNP](https://www.ncbi.nlm.nih.gov/snp/rs113488022)"
