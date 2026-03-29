@@ -81,7 +81,7 @@ echo "$out" | jq -e '._meta.next_commands[0] == "biomcp search all --gene BRAF -
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" discover diabetes)"
 echo "$out" | mustmatch like "## Concepts"
-echo "$out" | mustmatch like $'## Suggested Commands\n1. '
+echo "$out" | mustmatch like $'## Suggested Commands\n- `biomcp search disease -q "diabetes" --limit 10`'
 echo "$out" | mustmatch like "Type 1 diabetes mellitus"
 echo "$out" | mustmatch like "Type 2 diabetes mellitus"
 ```

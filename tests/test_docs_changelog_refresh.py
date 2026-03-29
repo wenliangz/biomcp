@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _read(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def _current_release_tag_example() -> str:
+    cargo = tomllib.loads(_read("Cargo.toml"))
+    return f"v{cargo['package']['version']}"
 
 
 def _markdown_section_block(text: str, heading: str) -> str:
@@ -208,6 +214,7 @@ def test_changelog_audit_backfills_rust_release_gaps() -> None:
 
 def test_release_overview_uses_manifest_reference_for_current_version_and_release_files() -> None:
     overview = _read("architecture/technical/overview.md")
+    example_tag = _current_release_tag_example()
 
     assert "**Current version:** see `Cargo.toml`" in overview
     assert "`scripts/check-version-sync.sh` keeps" in overview
@@ -222,8 +229,9 @@ def test_release_overview_uses_manifest_reference_for_current_version_and_releas
     ]:
         assert required_file in overview
 
-    assert "https://api.github.com/repos/genomoncology/biomcp/releases/latest" in overview
-    assert 'BIOMCP_VERSION=v0.8.18 bash install.sh' in overview
+    assert f'tag="${{BIOMCP_TAG:?set BIOMCP_TAG to the published release tag, e.g. {example_tag}}}"' in overview
+    assert 'version="${tag#v}"' in overview
+    assert 'BIOMCP_VERSION="$tag" bash install.sh' in overview
     assert "https://biomcp.org/reference/bioasq-benchmark/" in overview
     assert "https://biomcp.org/getting-started/api-keys/" in overview
     assert "https://biomcp.org/user-guide/drug/" in overview
@@ -232,7 +240,11 @@ def test_release_overview_uses_manifest_reference_for_current_version_and_releas
 def test_release_overview_post_tag_public_proof_requires_all_markers() -> None:
     overview = _read("architecture/technical/overview.md")
     post_tag_block = _markdown_section_block(overview, "### Post-tag public proof")
+    example_tag = _current_release_tag_example()
 
+    assert f'tag="${{BIOMCP_TAG:?set BIOMCP_TAG to the published release tag, e.g. {example_tag}}}"' in post_tag_block
+    assert 'version="${tag#v}"' in post_tag_block
+    assert 'BIOMCP_VERSION="$tag" bash install.sh' in post_tag_block
     assert 'bioasq_page="$(mktemp)"' in post_tag_block
     assert "rg -q 'hf-public-pre2026'" in post_tag_block
     assert "rg -q 'Phase A\\+'" in post_tag_block
