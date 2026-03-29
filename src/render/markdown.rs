@@ -2457,6 +2457,7 @@ pub fn variant_markdown(
         id => &variant.id,
         gene => &variant.gene,
         hgvs_p => &variant.hgvs_p,
+        legacy_name => &variant.legacy_name,
         hgvs_c => &variant.hgvs_c,
         consequence => &variant.consequence,
         rsid => &variant.rsid,
@@ -5866,6 +5867,7 @@ mod tests {
             "id": "chr7:g.55259515T>G",
             "gene": "EGFR",
             "hgvs_p": "p.L858R",
+            "legacy_name": "EGFR L858R",
             "significance": "Pathogenic"
         }))
         .expect("variant should deserialize");
@@ -5873,6 +5875,7 @@ mod tests {
         let markdown = variant_markdown(&variant, &[]).expect("rendered markdown");
         assert!(markdown.contains("EGFR"));
         assert!(markdown.contains("p.L858R"));
+        assert!(markdown.contains("Legacy Name: EGFR L858R"));
     }
 
     #[test]
@@ -5908,6 +5911,40 @@ mod tests {
             variant_markdown(&variant, &["gwas".to_string()]).expect("rendered markdown");
         assert!(markdown.contains("GWAS association data temporarily unavailable."));
         assert!(!markdown.contains("No GWAS associations found for this variant."));
+    }
+
+    #[test]
+    fn variant_search_markdown_renders_legacy_name_column_and_fallback() {
+        let results = vec![
+            VariantSearchResult {
+                id: "chr6:g.118880200T>G".to_string(),
+                gene: "PLN".to_string(),
+                hgvs_p: Some("p.L39X".to_string()),
+                legacy_name: Some("PLN L39stop".to_string()),
+                significance: Some("Pathogenic".to_string()),
+                clinvar_stars: Some(2),
+                gnomad_af: None,
+                revel: Some(0.935),
+                gerp: Some(5.12),
+            },
+            VariantSearchResult {
+                id: "chr6:g.118880100A>G".to_string(),
+                gene: "PLN".to_string(),
+                hgvs_p: Some("p.K3R".to_string()),
+                legacy_name: None,
+                significance: None,
+                clinvar_stars: None,
+                gnomad_af: None,
+                revel: None,
+                gerp: None,
+            },
+        ];
+
+        let markdown =
+            variant_search_markdown("gene=PLN, hgvsp=L39X", &results).expect("rendered markdown");
+        assert!(markdown.contains("| ID | Gene | Protein | Legacy Name | Significance |"));
+        assert!(markdown.contains("| chr6:g.118880200T>G | PLN | p.L39X | PLN L39stop |"));
+        assert!(markdown.contains("| chr6:g.118880100A>G | PLN | p.K3R | - |"));
     }
 
     #[test]

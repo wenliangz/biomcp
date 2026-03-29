@@ -1015,6 +1015,7 @@ mod tests {
             gene: String::new(),
             id: "rs7903146".to_string(),
             hgvs_p: None,
+            legacy_name: None,
             hgvs_c: None,
             rsid: Some("rs7903146".to_string()),
             cosmic_id: None,

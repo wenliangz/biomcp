@@ -23,6 +23,8 @@ pub struct Variant {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hgvs_p: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hgvs_c: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rsid: Option<String>,
@@ -226,6 +228,8 @@ pub struct VariantSearchResult {
     pub gene: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hgvs_p: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub significance: Option<String>,
     pub clinvar_stars: Option<u8>,
@@ -707,7 +711,7 @@ fn amino_acid_one_letter(token: &str) -> Option<char> {
         "W" | "TRP" => Some('W'),
         "Y" | "TYR" => Some('Y'),
         "V" | "VAL" => Some('V'),
-        "*" | "TER" | "STOP" => Some('*'),
+        "*" | "TER" | "STOP" | "X" => Some('*'),
         _ => None,
     }
 }
@@ -1933,6 +1937,7 @@ fn gwas_only_variant_stub(rsid: &str) -> Variant {
         gene: String::new(),
         id: rsid.to_string(),
         hgvs_p: None,
+        legacy_name: None,
         hgvs_c: None,
         rsid: Some(rsid.to_string()),
         cosmic_id: None,
@@ -2285,6 +2290,7 @@ mod tests {
             id: "chr1:g.1A>T".into(),
             gene: "TP53".into(),
             hgvs_p: Some("p.V1A".into()),
+            legacy_name: None,
             significance: Some("Pathogenic".into()),
             clinvar_stars: None,
             gnomad_af: Some(0.001),
@@ -2295,6 +2301,7 @@ mod tests {
             id: "chr1:g.2A>T".into(),
             gene: "TP53".into(),
             hgvs_p: Some("p.V2A".into()),
+            legacy_name: None,
             significance: None,
             clinvar_stars: None,
             gnomad_af: None,
@@ -2303,6 +2310,13 @@ mod tests {
         };
 
         assert!(search_result_quality_score(&rich) > search_result_quality_score(&sparse));
+    }
+
+    #[test]
+    fn variant_json_omits_legacy_name_when_absent() {
+        let variant = gwas_only_variant_stub("rs7903146");
+        let json = serde_json::to_value(&variant).expect("variant should serialize");
+        assert!(json.get("legacy_name").is_none());
     }
 
     #[test]
@@ -2352,6 +2366,7 @@ mod tests {
             gene: "BRAF".into(),
             id: "chr7:g.140453136A>T".into(),
             hgvs_p: Some("p.V600E".into()),
+            legacy_name: None,
             hgvs_c: None,
             rsid: None,
             cosmic_id: None,

@@ -7,6 +7,7 @@
     "id": { "type": "string" },
     "gene": { "type": "string" },
     "hgvs_p": { "type": ["string", "null"] },
+    "legacy_name": { "type": ["string", "null"] },
     "hgvs_c": { "type": ["string", "null"] },
     "rsid": { "type": ["string", "null"] },
     "cosmic_id": { "type": ["string", "null"] },

@@ -61,6 +61,9 @@ biomcp get variant "BRAF p.Val600Glu"
 ```
 
 The default output favors concise, clinically relevant context first.
+When BioMCP can derive a compact literature-facing alias, variant search rows
+and detail cards also show `Legacy Name`, and JSON output includes
+`legacy_name`.
 
 Shorthand such as `PTPN22 620W` or `R620W` is not treated as an exact variant
 ID. Use `biomcp search variant` for those inputs.

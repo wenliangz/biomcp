@@ -2512,8 +2512,7 @@ fn resolve_variant_query(
     positional_tokens: Vec<String>,
 ) -> Result<VariantSearchPlan, crate::error::BioMcpError> {
     let gene_flag = normalize_cli_query(gene_flag);
-    let hgvsp_flag = normalize_cli_query(hgvsp_flag)
-        .map(|value| crate::entities::variant::normalize_protein_change(&value).unwrap_or(value));
+    let hgvsp_flag = normalize_cli_query(hgvsp_flag).map(|value| normalize_search_hgvsp(&value));
     let consequence_flag = normalize_cli_query(consequence_flag);
     let condition_flag = normalize_cli_query(condition_flag);
 
@@ -2582,7 +2581,7 @@ fn resolve_variant_query(
                 }
                 return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
                     gene: Some(gene),
-                    hgvsp: Some(change),
+                    hgvsp: Some(normalize_search_hgvsp(&change)),
                     consequence: consequence_flag,
                     condition: condition_flag,
                     ..Default::default()
@@ -2618,7 +2617,7 @@ fn resolve_variant_query(
         }
         return Ok(VariantSearchPlan::Standard(ResolvedVariantQuery {
             gene: Some(gene),
-            hgvsp: Some(change),
+            hgvsp: Some(normalize_search_hgvsp(&change)),
             consequence: consequence_flag,
             condition: condition_flag,
             ..Default::default()
@@ -3501,6 +3500,15 @@ fn trim_protein_change_prefix(value: &str) -> &str {
         .trim()
         .trim_start_matches("p.")
         .trim_start_matches("P.")
+}
+
+fn normalize_search_hgvsp(value: &str) -> String {
+    let normalized = crate::entities::variant::normalize_protein_change(value)
+        .unwrap_or_else(|| trim_protein_change_prefix(value).to_string());
+    normalized
+        .strip_suffix('*')
+        .map(|prefix| format!("{prefix}X"))
+        .unwrap_or(normalized)
 }
 
 async fn variant_trial_mutation_query(id: &str) -> String {
@@ -8079,6 +8087,23 @@ mod tests {
         assert!(resolved.hgvsc.is_none());
         assert!(resolved.rsid.is_none());
         assert!(resolved.condition.is_none());
+    }
+
+    #[test]
+    fn resolve_variant_query_preserves_stop_x_for_hgvsp_flag() {
+        let resolved = resolve_variant_query(
+            Some("PLN".into()),
+            Some("L39X".into()),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let VariantSearchPlan::Standard(resolved) = resolved else {
+            panic!("expected standard search plan");
+        };
+        assert_eq!(resolved.gene.as_deref(), Some("PLN"));
+        assert_eq!(resolved.hgvsp.as_deref(), Some("L39X"));
     }
 
     #[test]
