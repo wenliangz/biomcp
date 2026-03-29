@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -14,6 +15,7 @@ REQUIRED_EXAMPLE_MARKERS = (
     "**Expected behavior:**",
     "**Expected output:**",
 )
+SPEC_BARE_PYTHON_PATTERN = re.compile(r"(?<![A-Za-z0-9_])python(?=(?: |$|-))")
 
 
 def _read(path: str) -> str:
@@ -92,7 +94,7 @@ def test_packaging_workspace_is_ignored_and_bundle_payload_is_filtered() -> None
     gitignore = _read(".gitignore")
     assert "/server/" in gitignore
 
-    for entry in (".claude/", ".agents/"):
+    for entry in (".march/", ".claude/", ".agents/"):
         assert entry in gitignore
 
     assert "architecture/" in mcpbignore
@@ -134,6 +136,47 @@ def test_repo_cleanup_removes_local_artifacts_and_deleted_dirs_from_git() -> Non
         "examples/test-predictions-stderr.log",
     ):
         assert not (REPO_ROOT / path).exists()
+
+
+def test_specs_do_not_depend_on_bare_python_alias() -> None:
+    bare_python_refs: list[str] = []
+
+    for path in sorted((REPO_ROOT / "spec").glob("*.md")):
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if SPEC_BARE_PYTHON_PATTERN.search(line):
+                bare_python_refs.append(f"{path.relative_to(REPO_ROOT)}:{line_no}: {line.strip()}")
+
+    assert not bare_python_refs, "\n".join(bare_python_refs)
+
+
+def test_study_chart_dimensions_spec_runs_as_a_targeted_heading() -> None:
+    env = dict(os.environ)
+    env["PATH"] = f"{REPO_ROOT / 'target' / 'release'}:{env['PATH']}"
+    spec_root = REPO_ROOT / "spec"
+
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "spec/13-study.md",
+                "--mustmatch-lang",
+                "bash",
+                "--mustmatch-timeout",
+                "60",
+                "-k",
+                "Custom and Terminal and Dimensions",
+                "-v",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        subprocess.run(["rm", "-rf", str(spec_root / ".cache")], check=False)
 
 
 def test_examples_tree_has_linked_index_and_readmes() -> None:

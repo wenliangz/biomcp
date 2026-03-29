@@ -287,6 +287,7 @@ echo "$out" | mustmatch not like "# Study Co-occurrence"
 `--cols` and `--rows` should constrain terminal chart output when the resolved target is the terminal.
 
 ```bash
+[ -f "$PWD/.cache/spec-study-env" ] || bash fixtures/setup-study-spec-fixture.sh "$PWD"
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart bar --cols 40 --rows 12)"
 OUT="$out" python3 - <<'PY'
