@@ -2313,6 +2313,13 @@ mod tests {
     }
 
     #[test]
+    fn variant_json_omits_legacy_name_when_absent() {
+        let variant = gwas_only_variant_stub("rs7903146");
+        let json = serde_json::to_value(&variant).expect("variant should serialize");
+        assert!(json.get("legacy_name").is_none());
+    }
+
+    #[test]
     fn parse_sections_supports_new_variant_sections() {
         let flags = parse_sections(&[
             "conservation".to_string(),

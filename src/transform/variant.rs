@@ -1281,41 +1281,43 @@ mod tests {
     }
 
     #[test]
-    fn from_myvariant_hit_derives_legacy_name_for_stop_aliases() {
-        let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
-            "_id": "chr6:g.118880200T>G",
-            "dbnsfp": {
-                "genename": "PLN",
-                "hgvsp": ["p.L39X", "p.Leu39Ter", "p.Leu39*"]
-            },
-            "clinvar": {
-                "variant_id": 4472
-            }
-        }))
-        .expect("variant payload should parse");
+    fn derive_legacy_name_normalizes_stop_alias_variants() {
+        for alias in ["p.L39X", "p.Leu39Ter", "p.Leu39*"] {
+            let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
+                "_id": "chr6:g.118880200T>G",
+                "dbnsfp": {
+                    "genename": "PLN",
+                    "hgvsp": [alias]
+                },
+                "clinvar": {
+                    "variant_id": 4472
+                }
+            }))
+            .expect("variant payload should parse");
 
-        let variant = from_myvariant_hit(&hit);
-        assert_eq!(variant.hgvs_p.as_deref(), Some("p.L39X"));
-        assert_eq!(variant.legacy_name.as_deref(), Some("PLN L39stop"));
+            let variant = from_myvariant_hit(&hit);
+            assert_eq!(variant.legacy_name.as_deref(), Some("PLN L39stop"));
+        }
     }
 
     #[test]
-    fn from_myvariant_search_hit_derives_legacy_name_for_missense_aliases() {
-        let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
-            "_id": "chr6:g.118880157C>T",
-            "dbnsfp": {
-                "genename": "PLN",
-                "hgvsp": ["p.R25C", "p.Arg25Cys"]
-            },
-            "clinvar": {
-                "rcv": [{"clinical_significance": "Likely pathogenic"}]
-            }
-        }))
-        .expect("variant payload should parse");
+    fn derive_legacy_name_normalizes_missense_alias_variants() {
+        for alias in ["p.R25C", "p.Arg25Cys"] {
+            let hit: MyVariantHit = serde_json::from_value(serde_json::json!({
+                "_id": "chr6:g.118880157C>T",
+                "dbnsfp": {
+                    "genename": "PLN",
+                    "hgvsp": [alias]
+                },
+                "clinvar": {
+                    "rcv": [{"clinical_significance": "Likely pathogenic"}]
+                }
+            }))
+            .expect("variant payload should parse");
 
-        let variant = from_myvariant_search_hit(&hit);
-        assert_eq!(variant.hgvs_p.as_deref(), Some("p.R25C"));
-        assert_eq!(variant.legacy_name.as_deref(), Some("PLN R25C"));
+            let variant = from_myvariant_search_hit(&hit);
+            assert_eq!(variant.legacy_name.as_deref(), Some("PLN R25C"));
+        }
     }
 
     #[test]

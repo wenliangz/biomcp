@@ -271,7 +271,7 @@ echo "$out" | mustmatch like "| PMID | Title |"
 rsID positional queries should normalize to an exact rsID search instead of falling back to gene text. The query echo and returned BRAF row guard the rsID normalization fix.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant rs113488022 --limit 5)"
+out="$(biomcp search variant rs113488022 --limit 5)"
 echo "$out" | mustmatch like "Query: rsid=rs113488022"
 echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF | p.V600E |"
 ```
@@ -281,7 +281,7 @@ echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF | p.V600E |"
 Gene plus c.HGVS shorthand should map to exact gene and coding-change filters. This regression checks the query echo and BRAF recall.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "BRAF c.1799T>A" --limit 5)"
+out="$(biomcp search variant "BRAF c.1799T>A" --limit 5)"
 echo "$out" | mustmatch like "Query: gene=BRAF, hgvsc=c.1799T>A"
 echo "$out" | mustmatch like "hgvsc=c.1799T>A"
 echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF |"
@@ -292,7 +292,7 @@ echo "$out" | mustmatch like "| chr7:g.140453136A>T | BRAF |"
 Confirmed exon-deletion phrases should resolve to a gene-scoped consequence search rather than generic condition text. The query echo should show the normalized consequence filter.
 
 ```bash
-out="$("$(git rev-parse --show-toplevel)/target/release/biomcp" search variant "EGFR Exon 19 Deletion" --limit 5)"
+out="$(biomcp search variant "EGFR Exon 19 Deletion" --limit 5)"
 echo "$out" | mustmatch like "Query: gene=EGFR, consequence=inframe_deletion"
 echo "$out" | mustmatch like "consequence=inframe_deletion"
 echo "$out" | mustmatch like "| ID | Gene | Protein | Legacy Name | Significance |"
