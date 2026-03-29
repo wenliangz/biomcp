@@ -33,6 +33,26 @@ echo "$out" | mustmatch like "ID: MONDO:0005105"
 echo "$out" | mustmatch like "Genes (Open Targets): CDKN2A (OT"
 ```
 
+## Full Disease Definitions
+
+Disease detail output should preserve the full curated definition text so characterization clauses remain available without falling back to phenotype dumps.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0100605)"
+echo "$out" | mustmatch like "hypogonadotropic hypogonadism"
+echo "$out" | mustmatch like "neurodevelopmental delay or regression"
+echo "$out" | mustmatch not like "It is characterized by the association of…"
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0017799)"
+echo "$out" | mustmatch like "pleural effusion, ascites and non-malignant ovarian neoplasm"
+echo "$out" | mustmatch like "surgical resection of the ovarian mass"
+echo "$out" | mustmatch not like "Prognosis is favorable following…"
+```
+
 ## Disease Genes
 
 Associated-gene expansion is central for translating phenotype-level queries into molecular follow-up. We assert on section heading and table structure.

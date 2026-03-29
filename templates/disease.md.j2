@@ -8,7 +8,7 @@ ID: {{ id }}
 {% if definition -%}
 ## Definition (MyDisease.info)
 
-{{ definition | truncate(200) }}
+{{ definition }}
 {% endif -%}
 {% if top_gene_score_labels -%}
 Genes (Open Targets): {{ top_gene_score_labels | join(", ") }}

@@ -9,61 +9,46 @@ git diff --stat main..HEAD | tail -1
 sed -n '1,220p' .march/ticket.md
 sed -n '1,260p' .march/design-draft.md
 sed -n '1,260p' .march/design-final.md
-sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/rust-standards/SKILL.md
-sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/testing-mindset/SKILL.md
-rg -n "GeneProtein|Protein \\(UniProt\\)|alternative_names|isoforms|PLIN2|PLIN1" src templates spec
-sed -n '1,120p' Makefile
-cargo test protein_isoforms_prefer_synonyms_and_track_displayed_status
-cargo test gene_markdown_renders_protein_isoforms_with_count_and_displayed_length
-cargo test gene_markdown_without_isoforms_keeps_protein_lines_contiguous
-sed -n '280,470p' src/sources/uniprot.rs
-sed -n '60,120p' src/entities/gene.rs
-sed -n '550,610p' src/entities/gene.rs
-sed -n '60,90p' templates/gene.md.j2
-sed -n '4370,5305p' src/render/markdown.rs
-sed -n '640,790p' src/sources/uniprot.rs
-sed -n '1,260p' src/transform/protein.rs
-cargo test alternative_protein_names
-cargo test gene_markdown_renders_protein_alternative_names
-cargo test gene_markdown_omits_protein_alternative_names_when_absent
-cargo build --release
-uv run --extra dev pytest spec/02-gene.md --collect-only -q
-cargo run --bin biomcp -- get gene PLIN2 protein
-cargo run --bin biomcp -- get gene PLIN2 protein --json
-BIOMCP_BIN="$PWD/target/debug/biomcp" uv run --extra dev sh -c 'BIOMCP_BIN="$PWD/target/debug/biomcp" pytest spec/02-gene.md -v --mustmatch-lang bash --mustmatch-timeout 60 -k "Gene and Protein and Alternative and Names"'
-make check < /dev/null > /tmp/084-make-check.log 2>&1
-sed -n '1,320p' /tmp/084-make-check.log
-bash -x tools/check-quality-ratchet.sh
-cat .march/reality-check/quality-ratchet-summary.json
-cargo fmt
-make check-quality-ratchet
-rm -rf .cache .pytest_cache
+rg -n "truncate\(200\)|Definition \(MyDisease.info\)|disease_markdown|MONDO:0100605|MONDO:0017799" src/render/markdown.rs templates/disease.md.j2 spec/07-disease.md
+sed -n '1,220p' templates/disease.md.j2
+sed -n '4440,4555p' src/render/markdown.rs
+sed -n '1,260p' spec/07-disease.md
+cargo test disease_markdown -- --nocapture
+biomcp get disease MONDO:0100605 | sed -n '1,80p'
+biomcp get disease MONDO:0017799 | sed -n '1,80p'
+cargo test disease_markdown_preserves_full_definition_text -- --nocapture
+uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -q
+cargo test disease_markdown -- --nocapture
+cargo run --quiet --bin biomcp -- get disease MONDO:0100605 | sed -n '1,20p'
+cargo run --quiet --bin biomcp -- get disease MONDO:0017799 | sed -n '1,20p'
+BIOMCP_BIN="$(pwd)/target/debug/biomcp" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -q
+git add src/render/markdown.rs templates/disease.md.j2 spec/07-disease.md
+git commit -m "Show full disease definitions"
+make check < /dev/null > /tmp/tmp.bQInuOtc3J 2>&1
+tail -n 40 /tmp/tmp.bQInuOtc3J
+git status --short
 ```
 
 ## What Changed
 
-- Extended UniProt deserialization in `src/sources/uniprot.rs` to parse `proteinDescription.alternativeNames` and `shortNames`, and added `UniProtRecord::alternative_protein_names()` with trim/dedup/source-order behavior.
-- Extended `GeneProtein` in `src/entities/gene.rs` with `alternative_names` and populated it from the existing UniProt-backed `fetch_protein_section()` path.
-- Rendered `- Also known as:` in `templates/gene.md.j2` when UniProt alternative protein names are present.
-- Updated Rust fixture builders and added unit/render coverage in `src/sources/uniprot.rs`, `src/render/markdown.rs`, and `src/transform/protein.rs`.
-- Added executable spec coverage for PLIN1/PLIN2 markdown and JSON behavior in `spec/02-gene.md`.
+- Removed the disease definition truncation filter from `templates/disease.md.j2` so markdown output now renders the full `definition` text.
+- Added a renderer regression test in `src/render/markdown.rs` that proves long disease definitions are preserved past the old 200-byte cutoff.
+- Extended `spec/07-disease.md` with executable checks for `MONDO:0100605` and `MONDO:0017799`, using stable substrings beyond the former truncation point.
 
-## Proof Added or Updated
+## Proof Added
 
-- `sources::uniprot::tests::alternative_protein_names_flatten_short_and_full_names_in_source_order`
-- `sources::uniprot::tests::alternative_protein_names_trim_deduplicate_and_skip_recommended_name`
-- `sources::uniprot::tests::alternative_protein_names_return_empty_when_alternative_names_are_missing`
-- `render::markdown::tests::gene_markdown_renders_protein_alternative_names`
-- `render::markdown::tests::gene_markdown_omits_protein_alternative_names_when_absent`
-- `spec/02-gene.md` heading `Gene Protein Alternative Names`
+- Rust unit test: `cargo test disease_markdown_preserves_full_definition_text -- --nocapture`
+- Disease spec coverage: `BIOMCP_BIN="$(pwd)/target/debug/biomcp" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -q`
 
-## Verification
+## Verification Results
 
-- Focused Rust tests passed for the new UniProt helper and markdown rendering.
-- Targeted executable spec passed against `target/debug/biomcp` for the new `Gene Protein Alternative Names` assertions.
-- `make check` passed after fixing formatting and the quality-ratchet spec literal length rule.
+- `cargo test disease_markdown_preserves_full_definition_text -- --nocapture` passed after the template change.
+- `cargo test disease_markdown -- --nocapture` passed with the new regression test included.
+- `cargo run --quiet --bin biomcp -- get disease MONDO:0100605` showed the full characterization text including `hypogonadotropic hypogonadism` and `neurodevelopmental delay or regression`.
+- `cargo run --quiet --bin biomcp -- get disease MONDO:0017799` showed the full prognosis sentence including `surgical resection of the ovarian mass`.
+- `make check < /dev/null 2>&1` passed; captured log: `/tmp/tmp.bQInuOtc3J`.
 
-## Deviations
+## Deviations From Design
 
-- No behavioral deviation from the approved design.
-- The spec assertion for `ADRP` was written as the longer stable substring `Adipophilin, ADRP` to satisfy the repo's quality-ratchet rule against very short `mustmatch like` literals.
+- No implementation deviations.
+- The spec update uses the existing `BIOMCP_BIN` override pattern so the markdown spec can be pointed at the worktree binary during local verification.
