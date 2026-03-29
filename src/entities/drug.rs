@@ -1706,10 +1706,12 @@ fn common_prefix_len_casefold(values: &[String]) -> Option<usize> {
     let mut prefix_len = first.len();
     for value in &values[1..] {
         let common_len = first
-            .bytes()
-            .zip(value.bytes())
-            .take_while(|(left, right)| left.eq_ignore_ascii_case(right))
-            .count();
+            .char_indices()
+            .zip(value.chars())
+            .take_while(|((_, left), right)| left.eq_ignore_ascii_case(right))
+            .map(|((idx, left), _)| idx + left.len_utf8())
+            .last()
+            .unwrap_or(0);
         prefix_len = prefix_len.min(common_len);
     }
     Some(prefix_len)
@@ -2749,6 +2751,12 @@ mod tests {
     }
 
     #[test]
+    fn strict_target_family_label_rejects_single_target() {
+        let targets = vec!["PDCD1".to_string()];
+        assert!(strict_target_family_label(&targets).is_none());
+    }
+
+    #[test]
     fn family_target_chembl_id_requires_single_matching_target_id() {
         let rows = vec![
             crate::sources::chembl::ChemblTarget {
@@ -2769,6 +2777,38 @@ mod tests {
             family_target_chembl_id(&rows, &displayed_targets).as_deref(),
             Some("CHEMBL3390820")
         );
+    }
+
+    #[test]
+    fn family_target_chembl_id_rejects_multiple_matching_target_ids() {
+        let rows = vec![
+            crate::sources::chembl::ChemblTarget {
+                target: "PARP1".to_string(),
+                action: "INHIBITOR".to_string(),
+                mechanism: None,
+                target_chembl_id: Some("CHEMBL3390820".to_string()),
+            },
+            crate::sources::chembl::ChemblTarget {
+                target: "PARP2".to_string(),
+                action: "INHIBITOR".to_string(),
+                mechanism: None,
+                target_chembl_id: Some("CHEMBL1234".to_string()),
+            },
+        ];
+        let displayed_targets = vec!["PARP1".to_string(), "PARP2".to_string()];
+        assert!(family_target_chembl_id(&rows, &displayed_targets).is_none());
+    }
+
+    #[test]
+    fn family_target_chembl_id_rejects_missing_matching_target_id() {
+        let rows = vec![crate::sources::chembl::ChemblTarget {
+            target: "PARP1".to_string(),
+            action: "INHIBITOR".to_string(),
+            mechanism: None,
+            target_chembl_id: None,
+        }];
+        let displayed_targets = vec!["PARP1".to_string(), "PARP2".to_string()];
+        assert!(family_target_chembl_id(&rows, &displayed_targets).is_none());
     }
 
     #[test]
@@ -2823,5 +2863,21 @@ mod tests {
             derive_target_family_name(&displayed_targets, &opentargets_targets).as_deref(),
             Some("poly(ADP-ribose) polymerase")
         );
+    }
+
+    #[test]
+    fn derive_target_family_name_handles_non_ascii_without_panicking() {
+        let displayed_targets = vec!["GENE1".to_string(), "GENE2".to_string()];
+        let opentargets_targets = vec![
+            OpenTargetsTarget {
+                approved_symbol: "GENE1".to_string(),
+                approved_name: Some("électron receptor 1".to_string()),
+            },
+            OpenTargetsTarget {
+                approved_symbol: "GENE2".to_string(),
+                approved_name: Some("èlectron receptor 2".to_string()),
+            },
+        ];
+        assert!(derive_target_family_name(&displayed_targets, &opentargets_targets).is_none());
     }
 }

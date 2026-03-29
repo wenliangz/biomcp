@@ -6890,6 +6890,48 @@ mod tests {
     }
 
     #[test]
+    fn drug_markdown_omits_target_family_for_mixed_targets() {
+        let drug = Drug {
+            name: "imatinib".to_string(),
+            drugbank_id: Some("DB00619".to_string()),
+            chembl_id: Some("CHEMBL941".to_string()),
+            unii: None,
+            drug_type: Some("small-molecule".to_string()),
+            mechanism: Some("Inhibitor of BCR-ABL".to_string()),
+            mechanisms: vec!["Inhibitor of BCR-ABL".to_string()],
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: vec!["ABL1".to_string(), "KIT".to_string(), "PDGFRB".to_string()],
+            target_family: None,
+            target_family_name: None,
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let markdown = drug_markdown(&drug, &["targets".to_string()]).expect("markdown");
+        assert!(!markdown.contains("Family:"));
+        assert!(!markdown.contains("Members:"));
+        assert!(markdown.contains("ABL1, KIT, PDGFRB"));
+    }
+
+    #[test]
     fn drug_markdown_with_region_all_keeps_us_and_eu_blocks_separate() {
         let drug = Drug {
             name: "pembrolizumab".to_string(),
