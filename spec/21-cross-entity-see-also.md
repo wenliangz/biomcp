@@ -8,7 +8,8 @@ empty-state must surface the structured path directly.
 | Section | Command focus | Why it matters |
 |---|---|---|
 | Drug to PGx | `get drug warfarin` | Teaches the structured PGx surface from a drug card |
-| Gene to PGx | `get gene TP53` | Teaches the PGx card from a gene card |
+| Gene to PGx | `get gene TP53` | Teaches the PGx search from a gene card |
+| Disease to Drug | `get disease melanoma` | Teaches indication-oriented drug search from a disease card |
 | Gene More ordering | `get gene NANOG` | Keeps `ontology` at equal prominence in follow-up sections |
 | Oncology study local match | `get disease "breast cancer" genes` | Prefers executable `study top-mutated` when a local study exists |
 | Oncology study fallback | `get disease melanoma genes` | Falls back to `study download --list` when no local study can be chosen |
@@ -35,18 +36,53 @@ echo "$out" | jq -e '._meta.next_commands | index("biomcp search pgx -d warfarin
 
 ## Gene to PGx
 
-Gene cards should point to the PGx card in both markdown and JSON because the
+Gene cards should point to the PGx search in both markdown and JSON because the
 same hint powers agentic follow-up planning across renderers.
 
 ```bash
 out="$(biomcp get gene TP53)"
-echo "$out" | mustmatch like "biomcp get pgx TP53"
-echo "$out" | mustmatch like "pharmacogenomics card"
+echo "$out" | mustmatch like "biomcp search pgx -g TP53"
+echo "$out" | mustmatch like "pharmacogenomics interactions"
+
+braf_out="$(biomcp get gene BRAF)"
+echo "$braf_out" | mustmatch like "biomcp search pgx -g BRAF"
+if echo "$braf_out" | grep -F "biomcp get pgx BRAF" >/dev/null; then
+  echo "unexpected stale gene->pgx command" >&2
+  exit 1
+fi
 ```
 
 ```bash
 out="$(biomcp --json get gene TP53)"
-echo "$out" | jq -e '._meta.next_commands | index("biomcp get pgx TP53") != null' > /dev/null
+echo "$out" | jq -e '._meta.next_commands | index("biomcp search pgx -g TP53") != null' > /dev/null
+
+pgx_out="$(biomcp search pgx -g TP53 --limit 3)"
+echo "$pgx_out" | mustmatch like "No PGx interactions found."
+echo "$pgx_out" | mustmatch like "# PGx Search: gene=TP53"
+```
+
+## Disease to Drug
+
+Disease cards should point to typed indication search so the follow-up command
+returns treatment-oriented drug results instead of name matches.
+
+```bash
+out="$(biomcp get disease melanoma)"
+echo "$out" | mustmatch like "biomcp search drug --indication melanoma"
+echo "$out" | mustmatch like "treatment options for this condition"
+if echo "$out" | grep -F "biomcp search drug melanoma" >/dev/null; then
+  echo "unexpected positional disease->drug command" >&2
+  exit 1
+fi
+```
+
+```bash
+out="$(biomcp --json get disease melanoma)"
+echo "$out" | jq -e '._meta.next_commands | index("biomcp search drug --indication melanoma") != null' > /dev/null
+
+drug_out="$(biomcp search drug --indication melanoma --limit 5)"
+echo "$drug_out" | mustmatch like "# Drugs: indication=melanoma"
+echo "$drug_out" | mustmatch like "pembrolizumab"
 ```
 
 ## Gene More Ordering

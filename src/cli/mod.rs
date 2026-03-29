@@ -10389,6 +10389,7 @@ mod next_commands_validity {
 
     #[test]
     fn gene_next_commands_parse() {
+        assert_parses("biomcp search pgx -g BRAF");
         assert_parses("biomcp search variant -g BRAF");
         assert_parses("biomcp search article -g BRAF");
         assert_parses("biomcp search drug --target BRAF");
@@ -10428,7 +10429,7 @@ mod next_commands_validity {
     fn disease_next_commands_parse() {
         assert_parses("biomcp search trial -c melanoma");
         assert_parses("biomcp search article -d melanoma");
-        assert_parses("biomcp search drug melanoma");
+        assert_parses("biomcp search drug --indication melanoma");
     }
 
     #[test]

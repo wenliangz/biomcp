@@ -1066,8 +1066,12 @@ fn related_command_description(command: &str) -> Option<&'static str> {
         Some("deepen into protein function and localization")
     } else if command.starts_with("biomcp get gene ") && command.ends_with(" hpa") {
         Some("deepen into tissue expression and localization")
-    } else if command.starts_with("biomcp search pgx -d ") {
+    } else if command.starts_with("biomcp search pgx -d ")
+        || command.starts_with("biomcp search pgx -g ")
+    {
         Some("pharmacogenomics interactions")
+    } else if command.starts_with("biomcp search drug --indication ") {
+        Some("treatment options for this condition")
     } else if command.starts_with("biomcp get pgx ") {
         Some("pharmacogenomics card")
     } else if command.starts_with("biomcp study top-mutated --study ") {
@@ -1318,7 +1322,7 @@ pub(crate) fn related_gene(gene: &Gene) -> Vec<String> {
     {
         out.push(format!("biomcp get gene {symbol} hpa"));
     }
-    out.push(format!("biomcp get pgx {symbol}"));
+    out.push(format!("biomcp search pgx -g {symbol}"));
     out.push(format!("biomcp search variant -g {symbol}"));
     out.push(format!("biomcp search article -g {symbol}"));
     out.push(format!("biomcp search drug --target {symbol}"));
@@ -1425,7 +1429,7 @@ pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
     }
     out.push(format!("biomcp search trial -c {name}"));
     out.push(format!("biomcp search article -d {name}"));
-    out.push(format!("biomcp search drug {name}"));
+    out.push(format!("biomcp search drug --indication {name}"));
     if is_oncology_disease(disease) {
         if let Some(study_id) = best_local_oncology_study_id(disease) {
             out.push(format!("biomcp study top-mutated --study {study_id}"));
@@ -5194,7 +5198,7 @@ mod tests {
         let related = related_gene(&gene);
         assert_eq!(related[0], "biomcp get gene OPA1 protein");
         assert_eq!(related[1], "biomcp get gene OPA1 hpa");
-        assert!(related.contains(&"biomcp get pgx OPA1".to_string()));
+        assert!(related.contains(&"biomcp search pgx -g OPA1".to_string()));
         assert!(related.contains(&"biomcp search variant -g OPA1".to_string()));
     }
 
@@ -5293,6 +5297,9 @@ mod tests {
             "biomcp search article -d \"Marfan syndrome\" --type review --limit 5"
         );
         assert!(related.contains(&"biomcp search trial -c \"Marfan syndrome\"".to_string()));
+        assert!(
+            related.contains(&"biomcp search drug --indication \"Marfan syndrome\"".to_string())
+        );
     }
 
     #[test]
