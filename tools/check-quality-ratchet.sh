@@ -32,8 +32,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-MUSTMATCH_JSON_RE = re.compile(r"\|\s*mustmatch\s+json\b")
-SHORT_LIKE_RE = re.compile(r'\|\s*mustmatch\s+like\s+("([^"]*)"|\'([^\']*)\')')
+MUSTMATCH_JSON_RE = re.compile(r"(?:^|\|\s*)mustmatch\s+json\b")
+SHORT_LIKE_RE = re.compile(r'(?:^|\|\s*)mustmatch\s+like\s+("([^"]*)"|\'([^\']*)\')')
 FENCE_RE = re.compile(r"^```(?P<info>.*)$")
 
 
