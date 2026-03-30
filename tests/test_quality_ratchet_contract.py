@@ -366,6 +366,25 @@ def test_wrapper_propagates_lint_failures(tmp_path: Path) -> None:
     summary = json.loads((output_dir / "quality-ratchet-summary.json").read_text())
     assert summary["status"] == "fail"
     assert summary["lint"]["status"] == "fail"
+    findings = summary["lint"]["results"][0]["findings"]
+    assert findings[0]["rule"] == "short-like-pattern"
+
+
+def test_wrapper_reports_error_when_no_specs_match(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+
+    result = _run_wrapper(
+        {
+            "QUALITY_RATCHET_OUTPUT_DIR": str(output_dir),
+            "QUALITY_RATCHET_SPEC_GLOB": str(tmp_path / "spec" / "*.md"),
+        }
+    )
+
+    assert result.returncode == 1
+    summary = json.loads((output_dir / "quality-ratchet-summary.json").read_text())
+    assert summary["status"] == "error"
+    assert summary["lint"]["status"] == "error"
+    assert "no spec files matched" in summary["lint"]["errors"][0]
 
 
 def test_wrapper_propagates_mcp_failures_from_override_paths(tmp_path: Path) -> None:
