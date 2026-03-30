@@ -100,7 +100,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 
 ### CIViC
 
-- BioMCP surfaces: `get variant <id> civic; get gene <symbol> civic; get drug <name> civic; get disease <id> civic; get disease <id> variants`
+- BioMCP surfaces: `get variant <id> civic; get gene <symbol> civic; get drug <name> targets; get drug <name> civic; get disease <id> civic; get disease <id> variants`
 - Integration mode: `direct_api`
 - BioMCP auth: `none`
 - Provider access / registration: open public API
@@ -108,7 +108,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Redistribution / reuse summary: reuse is broadly permitted; attribution remains best practice
 - Official terms URL: <https://civicdb.org/home>
 - Reviewed on: `2026-03-20`
-- Notes: CIViC is treated here as an open-access evidence source surfaced directly by BioMCP.
+- Notes: CIViC is treated here as an open-access evidence source surfaced directly by BioMCP. Drug target output may add a separate CIViC variant-target annotation line without merging those labels into the generic targets section.
 
 ### ClinGen
 

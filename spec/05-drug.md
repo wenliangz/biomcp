@@ -214,13 +214,19 @@ echo "$out" | mustmatch not like "Members:"
 Variant-specific therapy targets should render separately from the generic ChEMBL/Open Targets list so the source labels stay truthful while still surfacing matchable CIViC context.
 
 ```bash
-out="$(biomcp get drug rindopepimut targets)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get drug rindopepimut)"
+echo "$out" | mustmatch like "## Targets (ChEMBL / Open Targets)"
+echo "$out" | mustmatch like "Variant Targets (CIViC): EGFRvIII"
+
+out="$("$bin" get drug rindopepimut targets)"
 echo "$out" | mustmatch like "## Targets (ChEMBL / Open Targets)"
 echo "$out" | mustmatch like "Variant Targets (CIViC): EGFRvIII"
 ```
 
 ```bash
-out="$(biomcp --json get drug rindopepimut)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json get drug rindopepimut)"
 echo "$out" | jq -e '
   (.variant_targets | index("EGFRvIII"))
   and any(._meta.section_sources[]; .key == "variant_targets" and (.sources | index("CIViC")))
