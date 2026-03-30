@@ -298,7 +298,7 @@ fn list_drug() -> String {
 - `get drug <name> regulatory [--region <us|eu|all>]` - regional regulatory summary (Drugs@FDA and/or EMA)
 - `get drug <name> safety [--region <us|eu|all>]` - regional safety context (OpenFDA and/or EMA)
 - `get drug <name> shortage [--region <us|eu|all>]` - query current shortage status
-- `get drug <name> targets` - enrich with ChEMBL/OpenTargets targets
+- `get drug <name> targets` - generic targets from ChEMBL/OpenTargets plus additive CIViC variant-target annotations when available
 - `get drug <name> indications` - enrich with OpenTargets indications
 - `get drug <name> interactions` - OpenFDA label interaction text when available; otherwise a truthful public-data fallback
 - `get drug <name> civic` - CIViC therapy evidence/assertion summary

@@ -46,7 +46,10 @@ biomcp get drug pembrolizumab
 Default output provides concise identity and mechanism context. Approval-bearing
 JSON includes additive `approval_date_raw`, `approval_date_display`, and
 `approval_summary` fields, while markdown renders the human-friendly display
-date in the base card.
+date in the base card. Default drug output and the `targets` section keep
+generic targets from ChEMBL/Open Targets and may add a separate `Variant
+Targets (CIViC): ...` line when CIViC surfaces a variant-specific molecular
+profile such as `EGFRvIII`.
 
 ## Request drug sections
 
@@ -80,6 +83,12 @@ Targets and indications sections:
 biomcp get drug pembrolizumab targets
 biomcp get drug pembrolizumab indications
 ```
+
+`get drug <name> targets` is a mixed-source workflow:
+
+- Generic targets come from ChEMBL and Open Targets.
+- Variant-specific target annotations may be added from CIViC.
+- Full CIViC evidence tables remain opt-in via `get drug <name> civic`.
 
 Interactions (OpenFDA label text when public interaction details are available; otherwise a truthful fallback):
 

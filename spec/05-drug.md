@@ -209,6 +209,24 @@ echo "$out" | mustmatch not like "Family:"
 echo "$out" | mustmatch not like "Members:"
 ```
 
+## Drug Variant Targets
+
+Variant-specific therapy targets should render separately from the generic ChEMBL/Open Targets list so the source labels stay truthful while still surfacing matchable CIViC context.
+
+```bash
+out="$(biomcp get drug rindopepimut targets)"
+echo "$out" | mustmatch like "## Targets (ChEMBL / Open Targets)"
+echo "$out" | mustmatch like "Variant Targets (CIViC): EGFRvIII"
+```
+
+```bash
+out="$(biomcp --json get drug rindopepimut)"
+echo "$out" | jq -e '
+  (.variant_targets | index("EGFRvIII"))
+  and any(._meta.section_sources[]; .key == "variant_targets" and (.sources | index("CIViC")))
+' > /dev/null
+```
+
 ## Drug Interactions With Public Label Text
 
 The public MyChem payload does not reliably expose structured DrugBank interaction rows, so BioMCP should render OpenFDA label text when it exists instead of claiming no interactions are known.

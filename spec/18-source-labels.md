@@ -21,6 +21,9 @@ echo "$gene_out" | mustmatch like "## Summary (NCBI Gene)"
 drug_out="$(biomcp get drug ivacaftor targets)"
 echo "$drug_out" | mustmatch like "## Targets (ChEMBL / Open Targets)"
 
+variant_drug_out="$(biomcp get drug rindopepimut targets)"
+echo "$variant_drug_out" | mustmatch like "Variant Targets (CIViC): EGFRvIII"
+
 disease_out="$(biomcp get disease "cystic fibrosis" all)"
 echo "$disease_out" | mustmatch like "Genes (Open Targets):"
 echo "$disease_out" | mustmatch like "## Pathways (Reactome)"
@@ -55,6 +58,11 @@ echo "$drug_json" | mustmatch like '"key": "safety"'
 echo "$drug_json" | mustmatch like '"key": "targets"'
 echo "$drug_json" | mustmatch like "OpenFDA FAERS"
 echo "$drug_json" | mustmatch like '"label": "ChEMBL"'
+
+variant_drug_json="$(biomcp get drug rindopepimut --json)"
+echo "$variant_drug_json" | mustmatch like '"key": "variant_targets"'
+echo "$variant_drug_json" | mustmatch like '"label": "Variant Targets"'
+echo "$variant_drug_json" | mustmatch like '"sources": ['
 
 disease_json="$(biomcp get disease "cystic fibrosis" all --json)"
 echo "$disease_json" | mustmatch like '"section_sources": ['

@@ -3173,6 +3173,7 @@ pub fn drug_markdown_with_region(
         show_us_header => show_us_header,
         top_adverse_events => &drug.top_adverse_events,
         targets => &drug.targets,
+        variant_targets => &drug.variant_targets,
         target_family => &drug.target_family,
         target_family_name => &drug.target_family_name,
         indications => &drug.indications,
@@ -4431,6 +4432,7 @@ mod tests {
             brand_names: vec!["Kalydeco".to_string()],
             route: Some("Oral".to_string()),
             targets: vec!["CFTR".to_string()],
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: vec!["Cystic fibrosis".to_string()],
@@ -5545,6 +5547,51 @@ mod tests {
     }
 
     #[test]
+    fn gene_markdown_preserves_full_protein_function_text() {
+        let long_function = "Mitochondrial dynamin-like GTPase required for fusion. Localizes to the intermembrane space where it helps organize cristae architecture and mitochondrial DNA maintenance.".to_string();
+        let gene = Gene {
+            symbol: "OPA1".to_string(),
+            name: "OPA1 mitochondrial dynamin like GTPase".to_string(),
+            entrez_id: "4976".to_string(),
+            ensembl_id: Some("ENSG00000198836".to_string()),
+            location: Some("3q29".to_string()),
+            genomic_coordinates: None,
+            omim_id: None,
+            uniprot_id: Some("O60313".to_string()),
+            summary: None,
+            gene_type: Some("protein-coding".to_string()),
+            aliases: Vec::new(),
+            clinical_diseases: Vec::new(),
+            clinical_drugs: Vec::new(),
+            pathways: None,
+            ontology: None,
+            diseases: None,
+            protein: Some(crate::entities::gene::GeneProtein {
+                accession: "O60313".to_string(),
+                name: "Dynamin-like 120 kDa protein, mitochondrial".to_string(),
+                function: Some(long_function.clone()),
+                length: Some(960),
+                isoforms: Vec::new(),
+                alternative_names: Vec::new(),
+            }),
+            go: None,
+            interactions: None,
+            civic: None,
+            expression: None,
+            hpa: None,
+            druggability: None,
+            clingen: None,
+            constraint: None,
+            disgenet: None,
+        };
+
+        let markdown = gene_markdown(&gene, &["protein".to_string()]).expect("gene markdown");
+        assert!(markdown.contains(&long_function));
+        assert!(markdown.contains("intermembrane space"));
+        assert!(!markdown.contains("architecture and mitochondrial DNA…"));
+    }
+
+    #[test]
     fn gene_markdown_omits_protein_alternative_names_when_absent() {
         let gene = Gene {
             symbol: "BRAF".to_string(),
@@ -5603,6 +5650,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -5937,6 +5985,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -6970,6 +7019,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7013,6 +7063,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7067,6 +7118,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7111,6 +7163,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7156,6 +7209,7 @@ mod tests {
                 "PARP2".to_string(),
                 "PARP3".to_string(),
             ],
+            variant_targets: Vec::new(),
             target_family: Some("PARP".to_string()),
             target_family_name: Some("poly(ADP-ribose) polymerase".to_string()),
             indications: Vec::new(),
@@ -7181,6 +7235,49 @@ mod tests {
     }
 
     #[test]
+    fn drug_markdown_renders_variant_targets_as_additive_line() {
+        let drug = Drug {
+            name: "rindopepimut".to_string(),
+            drugbank_id: None,
+            chembl_id: Some("CHEMBL2108508".to_string()),
+            unii: None,
+            drug_type: Some("vaccine".to_string()),
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: vec!["EGFR".to_string()],
+            variant_targets: vec!["EGFRvIII".to_string()],
+            target_family: None,
+            target_family_name: None,
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let markdown = drug_markdown(&drug, &["targets".to_string()]).expect("markdown");
+        assert!(markdown.contains("## Targets (ChEMBL / Open Targets)"));
+        assert!(markdown.contains("EGFR"));
+        assert!(markdown.contains("Variant Targets (CIViC): EGFRvIII"));
+    }
+
+    #[test]
     fn drug_markdown_omits_target_family_for_mixed_targets() {
         let drug = Drug {
             name: "imatinib".to_string(),
@@ -7197,6 +7294,7 @@ mod tests {
             brand_names: Vec::new(),
             route: None,
             targets: vec!["ABL1".to_string(), "KIT".to_string(), "PDGFRB".to_string()],
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7239,6 +7337,7 @@ mod tests {
             brand_names: vec!["Keytruda".to_string()],
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7332,6 +7431,7 @@ mod tests {
             brand_names: vec!["Keytruda".to_string()],
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),
@@ -7397,6 +7497,7 @@ mod tests {
             brand_names: vec!["Ozempic".to_string()],
             route: None,
             targets: Vec::new(),
+            variant_targets: Vec::new(),
             target_family: None,
             target_family_name: None,
             indications: Vec::new(),

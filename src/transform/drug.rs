@@ -599,6 +599,7 @@ pub fn merge_mychem_hits(hits: &[&MyChemHit], requested_name: &str) -> Drug {
         brand_names,
         route: None,
         targets,
+        variant_targets: Vec::new(),
         target_family: None,
         target_family_name: None,
         indications,

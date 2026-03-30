@@ -96,7 +96,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Redistribution / reuse summary: reuse is generally allowed under the provider's open-data terms with attribution where required
 - Official terms URL: <https://www.ebi.ac.uk/chembl/>
 - Reviewed on: `2026-03-20`
-- Notes: BioMCP only queries live ChEMBL endpoints and does not ship ChEMBL data in the repository.
+- Notes: `get drug <name> targets` keeps ChEMBL as the generic target/mechanism source; CIViC variant labels are rendered separately when present.
 
 ### CIViC
 
@@ -386,7 +386,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Redistribution / reuse summary: platform data is dedicated to the public domain, but linked evidence still carries source provenance
 - Official terms URL: <https://platform-docs.opentargets.org/licence>
 - Reviewed on: `2026-03-20`
-- Notes: The licence page also lists the licensing status of major upstream datasets consumed by Open Targets.
+- Notes: `get drug <name> targets` keeps Open Targets in the generic target section while CIViC variant annotations, when present, are labeled separately.
 
 ### PMC OA
 

@@ -366,6 +366,13 @@ pub(crate) fn drug_section_sources(drug: &Drug) -> Vec<SectionSource> {
     );
     push_section(
         &mut out,
+        !drug.variant_targets.is_empty(),
+        "variant_targets",
+        "Variant Targets",
+        ["CIViC"],
+    );
+    push_section(
+        &mut out,
         !drug.indications.is_empty(),
         "indications",
         "Indications",
@@ -1050,5 +1057,50 @@ mod tests {
 
         let sources = variant_section_sources(&variant);
         assert!(sources.iter().any(|source| source.key == "gwas"));
+    }
+
+    #[test]
+    fn drug_provenance_emits_variant_targets_when_present() {
+        let drug = Drug {
+            name: "rindopepimut".to_string(),
+            drugbank_id: None,
+            chembl_id: None,
+            unii: None,
+            drug_type: None,
+            mechanism: None,
+            mechanisms: Vec::new(),
+            approval_date: None,
+            approval_date_raw: None,
+            approval_date_display: None,
+            approval_summary: None,
+            brand_names: Vec::new(),
+            route: None,
+            targets: vec!["EGFR".to_string()],
+            variant_targets: vec!["EGFRvIII".to_string()],
+            target_family: None,
+            target_family_name: None,
+            indications: Vec::new(),
+            interactions: Vec::new(),
+            interaction_text: None,
+            pharm_classes: Vec::new(),
+            top_adverse_events: Vec::new(),
+            faers_query: None,
+            label: None,
+            label_set_id: None,
+            shortage: None,
+            approvals: None,
+            us_safety_warnings: None,
+            ema_regulatory: None,
+            ema_safety: None,
+            ema_shortage: None,
+            civic: None,
+        };
+
+        let sources = drug_section_sources(&drug);
+        assert!(sources.iter().any(|source| {
+            source.key == "variant_targets"
+                && source.label == "Variant Targets"
+                && source.sources == vec!["CIViC".to_string()]
+        }));
     }
 }

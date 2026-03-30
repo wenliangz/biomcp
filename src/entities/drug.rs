@@ -45,6 +45,8 @@ pub struct Drug {
     pub route: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variant_targets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1500,57 +1502,59 @@ fn merge_unique_casefold(dst: &mut Vec<String>, values: impl IntoIterator<Item =
     }
 }
 
-async fn enrich_targets(drug: &mut Drug) {
-    let Some(chembl_id) = drug.chembl_id.as_deref() else {
-        return;
-    };
-
+async fn enrich_targets(drug: &mut Drug, civic_context: Option<&CivicContext>) {
     let mut chembl_rows = Vec::new();
-    match ChemblClient::new() {
-        Ok(client) => match client.drug_targets(chembl_id, 15).await {
-            Ok(rows) => {
-                let targets = rows
-                    .iter()
-                    .filter(|row| !row.target.eq_ignore_ascii_case("Unknown target"))
-                    .map(|row| row.target.clone())
-                    .collect::<Vec<_>>();
-                merge_unique_casefold(&mut drug.targets, targets);
-
-                let mechanisms = rows
-                    .iter()
-                    .filter(|row| !row.target.eq_ignore_ascii_case("Unknown target"))
-                    .map(|row| {
-                        row.mechanism
-                            .clone()
-                            .unwrap_or_else(|| format!("{} of {}", row.action, row.target))
-                    })
-                    .collect::<Vec<_>>();
-                merge_unique_casefold(&mut drug.mechanisms, mechanisms);
-                chembl_rows = rows;
-            }
-            Err(err) => warn!("ChEMBL unavailable for drug targets section: {err}"),
-        },
-        Err(err) => warn!("ChEMBL client init failed: {err}"),
-    }
-
     let mut opentargets_targets = Vec::new();
-    match OpenTargetsClient::new() {
-        Ok(client) => match client.drug_sections(chembl_id, 15).await {
-            Ok(sections) => {
-                let targets = sections
-                    .targets
-                    .iter()
-                    .map(|t| t.approved_symbol.clone())
-                    .collect::<Vec<_>>();
-                merge_unique_casefold(&mut drug.targets, targets);
-                opentargets_targets = sections.targets;
-            }
-            Err(err) => warn!("OpenTargets unavailable for drug targets section: {err}"),
-        },
-        Err(err) => warn!("OpenTargets client init failed: {err}"),
+    if let Some(chembl_id) = drug.chembl_id.as_deref() {
+        match ChemblClient::new() {
+            Ok(client) => match client.drug_targets(chembl_id, 15).await {
+                Ok(rows) => {
+                    let targets = rows
+                        .iter()
+                        .filter(|row| !row.target.eq_ignore_ascii_case("Unknown target"))
+                        .map(|row| row.target.clone())
+                        .collect::<Vec<_>>();
+                    merge_unique_casefold(&mut drug.targets, targets);
+
+                    let mechanisms = rows
+                        .iter()
+                        .filter(|row| !row.target.eq_ignore_ascii_case("Unknown target"))
+                        .map(|row| {
+                            row.mechanism
+                                .clone()
+                                .unwrap_or_else(|| format!("{} of {}", row.action, row.target))
+                        })
+                        .collect::<Vec<_>>();
+                    merge_unique_casefold(&mut drug.mechanisms, mechanisms);
+                    chembl_rows = rows;
+                }
+                Err(err) => warn!("ChEMBL unavailable for drug targets section: {err}"),
+            },
+            Err(err) => warn!("ChEMBL client init failed: {err}"),
+        }
+
+        match OpenTargetsClient::new() {
+            Ok(client) => match client.drug_sections(chembl_id, 15).await {
+                Ok(sections) => {
+                    let targets = sections
+                        .targets
+                        .iter()
+                        .map(|t| t.approved_symbol.clone())
+                        .collect::<Vec<_>>();
+                    merge_unique_casefold(&mut drug.targets, targets);
+                    opentargets_targets = sections.targets;
+                }
+                Err(err) => warn!("OpenTargets unavailable for drug targets section: {err}"),
+            },
+            Err(err) => warn!("OpenTargets client init failed: {err}"),
+        }
     }
 
     drug.targets.truncate(12);
+    drug.variant_targets = civic_context
+        .map(|context| extract_variant_targets_from_civic(context, &drug.targets))
+        .unwrap_or_default();
+    drug.variant_targets.truncate(12);
     drug.target_family = None;
     drug.target_family_name = None;
 
@@ -1576,6 +1580,59 @@ async fn enrich_targets(drug: &mut Drug) {
         drug.mechanism = drug.mechanisms.first().cloned();
     }
     drug.mechanisms.truncate(6);
+}
+
+fn normalize_variant_target_label(profile_name: &str, gene_symbol: &str) -> Option<String> {
+    let profile_name = profile_name.trim();
+    let gene_symbol = gene_symbol.trim();
+    if profile_name.is_empty() || gene_symbol.is_empty() {
+        return None;
+    }
+    let profile_lower = profile_name.to_ascii_lowercase();
+    let gene_lower = gene_symbol.to_ascii_lowercase();
+    if profile_lower == gene_lower || !profile_lower.starts_with(&gene_lower) {
+        return None;
+    }
+    let remainder = profile_name.get(gene_symbol.len()..)?.trim();
+    if remainder.is_empty() {
+        return None;
+    }
+    let remainder_flat = remainder.replace(' ', "");
+    if gene_symbol.eq_ignore_ascii_case("EGFR") && remainder_flat.eq_ignore_ascii_case("VIII") {
+        return Some("EGFRvIII".to_string());
+    }
+    Some(profile_name.to_string())
+}
+
+fn extract_variant_targets_from_civic(
+    civic: &CivicContext,
+    generic_targets: &[String],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for profile in civic
+        .evidence_items
+        .iter()
+        .map(|row| row.molecular_profile.as_str())
+        .chain(
+            civic
+                .assertions
+                .iter()
+                .map(|row| row.molecular_profile.as_str()),
+        )
+    {
+        for target in generic_targets {
+            let Some(normalized) = normalize_variant_target_label(profile, target) else {
+                continue;
+            };
+            let key = normalized.to_ascii_lowercase();
+            if seen.insert(key) {
+                out.push(normalized);
+            }
+            break;
+        }
+    }
+    out
 }
 
 fn family_target_chembl_id(
@@ -1787,11 +1844,10 @@ fn format_opentargets_clinical_stage(stage: &str) -> Option<String> {
     (!label.is_empty()).then_some(label)
 }
 
-async fn add_civic_section(drug: &mut Drug) {
-    let name = drug.name.trim();
+async fn fetch_civic_therapy_context(name: &str) -> Option<CivicContext> {
+    let name = name.trim();
     if name.is_empty() {
-        drug.civic = Some(CivicContext::default());
-        return;
+        return Some(CivicContext::default());
     }
 
     let civic_fut = async {
@@ -1800,18 +1856,18 @@ async fn add_civic_section(drug: &mut Drug) {
     };
 
     match tokio::time::timeout(OPTIONAL_SAFETY_TIMEOUT, civic_fut).await {
-        Ok(Ok(context)) => drug.civic = Some(context),
+        Ok(Ok(context)) => Some(context),
         Ok(Err(err)) => {
-            warn!(drug = %drug.name, "CIViC unavailable for drug section: {err}");
-            drug.civic = Some(CivicContext::default());
+            warn!(drug = %name, "CIViC unavailable for drug section: {err}");
+            None
         }
         Err(_) => {
             warn!(
-                drug = %drug.name,
+                drug = %name,
                 timeout_secs = OPTIONAL_SAFETY_TIMEOUT.as_secs(),
                 "CIViC drug section timed out"
             );
-            drug.civic = Some(CivicContext::default());
+            None
         }
     }
 }
@@ -1942,6 +1998,12 @@ async fn populate_common_sections(
     label_response: Option<&serde_json::Value>,
     section_flags: &DrugSections,
 ) {
+    let civic_context = if section_flags.include_targets || section_flags.include_civic {
+        fetch_civic_therapy_context(&drug.name).await
+    } else {
+        None
+    };
+
     drug.label = if section_flags.include_label {
         label_response.and_then(extract_inline_label)
     } else {
@@ -1956,7 +2018,9 @@ async fn populate_common_sections(
     }
 
     if section_flags.include_targets {
-        enrich_targets(drug).await;
+        enrich_targets(drug, civic_context.as_ref()).await;
+    } else {
+        drug.variant_targets.clear();
     }
 
     if section_flags.include_indications {
@@ -1964,7 +2028,7 @@ async fn populate_common_sections(
     }
 
     if section_flags.include_civic {
-        add_civic_section(drug).await;
+        drug.civic = Some(civic_context.unwrap_or_default());
     } else {
         drug.civic = None;
     }
@@ -2809,6 +2873,104 @@ mod tests {
         }];
         let displayed_targets = vec!["PARP1".to_string(), "PARP2".to_string()];
         assert!(family_target_chembl_id(&rows, &displayed_targets).is_none());
+    }
+
+    #[test]
+    fn normalize_variant_target_label_rejects_exact_gene_match() {
+        assert_eq!(normalize_variant_target_label("EGFR", "EGFR"), None);
+    }
+
+    #[test]
+    fn normalize_variant_target_label_keeps_spaced_protein_change() {
+        assert_eq!(
+            normalize_variant_target_label("BRAF V600E", "BRAF").as_deref(),
+            Some("BRAF V600E")
+        );
+    }
+
+    #[test]
+    fn normalize_variant_target_label_normalizes_egfr_roman_suffix() {
+        assert_eq!(
+            normalize_variant_target_label("EGFR VIII", "EGFR").as_deref(),
+            Some("EGFRvIII")
+        );
+        assert_eq!(
+            normalize_variant_target_label("EGFRVIII", "EGFR").as_deref(),
+            Some("EGFRvIII")
+        );
+    }
+
+    #[test]
+    fn extract_variant_targets_from_civic_deduplicates_and_filters_by_generic_target() {
+        let civic = CivicContext {
+            evidence_total_count: 2,
+            assertion_total_count: 2,
+            evidence_items: vec![
+                crate::sources::civic::CivicEvidenceItem {
+                    id: 1,
+                    name: "EID1".to_string(),
+                    molecular_profile: "EGFR VIII".to_string(),
+                    evidence_type: "PREDICTIVE".to_string(),
+                    evidence_level: "A".to_string(),
+                    significance: "SENSITIVITYRESPONSE".to_string(),
+                    disease: None,
+                    therapies: vec!["rindopepimut".to_string()],
+                    status: "ACCEPTED".to_string(),
+                    citation: None,
+                    source_type: None,
+                    publication_year: None,
+                },
+                crate::sources::civic::CivicEvidenceItem {
+                    id: 2,
+                    name: "EID2".to_string(),
+                    molecular_profile: "PDGFRA D842V".to_string(),
+                    evidence_type: "PREDICTIVE".to_string(),
+                    evidence_level: "A".to_string(),
+                    significance: "SENSITIVITYRESPONSE".to_string(),
+                    disease: None,
+                    therapies: vec!["rindopepimut".to_string()],
+                    status: "ACCEPTED".to_string(),
+                    citation: None,
+                    source_type: None,
+                    publication_year: None,
+                },
+            ],
+            assertions: vec![
+                crate::sources::civic::CivicAssertion {
+                    id: 3,
+                    name: "AID3".to_string(),
+                    molecular_profile: "EGFRVIII".to_string(),
+                    assertion_type: "PREDICTIVE".to_string(),
+                    assertion_direction: "SUPPORTS".to_string(),
+                    amp_level: None,
+                    significance: "SENSITIVITYRESPONSE".to_string(),
+                    disease: None,
+                    therapies: vec!["rindopepimut".to_string()],
+                    status: "ACCEPTED".to_string(),
+                    summary: None,
+                    approvals_count: 0,
+                },
+                crate::sources::civic::CivicAssertion {
+                    id: 4,
+                    name: "AID4".to_string(),
+                    molecular_profile: "EGFR".to_string(),
+                    assertion_type: "PREDICTIVE".to_string(),
+                    assertion_direction: "SUPPORTS".to_string(),
+                    amp_level: None,
+                    significance: "SENSITIVITYRESPONSE".to_string(),
+                    disease: None,
+                    therapies: vec!["rindopepimut".to_string()],
+                    status: "ACCEPTED".to_string(),
+                    summary: None,
+                    approvals_count: 0,
+                },
+            ],
+        };
+
+        assert_eq!(
+            extract_variant_targets_from_civic(&civic, &["EGFR".to_string()]),
+            vec!["EGFRvIII".to_string()]
+        );
     }
 
     #[test]

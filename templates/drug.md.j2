@@ -82,13 +82,16 @@ No CIViC records returned for this drug query.
 {{ mechanism }}
 {% endif -%}
 {% endif -%}
-{% if show_targets_section and targets -%}
+{% if show_targets_section and (targets or variant_targets) -%}
 ## Targets (ChEMBL / Open Targets)
 {% if target_family or target_family_name -%}
 Family: {{ target_family or target_family_name }}{% if target_family and target_family_name %} ({{ target_family_name }}){% endif %}
 Members: {{ targets | join(", ") }}
-{% else -%}
+{% elif targets -%}
 {{ targets | join(", ") }}
+{% endif -%}
+{% if variant_targets -%}
+Variant Targets (CIViC): {{ variant_targets | join(", ") }}
 {% endif -%}
 {% endif -%}
 {% if show_indications_section and indications -%}
