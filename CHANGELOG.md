@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.8.20 — 2026-03-30
+
+### Security
+
+- Security fix: remove partial API key from health output so shared operator
+  reports no longer leak credential fragments. (067)
+- Hardened the MCP allowlist so mutating `study download` paths stay blocked
+  while the safe `--list` path remains available. (068)
+
+### Fixes
+
+- Fixed `batch --json` so responses always include the `_meta` contract field.
+  (069)
+- Hardened the GWAS variant section against live decode failures. (070)
+- Fixed gene-to-PGx and disease-to-drug See-also routing so those pivots land
+  on the correct entity helpers. (077)
+- Fixed large PMC OA full-text downloads that were timing out on bigger
+  payloads. (080)
+
+### New features
+
+- Added cross-entity See-also links for drug→PGx, gene→PGx, disease→study,
+  and zero-result→discover routing. (076)
+- Added the quality ratchet to `make check` so the repo gate now audits
+  mustmatch lint, MCP allowlist coverage, and source-registry drift. (075)
+- Added the study top-mutated helper plus disease literature fallback for
+  missing direct evidence paths.
+
+### Improvements
+
+- Reworked CLI help, typed-path guidance, and the skill catalog for
+  self-teaching agent navigation. (072, 073, 074)
+- `get disease` now shows full disease definitions instead of truncated
+  characterizations. (080)
+- `get disease` now separates defining phenotypic features from the full HPO
+  list with ranked key-feature summaries. (081)
+- `get gene` now shows UniProt protein isoforms in the protein section. (082)
+- `get drug` now shows drug target family names alongside individual targets.
+  (083)
+- `get gene` now shows protein legacy names alongside current symbols. (084)
+- `get variant` now shows variant legacy nomenclature alongside current HGVS
+  names. (085)
+- Improved purine-analog mechanism labels so ATC-exact and mechanism-of-action
+  coverage stay aligned. (086)
+- Closed the remaining BioASQ product gaps around protein function truncation,
+  variant-specific targets, and disease feature coverage. (087)
+- Replaced the in-shell mustmatch shim with the packaged `mustmatch lint`
+  entrypoint plus a small compatibility layer for the repo’s existing ratchet
+  contract. (088)
+
+### Docs
+
+- Added architecture contract docs for See-also links, discover grammar, CI,
+  and post-tag public proof expectations. (078)
+- Documentation consistency audit across the public docs surface.
+- Repo cleanup for layout, example paths, and tracked `.march` artifacts.
+  (079)
+
 ## 0.8.19 — 2026-03-26
 
 ### Improvements
