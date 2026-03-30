@@ -7,7 +7,7 @@ description: "Use BioMCP to surface CIViC evidence, disease-associated variants,
 
 CIViC matters when you want clinically oriented cancer-variant evidence instead of a generic annotation alone. It is a good fit for workflows that need therapy relevance, disease context, or evidence assertions tied to specific molecular profiles and clinical interpretations.
 
-In BioMCP, CIViC is exposed as section-gated enrichment rather than a full alternate entity system. The main entry points are `get variant <id> civic`, `get gene <symbol> civic`, `get drug <name> civic`, and disease workflows such as `get disease <id> variants` when you want CIViC-backed molecular profile context.
+In BioMCP, CIViC is exposed as section-gated enrichment rather than a full alternate entity system. The main entry points are `get variant <id> civic`, `get gene <symbol> civic`, `get drug <name> civic`, and disease workflows such as `get disease <id> variants` when you want CIViC-backed molecular profile context. Drug `targets` output can also add a separate CIViC-backed variant-target annotation line while leaving the full CIViC evidence table opt-in.
 
 ## What BioMCP exposes
 
@@ -15,6 +15,7 @@ In BioMCP, CIViC is exposed as section-gated enrichment rather than a full alter
 |---|---|---|
 | `get variant <id> civic` | Variant-level CIViC evidence and assertions | Explicit opt-in section |
 | `get gene <symbol> civic` | Gene-level CIViC evidence summary | Explicit opt-in section |
+| `get drug <name> targets` | Variant-specific therapy target annotations that map to displayed generic targets | Additive CIViC line; not merged into generic target/mechanism fields |
 | `get drug <name> civic` | Therapy-context evidence for a drug | CIViC therapy evidence section |
 | `get disease <id> civic` | Disease-context evidence and assertions | CIViC disease evidence section |
 | `get disease <id> variants` | Disease-associated molecular profiles and variants | CIViC augments the disease variants workflow |

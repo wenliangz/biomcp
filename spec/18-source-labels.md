@@ -14,27 +14,31 @@ for stable provenance strings, not volatile upstream data values.
 Each entity type must name its upstream source at visible section boundaries.
 
 ```bash
-gene_out="$(biomcp get gene CFTR all)"
+bin="${BIOMCP_BIN:-biomcp}"
+gene_out="$("$bin" get gene CFTR all)"
 echo "$gene_out" | mustmatch like "Source: NCBI Gene / MyGene.info"
 echo "$gene_out" | mustmatch like "## Summary (NCBI Gene)"
 
-drug_out="$(biomcp get drug ivacaftor targets)"
+drug_out="$("$bin" get drug ivacaftor targets)"
 echo "$drug_out" | mustmatch like "## Targets (ChEMBL / Open Targets)"
 
-disease_out="$(biomcp get disease "cystic fibrosis" all)"
+variant_drug_out="$("$bin" get drug rindopepimut targets)"
+echo "$variant_drug_out" | mustmatch like "Variant Targets (CIViC): EGFRvIII"
+
+disease_out="$("$bin" get disease "cystic fibrosis" all)"
 echo "$disease_out" | mustmatch like "Genes (Open Targets):"
 echo "$disease_out" | mustmatch like "## Pathways (Reactome)"
 
-trial_out="$(biomcp get trial NCT06668103)"
+trial_out="$("$bin" get trial NCT06668103)"
 echo "$trial_out" | mustmatch like "Source: ClinicalTrials.gov"
 
-protein_out="$(biomcp get protein P15056 complexes)"
+protein_out="$("$bin" get protein P15056 complexes)"
 echo "$protein_out" | mustmatch like "## Complexes (ComplexPortal)"
 
-pgx_out="$(biomcp get pgx CYP2D6 recommendations)"
+pgx_out="$("$bin" get pgx CYP2D6 recommendations)"
 echo "$pgx_out" | mustmatch like "## Recommendations (CPIC)"
 
-ae_out="$(biomcp get adverse-event 10329882)"
+ae_out="$("$bin" get adverse-event 10329882)"
 echo "$ae_out" | mustmatch like "## Reactions (OpenFDA)"
 ```
 
@@ -43,20 +47,26 @@ echo "$ae_out" | mustmatch like "## Reactions (OpenFDA)"
 Core entity types must include a non-empty `_meta.section_sources` array.
 
 ```bash
-gene_json="$(biomcp get gene CFTR all --json)"
+bin="${BIOMCP_BIN:-biomcp}"
+gene_json="$("$bin" get gene CFTR all --json)"
 echo "$gene_json" | mustmatch like '"section_sources": ['
 echo "$gene_json" | mustmatch like '"key": "summary"'
 echo "$gene_json" | mustmatch like '"key": "identity"'
 echo "$gene_json" | mustmatch like '"label": "NCBI Gene"'
 
-drug_json="$(biomcp get drug ivacaftor all --json)"
+drug_json="$("$bin" get drug ivacaftor all --json)"
 echo "$drug_json" | mustmatch like '"section_sources": ['
 echo "$drug_json" | mustmatch like '"key": "safety"'
 echo "$drug_json" | mustmatch like '"key": "targets"'
 echo "$drug_json" | mustmatch like "OpenFDA FAERS"
 echo "$drug_json" | mustmatch like '"label": "ChEMBL"'
 
-disease_json="$(biomcp get disease "cystic fibrosis" all --json)"
+variant_drug_json="$("$bin" get drug rindopepimut --json)"
+echo "$variant_drug_json" | mustmatch like '"key": "variant_targets"'
+echo "$variant_drug_json" | mustmatch like '"label": "Variant Targets"'
+echo "$variant_drug_json" | mustmatch like '"sources": ['
+
+disease_json="$("$bin" get disease "cystic fibrosis" all --json)"
 echo "$disease_json" | mustmatch like '"section_sources": ['
 echo "$disease_json" | mustmatch like '"key": "definition"'
 echo "$disease_json" | mustmatch like '"key": "top_genes"'

@@ -9,64 +9,50 @@ git diff --stat main..HEAD | tail -1
 sed -n '1,220p' .march/ticket.md
 sed -n '1,260p' .march/design-draft.md
 sed -n '1,260p' .march/design-final.md
-sed -n '1,220p' docs/user-guide/disease.md
-sed -n '1,220p' src/entities/disease.rs
-sed -n '1,220p' src/transform/disease.rs
-sed -n '1240,1415p' src/entities/disease.rs
-sed -n '380,520p' src/render/markdown.rs
-sed -n '2178,2248p' src/render/markdown.rs
-sed -n '1,220p' templates/disease.md.j2
-sed -n '1,220p' spec/07-disease.md
-rg -n "key_features|DiseasePhenotype|apply_requested_sections|from_mydisease_hit|disease_markdown|disease.md.j2|Sparse Phenotype Coverage Notes|MONDO:0008222|MONDO:0100605|MONDO:0017799" src templates spec docs -S
-cargo test disease_markdown_preserves_full_definition_text -- --nocapture
-cargo test from_mydisease_hit_collects_hpo_phenotypes -- --nocapture
-PATH="$(pwd)/target/debug:$PATH" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -k "Sparse and Phenotype and Coverage and Notes"
-cargo test disease_markdown -- --nocapture
-cargo test extract_definition_key_features_ -- --nocapture
-cargo test disease_markdown_phenotypes_section_ -- --nocapture
-cargo build
-./target/debug/biomcp get disease MONDO:0008222 phenotypes
-./target/debug/biomcp --json get disease MONDO:0008222 phenotypes
+rg -n "variant_targets|enrich_targets|add_civic_section|section_sources|truncate\\(260\\)|protein.function|Targets \\(ChEMBL / Open Targets\\)|OPTIONAL_SAFETY_TIMEOUT|get drug <name> targets|rindopepimut|OPA1|EGFRvIII" -S src templates spec docs .march
+cargo test gene_markdown_ -- --nocapture
+cargo test variant_provenance_includes_gwas_when_requested_section_is_unavailable -- --nocapture
+XDG_CACHE_HOME="$PWD/.cache" PATH="$PWD/target/release:$PATH" uv run --extra dev sh -c 'PATH="$PWD/target/release:$PATH" pytest spec/02-gene.md spec/05-drug.md spec/18-source-labels.md --mustmatch-lang bash --mustmatch-timeout 60 -v --deselect "spec/02-gene.md::Gene to Articles"'
+cargo test normalize_variant_target_label_ -- --nocapture
+cargo test extract_variant_targets_from_civic_deduplicates_and_filters_by_generic_target -- --nocapture
+XDG_CACHE_HOME="$PWD/.cache" PATH="$PWD/target/release:$PATH" uv run --extra dev sh -c 'PATH="$PWD/target/release:$PATH" pytest "spec/02-gene.md::Gene Protein Function Full Text (line 172) [bash]" "spec/05-drug.md::Drug Variant Targets (line 216) [bash]" "spec/05-drug.md::Drug Variant Targets (line 222) [bash]" "spec/18-source-labels.md::Markdown Source Labels (line 16) [bash]" "spec/18-source-labels.md::JSON section_sources — Gene, Drug, Disease (line 48) [bash]" --mustmatch-lang bash --mustmatch-timeout 60 -v'
 cargo fmt
-cargo test extract_definition_key_features_ -- --nocapture
-cargo test derive_key_features_ -- --nocapture
-cargo test disease_markdown_phenotypes_section_ -- --nocapture
-cargo test disease_markdown_preserves_full_definition_text -- --nocapture
-BIOMCP_BIN="$(pwd)/target/debug/biomcp" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -k "Sparse and Phenotype and Coverage and Notes or Disease and Phenotype and Key and Features"
-git add docs/user-guide/disease.md spec/07-disease.md src/cli/mod.rs src/entities/disease.rs src/render/markdown.rs src/sources/disgenet.rs src/transform/disease.rs templates/disease.md.j2
-git commit -m "Add disease key feature summaries"
-make check < /dev/null > /tmp/081-make-check.log 2>&1
-tail -n 40 /tmp/081-make-check.log
+./tools/check-quality-ratchet.sh
+make check < /dev/null > .march/make-check.log 2>&1
+git diff --stat
 git status --short
 ```
 
 ## What Changed
 
-- Added `key_features` to `Disease` and exposed it in JSON, with empty values omitted.
-- Implemented conservative definition-first feature extraction in `src/transform/disease.rs` using cue phrases such as `characterized by`, `defined by`, `triad of`, and `association of`.
-- Added phenotype frequency supplementation for high-signal qualifiers (`obligate`, `very frequent`, `frequent`) when the definition yields too few features.
-- Recomputed `key_features` after disease section enrichment so phenotype qualifiers from Monarch can supplement the summary when present.
-- Updated phenotype markdown rendering to show `### Key Features` above the existing completeness note, or a definition hint when `key_features` is empty but a definition exists.
-- Extended disease specs and renderer/transform unit tests for the new summary behavior and JSON contract.
-- Updated the disease user guide to document the difference between `key_features` and the comprehensive phenotype table.
+- Removed the template-only truncation from the gene protein section so `get gene <symbol> protein` now renders the full UniProt function text.
+- Added additive `variant_targets` support to `Drug` instead of mutating the existing generic `targets` and `mechanisms` contracts.
+- Reused one shared CIViC therapy fetch in the drug section population path so `targets` and explicit `civic` can share the same context.
+- Added CIViC variant-target extraction and normalization rules, including the required `EGFR VIII` / `EGFRVIII` -> `EGFRvIII` normalization.
+- Updated markdown rendering and provenance so variant-specific targets appear as `Variant Targets (CIViC): ...` and `_meta.section_sources` gets a truthful `variant_targets` entry.
+- Updated operator-facing docs and `biomcp list drug` to describe the mixed-source drug target workflow accurately.
+- Documented the disease-gap disposition by following the approved design: no disease extraction code was changed for this ticket.
 
 ## Proof Added
 
-- Unit: `cargo test extract_definition_key_features_ -- --nocapture`
-- Unit: `cargo test derive_key_features_ -- --nocapture`
-- Unit: `cargo test disease_markdown_phenotypes_section_ -- --nocapture`
-- Regression: `cargo test disease_markdown_preserves_full_definition_text -- --nocapture`
-- Spec: `BIOMCP_BIN="$(pwd)/target/debug/biomcp" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -k "Sparse and Phenotype and Coverage and Notes or Disease and Phenotype and Key and Features"`
+- Unit: `cargo test gene_markdown_preserves_full_protein_function_text -- --nocapture`
+- Unit: `cargo test drug_markdown_renders_variant_targets_as_additive_line -- --nocapture`
+- Unit: `cargo test normalize_variant_target_label_ -- --nocapture`
+- Unit: `cargo test extract_variant_targets_from_civic_deduplicates_and_filters_by_generic_target -- --nocapture`
+- Unit: `cargo test drug_provenance_emits_variant_targets_when_present -- --nocapture`
+- Spec: `Gene Protein Function Full Text`
+- Spec: `Drug Variant Targets`
+- Spec: `Markdown Source Labels`
+- Spec: `JSON section_sources — Gene, Drug, Disease`
 
 ## Verification Results
 
-- Focused transform and renderer tests passed after implementation.
-- Live Andersen-Tawil phenotype output from `./target/debug/biomcp get disease MONDO:0008222 phenotypes` rendered `### Key Features` before the HPO table.
-- Live JSON output from `./target/debug/biomcp --json get disease MONDO:0008222 phenotypes` included a populated `key_features` array.
-- `make check < /dev/null 2>&1` passed; captured log: `/tmp/081-make-check.log`.
-- The source commit for the code change is `36e6f92` (`Add disease key feature summaries`).
+- Focused Rust tests for the new gene, drug, and provenance behavior passed.
+- Targeted executable markdown specs for OPA1 full-text protein output, rindopepimut variant targets, and variant-target provenance passed with the worktree binary.
+- `./tools/check-quality-ratchet.sh` passed after fixing one short `mustmatch like` literal in `spec/18-source-labels.md`.
+- `make check < /dev/null 2>&1` passed; captured log: `.march/make-check.log`.
 
 ## Deviations From Design
 
 - No implementation deviations.
-- The new spec sections use the existing `BIOMCP_BIN` override pattern so executable markdown specs can target the locally built worktree binary deterministically.
+- For live spec verification, the targeted rerun used `BIOMCP_BIN="$PWD/target/debug/biomcp"` after the worktree binary was rebuilt locally; the repo-wide gate still passed through `make check`.

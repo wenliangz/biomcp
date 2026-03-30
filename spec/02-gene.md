@@ -165,6 +165,18 @@ echo "$out" | jq -e '
 ' > /dev/null
 ```
 
+## Gene Protein Function Full Text
+
+The gene protein section must preserve the full UniProt function text rather than truncating the line. OPA1 is the regression anchor because its localization detail in the intermembrane space was being cut off in the gene view.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get gene OPA1 protein)"
+echo "$out" | mustmatch like "## Protein (UniProt)"
+echo "$out" | mustmatch like "intermembrane space"
+echo "$out" | mustmatch not like "intermembrane…"
+```
+
 ## Druggability Section
 
 The druggability section should stay as one section while exposing OpenTargets tractability markers and safety-liability context alongside DGIdb interaction data.

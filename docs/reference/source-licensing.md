@@ -96,11 +96,11 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Redistribution / reuse summary: reuse is generally allowed under the provider's open-data terms with attribution where required
 - Official terms URL: <https://www.ebi.ac.uk/chembl/>
 - Reviewed on: `2026-03-20`
-- Notes: BioMCP only queries live ChEMBL endpoints and does not ship ChEMBL data in the repository.
+- Notes: `get drug <name> targets` keeps ChEMBL as the generic target/mechanism source; CIViC variant labels are rendered separately when present.
 
 ### CIViC
 
-- BioMCP surfaces: `get variant <id> civic; get gene <symbol> civic; get drug <name> civic; get disease <id> civic; get disease <id> variants`
+- BioMCP surfaces: `get variant <id> civic; get gene <symbol> civic; get drug <name> targets; get drug <name> civic; get disease <id> civic; get disease <id> variants`
 - Integration mode: `direct_api`
 - BioMCP auth: `none`
 - Provider access / registration: open public API
@@ -108,7 +108,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Redistribution / reuse summary: reuse is broadly permitted; attribution remains best practice
 - Official terms URL: <https://civicdb.org/home>
 - Reviewed on: `2026-03-20`
-- Notes: CIViC is treated here as an open-access evidence source surfaced directly by BioMCP.
+- Notes: CIViC is treated here as an open-access evidence source surfaced directly by BioMCP. Drug target output may add a separate CIViC variant-target annotation line without merging those labels into the generic targets section.
 
 ### ClinGen
 
@@ -386,7 +386,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 - Redistribution / reuse summary: platform data is dedicated to the public domain, but linked evidence still carries source provenance
 - Official terms URL: <https://platform-docs.opentargets.org/licence>
 - Reviewed on: `2026-03-20`
-- Notes: The licence page also lists the licensing status of major upstream datasets consumed by Open Targets.
+- Notes: `get drug <name> targets` keeps Open Targets in the generic target section while CIViC variant annotations, when present, are labeled separately.
 
 ### PMC OA
 

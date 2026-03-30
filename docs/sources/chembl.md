@@ -13,7 +13,7 @@ In BioMCP, ChEMBL mainly appears inside the drug `targets` section and the drug 
 
 | Command | What BioMCP gets from this source | Integration note |
 |---|---|---|
-| `get drug <name> targets` | Drug-target activity, mechanism, and target context | Mixed-source section that combines ChEMBL with OpenTargets |
+| `get drug <name> targets` | Generic drug-target activity, mechanism, and target context | Mixed-source section: ChEMBL generic targets/mechanisms plus OpenTargets target context; CIViC may add a separate variant-target annotation line |
 | `get drug <name> indications` | Drug indication context linked to known use areas | ChEMBL contributes indication enrichment alongside OpenTargets |
 
 ## Example commands

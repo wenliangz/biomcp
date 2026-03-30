@@ -15,7 +15,7 @@ In BioMCP, OpenTargets powers the gene `druggability` section and contributes ra
 |---|---|---|
 | `get gene <symbol> diseases` | Ranked disease associations for a gene | OpenTargets scores anchor the disease ranking |
 | `get gene <symbol> druggability` | Tractability, safety, and targetability context | Combined with DGIdb interactions in one gene section |
-| `get drug <name> targets` | Drug-target context for known therapies | Mixed with ChEMBL target evidence |
+| `get drug <name> targets` | Generic drug-target context for known therapies | Mixed with ChEMBL target evidence; CIViC may add separate variant-target annotations |
 | `get drug <name> indications` | Disease and indication context for drugs | Mixed with ChEMBL indication enrichment |
 | `get disease <id> genes` | Ranked associated genes for a disease | Monarch-backed rows can be augmented with OpenTargets scores |
 | `get disease <id> prevalence` | Prevalence-like evidence and disease burden context | OpenTargets-backed disease section |
@@ -50,7 +50,7 @@ Returns prevalence-like evidence for the normalized disease record.
 biomcp get drug pembrolizumab targets
 ```
 
-Returns a drug targets section where OpenTargets joins ChEMBL target context.
+Returns a drug targets section where OpenTargets joins ChEMBL generic target context, with CIViC optionally adding a separate variant-target line.
 
 ## API access
 
