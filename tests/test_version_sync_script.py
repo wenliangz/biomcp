@@ -213,6 +213,8 @@ def test_manifest_and_citation_versions_match_repo_metadata() -> None:
     cargo = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
+    assert cargo["package"]["version"] == "0.8.20"
+    assert pyproject["project"]["version"] == "0.8.20"
     assert _read_manifest_version(REPO_ROOT / "manifest.json") == cargo["package"]["version"]
     assert _read_manifest_version(REPO_ROOT / "manifest.json") == pyproject["project"]["version"]
     assert _read_citation_version(REPO_ROOT / "CITATION.cff") == cargo["package"]["version"]

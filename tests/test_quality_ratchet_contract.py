@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MCP_SCRIPT = REPO_ROOT / "tools" / "check-mcp-allowlist.py"
 SOURCE_SCRIPT = REPO_ROOT / "tools" / "check-source-registry.py"
 WRAPPER_SCRIPT = REPO_ROOT / "tools" / "check-quality-ratchet.sh"
+RATCHET_TOOL = REPO_ROOT / "tools" / "check-quality-ratchet.py"
 
 
 def _run_python_script(
@@ -334,6 +335,20 @@ def test_wrapper_writes_summary_artifacts_for_pass_fixture(tmp_path: Path) -> No
     assert summary["lint"]["status"] == "pass"
     assert summary["lint"]["files_checked"] == 1
     assert summary["lint"]["finding_count"] == 0
+
+
+def test_wrapper_is_thin_shell_around_committed_python_tool() -> None:
+    wrapper = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+
+    assert RATCHET_TOOL.exists()
+    assert "python3 - <<'PY'" not in wrapper
+    assert "lint_spec_file" not in wrapper
+    assert "collect_shell_blocks" not in wrapper
+    assert "MUSTMATCH_JSON_RE" not in wrapper
+    assert "SHORT_LIKE_RE" not in wrapper
+    assert "FENCE_RE" not in wrapper
+    assert "uv run --extra dev python" in wrapper
+    assert "tools/check-quality-ratchet.py" in wrapper
 
 
 def test_wrapper_propagates_lint_failures(tmp_path: Path) -> None:

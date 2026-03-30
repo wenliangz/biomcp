@@ -26,25 +26,25 @@ def _markdown_section_block(text: str, heading: str) -> str:
 
 def test_changelog_has_backfilled_releases_and_release_header() -> None:
     changelog = _read("CHANGELOG.md")
-    latest_release_block = _markdown_section_block(changelog, "## 0.8.18 — 2026-03-25")
+    latest_release_block = _markdown_section_block(changelog, "## 0.8.20 — 2026-03-30")
 
     assert "## [Unreleased]" not in changelog
+    assert "## 0.8.20 — 2026-03-30" in changelog
+    assert "## 0.8.19 — 2026-03-26" in changelog
     assert "## 0.8.18 — 2026-03-25" in changelog
     assert "## 0.9.0" not in changelog
-    assert "--region us|eu|all" in latest_release_block
-    assert "EMA" in latest_release_block
-    assert "BioASQ benchmark" in latest_release_block
-    assert "docs/reference/bioasq-benchmark.md" in latest_release_block
-    assert "S2_API_KEY" in latest_release_block
-    assert "1 req/2sec" in latest_release_block
-    assert "1 req/sec" in latest_release_block
-    assert "049" not in latest_release_block
-    assert "050" not in latest_release_block
-    assert "051" not in latest_release_block
+    assert "remove partial API key from health output" in latest_release_block
+    assert "cross-entity See-also links" in latest_release_block
+    assert "quality ratchet" in latest_release_block
+    assert "mustmatch" in latest_release_block
+    assert "drug target family" in latest_release_block
+    assert "protein isoforms" in latest_release_block
+    assert "variant legacy" in latest_release_block
+    assert "disease definitions" in latest_release_block
+    assert "Documentation consistency audit" in latest_release_block
+    assert "Repo cleanup" in latest_release_block
     assert "pending separate merge" not in latest_release_block
-    assert "run.py" not in latest_release_block
-    assert "evaluate.py" not in latest_release_block
-    assert "score.py" not in latest_release_block
+    assert "0.8.21" not in latest_release_block
 
     expected_releases = [
         ("0.8.18", "2026-03-25"),
