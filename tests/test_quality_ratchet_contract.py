@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MCP_SCRIPT = REPO_ROOT / "tools" / "check-mcp-allowlist.py"
 SOURCE_SCRIPT = REPO_ROOT / "tools" / "check-source-registry.py"
 WRAPPER_SCRIPT = REPO_ROOT / "tools" / "check-quality-ratchet.sh"
+RATCHET_TOOL = REPO_ROOT / "tools" / "check-quality-ratchet.py"
 
 
 def _run_python_script(
@@ -336,6 +337,20 @@ def test_wrapper_writes_summary_artifacts_for_pass_fixture(tmp_path: Path) -> No
     assert summary["lint"]["finding_count"] == 0
 
 
+def test_wrapper_is_thin_shell_around_committed_python_tool() -> None:
+    wrapper = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+
+    assert RATCHET_TOOL.exists()
+    assert "python3 - <<'PY'" not in wrapper
+    assert "lint_spec_file" not in wrapper
+    assert "collect_shell_blocks" not in wrapper
+    assert "MUSTMATCH_JSON_RE" not in wrapper
+    assert "SHORT_LIKE_RE" not in wrapper
+    assert "FENCE_RE" not in wrapper
+    assert "uv run --extra dev python" in wrapper
+    assert "tools/check-quality-ratchet.py" in wrapper
+
+
 def test_wrapper_propagates_lint_failures(tmp_path: Path) -> None:
     spec_path = _write_failing_spec(tmp_path / "spec")
     output_dir = tmp_path / "out"
@@ -351,6 +366,25 @@ def test_wrapper_propagates_lint_failures(tmp_path: Path) -> None:
     summary = json.loads((output_dir / "quality-ratchet-summary.json").read_text())
     assert summary["status"] == "fail"
     assert summary["lint"]["status"] == "fail"
+    findings = summary["lint"]["results"][0]["findings"]
+    assert findings[0]["rule"] == "short-like-pattern"
+
+
+def test_wrapper_reports_error_when_no_specs_match(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+
+    result = _run_wrapper(
+        {
+            "QUALITY_RATCHET_OUTPUT_DIR": str(output_dir),
+            "QUALITY_RATCHET_SPEC_GLOB": str(tmp_path / "spec" / "*.md"),
+        }
+    )
+
+    assert result.returncode == 1
+    summary = json.loads((output_dir / "quality-ratchet-summary.json").read_text())
+    assert summary["status"] == "error"
+    assert summary["lint"]["status"] == "error"
+    assert "no spec files matched" in summary["lint"]["errors"][0]
 
 
 def test_wrapper_propagates_mcp_failures_from_override_paths(tmp_path: Path) -> None:
