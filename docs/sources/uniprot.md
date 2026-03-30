@@ -36,11 +36,11 @@ Returns a protein card with accession, gene, function, and UniProt evidence link
 biomcp get gene BRAF protein
 ```
 
-Returns a gene detail view with a `Protein (UniProt)` section. When UniProt
-annotates legacy protein names, that section includes an `Also known as:` line
-with alternative full names and short names from UniProt. When UniProt annotates
-alternative products, the same section also includes an `Isoforms (N)` line with
-isoform names and the displayed isoform length from the canonical record.
+Returns a gene detail view with a `Protein (UniProt)` section, including legacy names and isoforms when UniProt annotates them.
+
+When UniProt annotates legacy protein names, the section includes an `Also known as:` line
+with alternative full names and short names. When UniProt annotates alternative products,
+the section also includes an `Isoforms (N)` line with isoform names and the canonical record length.
 
 ```bash
 biomcp get protein P15056 structures

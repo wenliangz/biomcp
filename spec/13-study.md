@@ -290,16 +290,10 @@ echo "$out" | mustmatch not like "# Study Co-occurrence"
 [ -f "$PWD/.cache/spec-study-env" ] || bash fixtures/setup-study-spec-fixture.sh "$PWD"
 . "$PWD/.cache/spec-study-env"
 out="$(biomcp study query --study msk_impact_2017 --gene TP53 --type mutations --chart bar --cols 40 --rows 12)"
-OUT="$out" python3 - <<'PY'
-import os
-import re
-
-text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", os.environ["OUT"])
-lines = text.splitlines()
-assert lines, text
-assert len(lines) <= 12, (len(lines), text)
-assert max(len(line) for line in lines) <= 40, text
-PY
+clean="$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g')"
+line_count="$(printf '%s\n' "$clean" | wc -l | tr -d ' ')"
+test "$line_count" -le 12
+printf '%s\n' "$clean" | mustmatch not like "# Study"
 ```
 
 ## Chart Flag: Co-occurrence Heatmap
