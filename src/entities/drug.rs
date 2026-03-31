@@ -1004,6 +1004,36 @@ fn strip_label_intro_prefix(segment: &str) -> &str {
     segment.trim()
 }
 
+fn strip_leading_label_indication_prefixes(mut segment: &str) -> &str {
+    loop {
+        let lower = segment.to_ascii_lowercase();
+        let mut next = None;
+        for needle in [
+            "the treatment of ",
+            "treatment of ",
+            "adult patients with ",
+            "adult patient with ",
+            "adults with ",
+            "pediatric patients with ",
+            "pediatric patient with ",
+            "patients with ",
+            "patient with ",
+            "children with ",
+            "women with ",
+            "people with ",
+        ] {
+            if lower.starts_with(needle) {
+                next = Some(segment[needle.len()..].trim());
+                break;
+            }
+        }
+        match next {
+            Some(trimmed) => segment = trimmed,
+            None => return segment.trim(),
+        }
+    }
+}
+
 fn label_continuation_prefix(lower: &str) -> bool {
     [
         "for ",
@@ -1020,8 +1050,11 @@ fn label_continuation_prefix(lower: &str) -> bool {
 
 fn label_patient_phrase_start<'a>(segment: &'a str, lower: &str) -> Option<&'a str> {
     [
+        "adults with ",
         "adult patients with ",
+        "adult patient with ",
         "pediatric patients with ",
+        "pediatric patient with ",
         "patients with ",
         "patient with ",
         "children with ",
@@ -1039,20 +1072,21 @@ fn label_candidate_cutoff(segment: &str) -> &str {
     for needle in [
         ",",
         ";",
-        " keytruda",
-        " pembrolizumab",
-        " qlex",
         " in combination",
         " as a single agent",
         " as first-line",
         " as first line",
         " as adjuvant",
+        " as determined",
         " for ",
         " in adult",
         " in pediatric",
         " in patients",
         " after ",
         " following ",
+        " who ",
+        " who:",
+        " whose ",
         " where ",
     ] {
         if let Some(idx) = lower.find(needle) {
@@ -1063,29 +1097,13 @@ fn label_candidate_cutoff(segment: &str) -> &str {
 }
 
 fn normalize_label_indication_name(segment: &str) -> Option<String> {
-    let candidate = label_candidate_cutoff(segment)
+    let candidate = strip_leading_label_indication_prefixes(label_candidate_cutoff(segment))
         .trim_matches(|c: char| c.is_whitespace() || matches!(c, ':' | ';' | '.' | '-'))
         .trim();
     if candidate.is_empty() {
         return None;
     }
     let lower = candidate.to_ascii_lowercase();
-    let has_intro_prefix = [
-        "the treatment of ",
-        "treatment of ",
-        "adult patients with ",
-        "pediatric patients with ",
-        "patients with ",
-        "patient with ",
-        "children with ",
-        "women with ",
-        "people with ",
-    ]
-    .iter()
-    .any(|prefix| lower.starts_with(prefix));
-    if has_intro_prefix {
-        return None;
-    }
     let has_disease_signal = [
         "cancer",
         "carcinoma",
@@ -1105,7 +1123,7 @@ fn normalize_label_indication_name(segment: &str) -> Option<String> {
     if !has_disease_signal {
         return None;
     }
-    Some(lower)
+    Some(candidate.to_string())
 }
 
 fn extract_label_indication_name(segment: &str) -> Option<String> {
@@ -1146,7 +1164,8 @@ fn extract_label_indication_summary(
         let Some(name) = extract_label_indication_name(segment) else {
             continue;
         };
-        if !seen.insert(name.clone()) {
+        let dedupe_key = name.to_ascii_lowercase();
+        if !seen.insert(dedupe_key) {
             continue;
         }
         out.push(DrugLabelIndication {
@@ -2784,6 +2803,52 @@ mod tests {
         assert!(label.warnings.is_none());
         assert!(label.dosage.is_none());
         assert!(label.indications.is_none());
+    }
+
+    #[test]
+    fn extract_inline_label_summary_mode_trims_patient_eligibility_qualifiers() {
+        let response = serde_json::json!({
+            "results": [{
+                "indications_and_usage": [
+                    "1 INDICATIONS AND USAGE",
+                    "(1.1) KEYTRUDA is indicated for the treatment of patients with locally advanced or metastatic urothelial carcinoma who are not eligible for cisplatin-containing chemotherapy.",
+                    "(1.2) KEYTRUDA is indicated for the treatment of adults with locally advanced unresectable or metastatic HER2-negative gastric or gastroesophageal junction (GEJ) adenocarcinoma whose tumors express PD-L1 (CPS ≥1) as determined by an FDA-authorized test."
+                ]
+            }]
+        });
+
+        let label = extract_inline_label(&response, false).expect("summary label");
+        assert_eq!(
+            label
+                .indication_summary
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "locally advanced or metastatic urothelial carcinoma",
+                "locally advanced unresectable or metastatic HER2-negative gastric or gastroesophageal junction (GEJ) adenocarcinoma"
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_inline_label_summary_mode_falls_back_to_raw_indications_when_no_rows() {
+        let response = serde_json::json!({
+            "results": [{
+                "indications_and_usage": [
+                    "1 INDICATIONS AND USAGE",
+                    "Use with diet and exercise to improve glycemic control."
+                ],
+                "warnings_and_cautions": ["Warnings"],
+                "dosage_and_administration": ["Dosage"]
+            }]
+        });
+
+        let label = extract_inline_label(&response, false).expect("fallback label");
+        assert!(label.indication_summary.is_empty());
+        assert!(label.indications.as_deref().is_some());
+        assert!(label.warnings.is_none());
+        assert!(label.dosage.is_none());
     }
 
     #[test]

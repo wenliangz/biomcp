@@ -120,23 +120,32 @@ echo "$out" | mustmatch '/\((Approved|Phase [0-9](\/[0-9])?|Early Phase 1)\)/'
 ## Compact FDA Label Summary
 
 Default `label` mode should render a compact approved-indications summary and
-keep the verbose FDA subsections behind `--raw`.
+keep the verbose FDA subsections behind `--raw`. The same compact contract
+should hold for JSON output.
 
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" get drug pembrolizumab label)"
 echo "$out" | mustmatch like "## FDA Label"
 echo "$out" | mustmatch like "### Approved Indications"
-echo "$out" | mustmatch like "triple-negative breast cancer"
+echo "$out" | mustmatch like "Triple-Negative Breast Cancer"
 echo "$out" | mustmatch like 'Use `--raw` for the full truncated FDA label text.'
+echo "$out" | mustmatch not like "who: are not eligible"
+echo "$out" | mustmatch not like "adults with locally advanced unresectable"
 echo "$out" | mustmatch not like "### Warnings and Precautions"
 echo "$out" | mustmatch not like "### Dosage and Administration"
+json="$("$bin" --json get drug pembrolizumab label)"
+echo "$json" | jq -e '.label.indication_summary | type == "array" and length > 0' > /dev/null
+echo "$json" | jq -e '.label.indications == null' > /dev/null
+echo "$json" | jq -e '.label.warnings == null' > /dev/null
+echo "$json" | jq -e '.label.dosage == null' > /dev/null
 ```
 
 ## Raw FDA Label Output
 
 Raw label mode should preserve the current truncated FDA subsections when the
-operator explicitly asks for them.
+operator explicitly asks for them. The same raw opt-in should hold for JSON
+output.
 
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
@@ -145,6 +154,11 @@ echo "$out" | mustmatch like "### Indications and Usage"
 echo "$out" | mustmatch like "### Warnings and Precautions"
 echo "$out" | mustmatch like "### Dosage and Administration"
 echo "$out" | mustmatch not like "### Approved Indications"
+json="$("$bin" --json get drug pembrolizumab label --raw)"
+echo "$json" | jq -e '.label.indication_summary | type == "array" and length > 0' > /dev/null
+echo "$json" | jq -e '.label.indications | type == "string"' > /dev/null
+echo "$json" | jq -e '.label.warnings | type == "string"' > /dev/null
+echo "$json" | jq -e '.label.dosage | type == "string"' > /dev/null
 ```
 
 ## Get Drug Help Surfaces Supported Sections
@@ -177,32 +191,6 @@ echo "$out" | mustmatch like "get drug <name> label [--raw]"
 echo "$out" | mustmatch like "get drug <name> regulatory [--region <us|eu|all>]"
 echo "$out" | mustmatch like "get drug <name> safety [--region <us|eu|all>]"
 echo "$out" | mustmatch like "get drug <name> shortage [--region <us|eu|all>]"
-```
-
-## Compact FDA Label JSON
-
-Default label JSON should expose `indication_summary` without the raw warning
-and dosage dumps.
-
-```bash
-out="$(biomcp --json get drug pembrolizumab label)"
-echo "$out" | jq -e '.label.indication_summary | type == "array" and length > 0' > /dev/null
-echo "$out" | jq -e '.label.indications == null' > /dev/null
-echo "$out" | jq -e '.label.warnings == null' > /dev/null
-echo "$out" | jq -e '.label.dosage == null' > /dev/null
-```
-
-## Raw FDA Label JSON
-
-Raw label JSON should preserve both the compact summary rows and the truncated
-raw text fields.
-
-```bash
-out="$(biomcp --json get drug pembrolizumab label --raw)"
-echo "$out" | jq -e '.label.indication_summary | type == "array" and length > 0' > /dev/null
-echo "$out" | jq -e '.label.indications | type == "string"' > /dev/null
-echo "$out" | jq -e '.label.warnings | type == "string"' > /dev/null
-echo "$out" | jq -e '.label.dosage | type == "string"' > /dev/null
 ```
 
 ## Compact Approval Fields
