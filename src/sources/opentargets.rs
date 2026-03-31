@@ -694,15 +694,24 @@ query SearchDisease($query: String!) {
             }
         }
 
-        let from_search = resp
+        let hits = resp
             .data
             .and_then(|d| d.search)
-            .and_then(|s| {
-                s.hits
-                    .into_iter()
-                    .find(|h| h.entity.as_deref() == Some("disease"))
+            .map(|s| s.hits)
+            .unwrap_or_default();
+
+        let from_search = hits
+            .iter()
+            .find(|h| {
+                h.entity.as_deref() == Some("disease")
+                    && h.id.as_deref().is_some_and(|id| id.starts_with("EFO_"))
             })
-            .and_then(|h| h.id);
+            .and_then(|h| h.id.clone())
+            .or_else(|| {
+                hits.into_iter()
+                    .find(|h| h.entity.as_deref() == Some("disease"))
+                    .and_then(|h| h.id)
+            });
 
         Ok(from_search.or(prefixed))
     }
@@ -1494,6 +1503,69 @@ mod tests {
         assert_eq!(genes[1].gwas_score, None);
         assert_eq!(genes[1].rare_variant_score, None);
         assert_eq!(genes[1].somatic_mutation_score, None);
+    }
+
+    #[tokio::test]
+    async fn disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SearchDisease"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "search": {
+                        "hits": [
+                            {
+                                "id": "MONDO_0003864",
+                                "name": "chronic lymphocytic leukemia/small lymphocytic lymphoma",
+                                "entity": "disease"
+                            },
+                            {
+                                "id": "EFO_0000095",
+                                "name": "chronic lymphocytic leukemia",
+                                "entity": "disease"
+                            }
+                        ]
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DiseaseGenes"))
+            .and(body_string_contains("\"efoId\":\"EFO_0000095\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "disease": {
+                        "associatedTargets": {
+                            "rows": [
+                                {
+                                    "score": 0.99,
+                                    "datatypeScores": [],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "TP53"}
+                                }
+                            ]
+                        }
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = OpenTargetsClient::new_for_test(server.uri()).unwrap();
+        let genes = client
+            .disease_associated_targets(
+                "chronic lymphocytic leukemia/small lymphocytic lymphoma",
+                5,
+            )
+            .await
+            .unwrap();
+        assert_eq!(genes.len(), 1);
+        assert_eq!(genes[0].symbol, "TP53");
     }
 
     #[tokio::test]
