@@ -294,7 +294,7 @@ fn list_drug() -> String {
 ## Commands
 
 - `get drug <name>` - get by name (MyChem.info aggregation)
-- `get drug <name> label` - show key FDA label sections inline
+- `get drug <name> label [--raw]` - compact FDA approved-indications summary by default; add `--raw` for the truncated FDA label text
 - `get drug <name> regulatory [--region <us|eu|all>]` - regional regulatory summary (Drugs@FDA and/or EMA)
 - `get drug <name> safety [--region <us|eu|all>]` - regional safety context (OpenFDA and/or EMA)
 - `get drug <name> shortage [--region <us|eu|all>]` - query current shortage status
@@ -837,6 +837,12 @@ mod tests {
         );
         assert!(out.contains("auto-download the EMA human-medicines JSON feeds"));
         assert!(out.contains("biomcp ema sync"));
+    }
+
+    #[test]
+    fn list_drug_documents_raw_label_mode() {
+        let out = list_drug();
+        assert!(out.contains("get drug <name> label [--raw]"));
     }
 
     #[test]

@@ -19,6 +19,7 @@ Safety (OpenFDA FAERS): unavailable
 {% if show_label_section and label -%}
 ## FDA Label
 
+{% if raw_label -%}
 {% if label.indications -%}
 ### Indications and Usage
 {{ label.indications }}
@@ -30,6 +31,17 @@ Safety (OpenFDA FAERS): unavailable
 {% if label.dosage -%}
 ### Dosage and Administration
 {{ label.dosage }}
+{% endif -%}
+{% elif label.indication_summary -%}
+### Approved Indications
+{% for row in label.indication_summary -%}
+- {{ row.name }}{% if row.approval_date or row.pivotal_trial %}{% if row.approval_date %} | approval: {{ row.approval_date }}{% endif %}{% if row.pivotal_trial %} | trial: {{ row.pivotal_trial }}{% endif %}{% endif %}
+{% endfor -%}
+
+Use `--raw` for the full truncated FDA label text.
+{% elif label.indications -%}
+### Indications and Usage
+{{ label.indications }}
 {% endif -%}
 {% endif -%}
 {% if regulatory_block %}{{ regulatory_block }}

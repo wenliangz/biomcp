@@ -1343,6 +1343,7 @@ See also: biomcp list variant")]
     #[command(after_help = "\
 EXAMPLES:
   biomcp get drug pembrolizumab
+  biomcp get drug pembrolizumab label --raw
   biomcp get drug Keytruda regulatory --region eu
   biomcp get drug Ozempic safety --region eu
   biomcp get drug pembrolizumab targets
@@ -1359,6 +1360,9 @@ See also: biomcp list drug")]
         /// Data region for regional sections (regulatory, safety, shortage, or all)
         #[arg(long, value_enum)]
         region: Option<DrugRegionArg>,
+        /// Preserve raw FDA label subsections when used with `label` or `all`
+        #[arg(long)]
+        raw: bool,
     },
     /// Get pathway by ID
     #[command(after_help = "\
@@ -2967,12 +2971,19 @@ async fn render_drug_card_outcome(
     name: &str,
     sections: &[String],
     region: Option<DrugRegion>,
+    raw_label: bool,
     json_output: bool,
     alias_suggestions_as_json: bool,
 ) -> anyhow::Result<CommandOutcome> {
     let effective_region = region.unwrap_or(DrugRegion::Us);
-    match crate::entities::drug::get_with_region(name, sections, effective_region, region.is_some())
-        .await
+    match crate::entities::drug::get_with_region(
+        name,
+        sections,
+        effective_region,
+        region.is_some(),
+        raw_label,
+    )
+    .await
     {
         Ok(drug) => {
             let text = if json_output {
@@ -2987,6 +2998,7 @@ async fn render_drug_card_outcome(
                     &drug,
                     sections,
                     effective_region,
+                    raw_label,
                 )?
             };
             Ok(CommandOutcome::stdout(text))
@@ -3531,6 +3543,21 @@ fn trial_search_query_summary(
     .join(", ")
 }
 
+fn should_show_trial_zero_result_nickname_hint(
+    positional_query: Option<&str>,
+    source: crate::entities::trial::TrialSource,
+    result_count: usize,
+) -> bool {
+    positional_query
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        && matches!(
+            source,
+            crate::entities::trial::TrialSource::ClinicalTrialsGov
+        )
+        && result_count == 0
+}
+
 fn trim_protein_change_prefix(value: &str) -> &str {
     value
         .trim()
@@ -3829,6 +3856,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     name,
                     sections,
                     region,
+                    raw,
                 },
             } => {
                 let (sections, json_override) = extract_json_from_sections(&sections);
@@ -3840,6 +3868,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     &sections,
                     effective_region,
                     region.is_some(),
+                    raw,
                 )
                 .await?;
                 if json_output {
@@ -3854,6 +3883,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         &drug,
                         &sections,
                         effective_region,
+                        raw,
                     )?)
                 }
             }
@@ -5836,6 +5866,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     next_page,
                     limit,
                 } => {
+                    let positional_trial_query = positional_query
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string);
                     let condition = resolve_query_input(
                         normalize_cli_tokens(condition),
                         positional_query,
@@ -5950,8 +5985,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             pagination_footer_offset(&pagination)
                         };
                         let total = pagination.total.and_then(|value| u32::try_from(value).ok());
+                        let show_zero_result_nickname_hint =
+                            should_show_trial_zero_result_nickname_hint(
+                                positional_trial_query.as_deref(),
+                                trial_source,
+                                results.len(),
+                            );
                         Ok(crate::render::markdown::trial_search_markdown_with_footer(
-                            &query, &results, total, &footer,
+                            &query,
+                            &results,
+                            total,
+                            &footer,
+                            show_zero_result_nickname_hint,
+                            positional_trial_query.as_deref(),
                         )?)
                     }
                 }
@@ -6689,6 +6735,7 @@ async fn run_outcome_inner(
                     name,
                     sections,
                     region,
+                    raw,
                 },
         } => {
             let json = cli.json;
@@ -6701,6 +6748,7 @@ async fn run_outcome_inner(
                     &name,
                     &sections,
                     region,
+                    raw,
                     json_output,
                     alias_suggestions_as_json,
                 )
@@ -6813,6 +6861,7 @@ async fn run_outcome_inner(
                     &name,
                     empty_sections(),
                     None,
+                    false,
                     json,
                     alias_suggestions_as_json,
                 )
@@ -6892,8 +6941,8 @@ mod tests {
         extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
         parse_trial_location_paging, resolve_drug_search_region, resolve_query_input,
         resolve_variant_query, rewrite_mcp_chart_args, run_outcome,
-        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
-        truncate_article_annotations,
+        should_show_trial_zero_result_nickname_hint, should_try_pathway_trial_fallback,
+        trial_locations_json, trial_search_query_summary, truncate_article_annotations,
     };
     use crate::entities::drug::{DrugRegion, DrugSearchFilters};
     use clap::{CommandFactory, FromArgMatches, Parser};
@@ -7075,6 +7124,24 @@ mod tests {
     }
 
     #[test]
+    fn get_drug_help_mentions_raw_label_mode() {
+        let mut command = Cli::command();
+        let get = command
+            .find_subcommand_mut("get")
+            .expect("get subcommand should exist");
+        let drug = get
+            .find_subcommand_mut("drug")
+            .expect("drug subcommand should exist");
+        let mut help = Vec::new();
+        drug.write_long_help(&mut help)
+            .expect("drug help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--raw"));
+        assert!(help.contains("biomcp get drug pembrolizumab label --raw"));
+    }
+
+    #[test]
     fn get_drug_parses_region_split_form() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -7095,6 +7162,7 @@ mod tests {
                             name,
                             sections,
                             region,
+                            raw,
                         },
                 },
             json,
@@ -7107,6 +7175,7 @@ mod tests {
         assert_eq!(name, "Keytruda");
         assert_eq!(sections, vec!["regulatory".to_string()]);
         assert_eq!(region, Some(DrugRegionArg::Eu));
+        assert!(!raw);
         assert!(!json);
         assert!(!no_cache);
     }
@@ -7125,6 +7194,7 @@ mod tests {
                             name,
                             sections,
                             region,
+                            raw,
                         },
                 },
             json,
@@ -7137,6 +7207,7 @@ mod tests {
         assert_eq!(name, "Ozempic");
         assert_eq!(sections, vec!["safety".to_string()]);
         assert_eq!(region, Some(DrugRegionArg::All));
+        assert!(!raw);
         assert!(!json);
         assert!(!no_cache);
     }
@@ -7163,6 +7234,7 @@ mod tests {
                             name,
                             sections,
                             region,
+                            raw,
                         },
                 },
             json,
@@ -7175,8 +7247,51 @@ mod tests {
         assert_eq!(name, "Keytruda");
         assert_eq!(sections, vec!["regulatory".to_string()]);
         assert_eq!(region, Some(DrugRegionArg::Eu));
+        assert!(!raw);
         assert!(json);
         assert!(!no_cache);
+    }
+
+    #[test]
+    fn get_drug_parses_raw_flag_with_label_section() {
+        let cli = Cli::try_parse_from(["biomcp", "get", "drug", "pembrolizumab", "label", "--raw"])
+            .expect("get drug label --raw should parse");
+
+        let Cli {
+            command:
+                Commands::Get {
+                    entity:
+                        GetEntity::Drug {
+                            name,
+                            sections,
+                            raw,
+                            ..
+                        },
+                },
+            ..
+        } = cli
+        else {
+            panic!("expected get drug command");
+        };
+
+        assert_eq!(name, "pembrolizumab");
+        assert_eq!(sections, vec!["label".to_string()]);
+        assert!(raw);
+    }
+
+    #[tokio::test]
+    async fn get_drug_raw_rejects_non_label_sections() {
+        let cli =
+            Cli::try_parse_from(["biomcp", "get", "drug", "pembrolizumab", "targets", "--raw"])
+                .expect("get drug --raw should parse");
+
+        let err = run_outcome(cli)
+            .await
+            .expect_err("targets --raw should be rejected");
+        assert!(
+            err.to_string()
+                .contains("--raw can only be used with label or all")
+        );
     }
 
     #[test]
@@ -7894,6 +8009,32 @@ mod tests {
         assert!(summary.contains("lat=40.7128"));
         assert!(summary.contains("lon=-74.006"));
         assert!(summary.contains("distance=50"));
+    }
+
+    #[test]
+    fn trial_zero_result_nickname_hint_requires_positional_ctgov_query_with_zero_results() {
+        use crate::entities::trial::TrialSource;
+
+        assert!(should_show_trial_zero_result_nickname_hint(
+            Some("CodeBreaK 300"),
+            TrialSource::ClinicalTrialsGov,
+            0
+        ));
+        assert!(!should_show_trial_zero_result_nickname_hint(
+            None,
+            TrialSource::ClinicalTrialsGov,
+            0
+        ));
+        assert!(!should_show_trial_zero_result_nickname_hint(
+            Some("CodeBreaK 300"),
+            TrialSource::NciCts,
+            0
+        ));
+        assert!(!should_show_trial_zero_result_nickname_hint(
+            Some("CodeBreaK 300"),
+            TrialSource::ClinicalTrialsGov,
+            1
+        ));
     }
 
     #[test]
@@ -10553,6 +10694,46 @@ mod tests {
             outcome
                 .text
                 .contains("Did you mean: `biomcp get drug pembrolizumab`")
+        );
+    }
+
+    #[tokio::test]
+    async fn drug_alias_fallback_json_writes_stdout_and_exit_1() {
+        let _guard = lock_env().await;
+        let mychem = MockServer::start().await;
+        let ols = MockServer::start().await;
+        let _mychem_base = set_env_var("BIOMCP_MYCHEM_BASE", Some(&format!("{}/v1", mychem.uri())));
+        let _ols_base = set_env_var("BIOMCP_OLS4_BASE", Some(&ols.uri()));
+        let _umls_base = set_env_var("BIOMCP_UMLS_BASE", None);
+        let _umls_key = set_env_var("UMLS_API_KEY", None);
+
+        mount_drug_lookup_miss(&mychem, "Keytruda").await;
+        mount_ols_alias(
+            &ols,
+            "Keytruda",
+            "mesh",
+            "MESH:C582435",
+            "pembrolizumab",
+            &["Keytruda"],
+            1,
+        )
+        .await;
+
+        let cli =
+            Cli::try_parse_from(["biomcp", "--json", "get", "drug", "Keytruda"]).expect("parse");
+        let outcome = run_outcome(cli).await.expect("drug alias json outcome");
+
+        assert_eq!(outcome.stream, OutputStream::Stdout);
+        assert_eq!(outcome.exit_code, 1);
+        let value: serde_json::Value =
+            serde_json::from_str(&outcome.text).expect("valid alias json");
+        assert_eq!(
+            value["_meta"]["alias_resolution"]["canonical"],
+            "pembrolizumab"
+        );
+        assert_eq!(
+            value["_meta"]["next_commands"][0],
+            "biomcp get drug pembrolizumab"
         );
     }
 
