@@ -15,6 +15,10 @@ description: Search and retrieve biomedical data - genes, variants, clinical tri
 - Gene-function questions: `biomcp get gene <symbol>`
 - Drug-safety questions: `biomcp drug adverse-events <name>` and `biomcp get drug <name> safety`
 - Review-literature questions: `biomcp search article -k "<query>" --type review --limit 5`
+- After `search article`, default to `biomcp article batch <id1> <id2> ...` instead of repeated `get article` calls. Batch up to 20 shortlisted papers in one call.
+- Use `biomcp batch gene <GENE1,GENE2,...>` when you need the same basic card fields, chromosome, or sectioned output for multiple genes.
+- For diseases with weak ontology-name coverage, run `biomcp discover "<disease>"` first, then pass a resolved `MESH:...`, `OMIM:...`, `ICD10CM:...`, `MONDO:...`, or `DOID:...` identifier to `biomcp get disease`.
+- Avoid `--type` when recall matters across sources. `--type` is Europe PMC only today because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.
 - Multi-hop article follow-up: `biomcp article citations <id> --limit 5` and `biomcp article recommendations <id> --limit 5`
 
 ## Section reference
@@ -39,6 +43,7 @@ description: Search and retrieve biomedical data - genes, variants, clinical tri
 - `gene articles <symbol>` and `search article -g <symbol>` are equivalent starting points for gene-filtered literature.
 - Use helpers when the pivot is obvious: `drug trials`, `disease trials`, `variant articles`, `article citations`.
 - Use `search article -d "<disease>" --type review --limit 5` when disease phenotypes or drug indications look sparse.
+- Use `article batch` as the default multi-article follow-up after `search article`; it replaces sequential `get article` calls and preserves Semantic Scholar enrichment when available.
 - Use `batch <entity> <id1,id2,...> --sections <s1,s2,...>` when you need the same card shape for several entities.
 - Use `enrich <GENE1,GENE2,...>` once you have a real gene set and want pathways or GO-style categories.
 

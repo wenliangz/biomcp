@@ -131,6 +131,17 @@ echo "$out" | mustmatch like '"matched_sources": ['
 echo "$out" | mustmatch like '"matched_sources": ["pubtator"'
 ```
 
+## Type Filter Warns About Europe PMC Restriction
+
+`--type` remains a strict Europe PMC-only filter today. The rendered output
+must say so explicitly instead of silently narrowing the search surface.
+
+```bash
+out="$(biomcp search article -g BRAF --type review --limit 3)"
+echo "$out" | mustmatch like "Note: --type currently restricts article search to Europe PMC"
+echo "$out" | mustmatch like "| PMID | Title |"
+```
+
 ## Getting Article Details
 
 The article detail card should preserve stable bibliographic anchors for reproducible referencing. We assert on PMID and journal markers.
@@ -296,7 +307,7 @@ markers, and sources in both markdown and JSON without changing default output.
 out="$(env -u S2_API_KEY biomcp search article -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like '"surface": "search_article"'
-echo "$out" | mustmatch like '"routing=source_federation"'
+echo "$out" | mustmatch like '"planner=federated"'
 echo "$out" | mustmatch like "Semantic Scholar"
 
 json_out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --debug-plan --limit 3)"
@@ -305,6 +316,12 @@ echo "$json_out" | mustmatch like '"surface": "search_article"'
 echo "$json_out" | mustmatch like '"leg": "article"'
 echo "$json_out" | mustmatch like '"sources": ['
 echo "$json_out" | mustmatch like '"Semantic Scholar"'
+
+typed_out="$(biomcp search article -g BRAF --type review --debug-plan --limit 3)"
+echo "$typed_out" | mustmatch like '"Note: --type currently restricts article search to Europe PMC'
+
+typed_json="$(biomcp --json search article -g BRAF --type review --debug-plan --limit 3)"
+echo "$typed_json" | mustmatch like '"note": "Note: --type currently restricts article search to Europe PMC'
 ```
 
 ## Semantic Scholar TLDR Section

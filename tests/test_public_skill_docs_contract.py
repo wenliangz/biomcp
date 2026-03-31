@@ -93,8 +93,15 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "## Output and evidence rules" in skill_file
     assert 'biomcp search drug --indication "<disease>"' in skill_file
     assert 'biomcp discover "<free text>"' in skill_file
+    assert "article batch" in skill_file
+    assert "batch gene" in skill_file
+    assert "discover" in skill_file and "get disease" in skill_file
+    assert "--type" in skill_file and "Europe PMC only" in skill_file
     assert "_meta.next_commands" in skill_file
     assert "Run `biomcp skill list` for worked examples" in skill_file
+
+    assert "article batch" in article_guide
+    assert "--type" in article_guide and "Europe PMC only" in article_guide
 
     assert "# Pattern: Treatment / approved-drug lookup" in treatment_use_case
     assert 'biomcp search drug --indication "myasthenia gravis" --limit 5' in treatment_use_case

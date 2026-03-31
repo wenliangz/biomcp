@@ -113,7 +113,9 @@ impl MyDiseaseClient {
         } else {
             // Keep the legacy name search semantics (tokenized by backend) to avoid
             // over-constraining common disease names like "lung cancer".
-            format!("(disease_ontology.name:{escaped} OR mondo.name:{escaped})")
+            format!(
+                "(disease_ontology.name:{escaped} OR disease_ontology.synonyms:{escaped} OR mondo.name:{escaped} OR mondo.synonym:{escaped})"
+            )
         };
         if let Some(source) = source.map(str::trim).filter(|v| !v.is_empty()) {
             let source_clause = match source.to_ascii_lowercase().as_str() {
@@ -147,6 +149,52 @@ impl MyDiseaseClient {
             ("q", scoped_query.as_str()),
             ("size", size.as_str()),
             ("from", from.as_str()),
+            ("fields", MYDISEASE_SEARCH_FIELDS),
+        ]))
+        .await
+    }
+
+    pub async fn lookup_disease_by_xref(
+        &self,
+        kind: &str,
+        value: &str,
+        size: usize,
+    ) -> Result<MyDiseaseQueryResponse, BioMcpError> {
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(BioMcpError::InvalidArgument(
+                "Disease crosswalk ID is required.".into(),
+            ));
+        }
+        crate::sources::validate_biothings_result_window("MyDisease search", size, 0)?;
+
+        let escaped = crate::utils::query::escape_lucene_value(value);
+        let query = match kind.trim().to_ascii_lowercase().as_str() {
+            "mesh" => format!(
+                "(mondo.xrefs.mesh:\"{escaped}\" OR disease_ontology.xrefs.mesh:\"{escaped}\" OR umls.mesh:\"{escaped}\")"
+            ),
+            "omim" => format!(
+                "(mondo.xrefs.omim:\"{escaped}\" OR disease_ontology.xrefs.omim:\"{escaped}\")"
+            ),
+            "icd10cm" => {
+                let prefixed = format!("ICD10:{escaped}");
+                format!(
+                    "(mondo.xrefs.icd10:\"{escaped}\" OR mondo.xrefs.icd10:\"{prefixed}\" OR disease_ontology.xrefs.icd10:\"{escaped}\" OR disease_ontology.xrefs.icd10:\"{prefixed}\" OR umls.icd10am:\"{escaped}\" OR umls.icd10am:\"{prefixed}\")"
+                )
+            }
+            other => {
+                return Err(BioMcpError::InvalidArgument(format!(
+                    "Unknown disease xref kind '{other}'. Expected one of: mesh, omim, icd10cm"
+                )));
+            }
+        };
+
+        let url = self.endpoint("query");
+        let size = size.to_string();
+        self.get_json(self.client.get(&url).query(&[
+            ("q", query.as_str()),
+            ("size", size.as_str()),
+            ("from", "0"),
             ("fields", MYDISEASE_SEARCH_FIELDS),
         ]))
         .await
@@ -271,7 +319,7 @@ mod tests {
             .and(path("/v1/query"))
             .and(query_param(
                 "q",
-                "(disease_ontology.name:melanoma OR mondo.name:melanoma)",
+                "(disease_ontology.name:melanoma OR disease_ontology.synonyms:melanoma OR mondo.name:melanoma OR mondo.synonym:melanoma)",
             ))
             .and(query_param("size", "10"))
             .and(query_param("from", "0"))
@@ -283,6 +331,38 @@ mod tests {
 
         let resp = client
             .query("melanoma", 10, 0, None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(resp.hits.len(), 1);
+        assert_eq!(resp.hits[0].id, "MONDO:0005105");
+    }
+
+    #[tokio::test]
+    async fn lookup_disease_by_xref_queries_exact_mesh_fields() {
+        let server = MockServer::start().await;
+        let client = MyDiseaseClient::new_for_test(format!("{}/v1", server.uri())).unwrap();
+
+        let body = r#"{
+          "total": 1,
+          "hits": [{"_id": "MONDO:0005105", "disease_ontology": {"name": "melanoma"}}]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param(
+                "q",
+                "(mondo.xrefs.mesh:\"D008545\" OR disease_ontology.xrefs.mesh:\"D008545\" OR umls.mesh:\"D008545\")",
+            ))
+            .and(query_param("size", "5"))
+            .and(query_param("from", "0"))
+            .and(query_param("fields", MYDISEASE_SEARCH_FIELDS))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resp = client
+            .lookup_disease_by_xref("mesh", "D008545", 5)
             .await
             .unwrap();
         assert_eq!(resp.hits.len(), 1);

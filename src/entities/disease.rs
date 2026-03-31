@@ -307,6 +307,82 @@ fn normalize_disease_id(value: &str) -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DiseaseLookupInput {
+    CanonicalOntologyId(String),
+    CrosswalkId(DiseaseXrefKind, String),
+    FreeText,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiseaseXrefKind {
+    Mesh,
+    Omim,
+    Icd10Cm,
+}
+
+impl DiseaseXrefKind {
+    fn source_key(self) -> &'static str {
+        match self {
+            Self::Mesh => "mesh",
+            Self::Omim => "omim",
+            Self::Icd10Cm => "icd10cm",
+        }
+    }
+}
+
+fn parse_disease_lookup_input(value: &str) -> DiseaseLookupInput {
+    if let Some(id) = normalize_disease_id(value) {
+        return DiseaseLookupInput::CanonicalOntologyId(id);
+    }
+
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return DiseaseLookupInput::FreeText;
+    }
+
+    let Some((prefix, raw_value)) = trimmed.split_once(':') else {
+        return DiseaseLookupInput::FreeText;
+    };
+    let raw_value = raw_value.trim();
+    if raw_value.is_empty() {
+        return DiseaseLookupInput::FreeText;
+    }
+
+    let kind = if prefix.eq_ignore_ascii_case("MESH") {
+        Some(DiseaseXrefKind::Mesh)
+    } else if prefix.eq_ignore_ascii_case("OMIM") {
+        Some(DiseaseXrefKind::Omim)
+    } else if prefix.eq_ignore_ascii_case("ICD10CM") {
+        Some(DiseaseXrefKind::Icd10Cm)
+    } else {
+        None
+    };
+
+    if let Some(kind) = kind {
+        DiseaseLookupInput::CrosswalkId(kind, raw_value.to_string())
+    } else {
+        DiseaseLookupInput::FreeText
+    }
+}
+
+fn preferred_crosswalk_hit(hits: Vec<MyDiseaseHit>) -> Option<MyDiseaseHit> {
+    hits.into_iter().min_by(|left, right| {
+        let rank = |id: &str| {
+            if id.starts_with("MONDO:") {
+                0u8
+            } else if id.starts_with("DOID:") {
+                1u8
+            } else {
+                2u8
+            }
+        };
+        rank(&left.id)
+            .cmp(&rank(&right.id))
+            .then_with(|| left.id.cmp(&right.id))
+    })
+}
+
 fn normalize_disease_text(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -1370,13 +1446,32 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
 
     let client = MyDiseaseClient::new()?;
 
-    if let Some(id) = normalize_disease_id(name_or_id) {
-        let hit = client.get(&id).await?;
-        let mut disease = transform::disease::from_mydisease_hit(hit);
-        disease.parents = resolve_parent_names(&client, &disease.parents).await;
-        enrich_base_context(&mut disease).await;
-        apply_requested_sections(&mut disease, parsed_sections).await?;
-        return Ok(disease);
+    match parse_disease_lookup_input(name_or_id) {
+        DiseaseLookupInput::CanonicalOntologyId(id) => {
+            let hit = client.get(&id).await?;
+            let mut disease = transform::disease::from_mydisease_hit(hit);
+            disease.parents = resolve_parent_names(&client, &disease.parents).await;
+            enrich_base_context(&mut disease).await;
+            apply_requested_sections(&mut disease, parsed_sections).await?;
+            return Ok(disease);
+        }
+        DiseaseLookupInput::CrosswalkId(kind, value) => {
+            let resp = client
+                .lookup_disease_by_xref(kind.source_key(), &value, 5)
+                .await?;
+            let best = preferred_crosswalk_hit(resp.hits).ok_or_else(|| BioMcpError::NotFound {
+                entity: "disease".into(),
+                id: name_or_id.trim().to_string(),
+                suggestion: "Try biomcp discover \"<disease name>\" to resolve a supported disease identifier.".into(),
+            })?;
+            let hit = client.get(&best.id).await?;
+            let mut disease = transform::disease::from_mydisease_hit(hit);
+            disease.parents = resolve_parent_names(&client, &disease.parents).await;
+            enrich_base_context(&mut disease).await;
+            apply_requested_sections(&mut disease, parsed_sections).await?;
+            return Ok(disease);
+        }
+        DiseaseLookupInput::FreeText => {}
     }
 
     let best = resolve_disease_hit_by_name(&client, name_or_id).await?;
@@ -1809,6 +1904,41 @@ mod tests {
         assert_eq!(normalize_disease_id("lung cancer"), None);
         assert_eq!(normalize_disease_id("MONDO:"), None);
         assert_eq!(normalize_disease_id("HP:0002861"), None);
+    }
+
+    #[test]
+    fn parse_disease_lookup_input_distinguishes_canonical_crosswalk_and_text() {
+        assert_eq!(
+            parse_disease_lookup_input("MONDO:0005105"),
+            DiseaseLookupInput::CanonicalOntologyId("MONDO:0005105".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("mesh:D008545"),
+            DiseaseLookupInput::CrosswalkId(DiseaseXrefKind::Mesh, "D008545".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("OMIM:155600"),
+            DiseaseLookupInput::CrosswalkId(DiseaseXrefKind::Omim, "155600".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("ICD10CM:Q07.0"),
+            DiseaseLookupInput::CrosswalkId(DiseaseXrefKind::Icd10Cm, "Q07.0".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("Arnold Chiari syndrome"),
+            DiseaseLookupInput::FreeText
+        );
+    }
+
+    #[test]
+    fn preferred_crosswalk_hit_prefers_mondo_then_doid_then_lexicographic_id() {
+        let best = preferred_crosswalk_hit(vec![
+            test_disease_hit("DOID:1909", "melanoma", &[], &[]),
+            test_disease_hit("MONDO:0005105", "melanoma", &[], &[]),
+            test_disease_hit("MESH:D008545", "melanoma", &[], &[]),
+        ])
+        .expect("a best hit should be selected");
+        assert_eq!(best.id, "MONDO:0005105");
     }
 
     #[test]

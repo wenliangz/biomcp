@@ -33,6 +33,20 @@ echo "$out" | mustmatch like "ID: MONDO:0005105"
 echo "$out" | mustmatch like "Genes (Open Targets): CDKN2A (OT"
 ```
 
+## Disease Crosswalk Identifier Resolution
+
+Crosswalkable identifiers such as MeSH should resolve through MyDisease xrefs
+and return the same canonical disease card path as the free-text lookup.
+
+```bash
+mesh_id="$(biomcp --json get disease melanoma | jq -r '.xrefs.MeSH')"
+test -n "$mesh_id"
+test "$mesh_id" != "null"
+out="$(biomcp get disease "MESH:${mesh_id}")"
+echo "$out" | mustmatch like "# melanoma"
+echo "$out" | mustmatch like "ID: MONDO:0005105"
+```
+
 ## Full Disease Definitions
 
 Disease detail output should preserve the full curated definition text so characterization clauses remain available without falling back to phenotype dumps.

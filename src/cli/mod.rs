@@ -3225,7 +3225,7 @@ fn build_article_debug_plan(
             matched_sources: summary.matched_sources,
             count: results.len(),
             total: pagination.total,
-            note: None,
+            note: crate::entities::article::article_type_limitation_note(filters, source_filter),
             error: None,
         }],
     })
@@ -3235,6 +3235,7 @@ fn article_search_json(
     query: &str,
     sort: crate::entities::article::ArticleSort,
     semantic_scholar_enabled: bool,
+    note: Option<String>,
     debug_plan: Option<DebugPlan>,
     results: Vec<crate::entities::article::ArticleSearchResult>,
     pagination: PaginationMeta,
@@ -3246,6 +3247,8 @@ fn article_search_json(
         semantic_scholar_enabled: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         ranking_policy: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
         pagination: PaginationMeta,
         count: usize,
         results: Vec<crate::entities::article::ArticleSearchResult>,
@@ -3261,6 +3264,7 @@ fn article_search_json(
         ranking_policy: (sort == crate::entities::article::ArticleSort::Relevance).then_some(
             "directness-first (title coverage > title+abstract coverage > study/review cue > citation support)",
         ),
+        note,
         pagination,
         count,
         results,
@@ -4005,6 +4009,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 crate::entities::article::ArticleSourceFilter::All,
                             ),
                             None,
+                            None,
                         )?)
                     }
                 }
@@ -4225,6 +4230,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 &filters,
                                 crate::entities::article::ArticleSourceFilter::All,
                             ),
+                            None,
                             None,
                         )?)
                     }
@@ -4468,6 +4474,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 crate::entities::article::ArticleSourceFilter::All,
                             ),
                             None,
+                            None,
                         )?)
                     }
                 }
@@ -4568,6 +4575,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                                 &filters,
                                 crate::entities::article::ArticleSourceFilter::All,
                             ),
+                            None,
                             None,
                         )?)
                     }
@@ -5729,6 +5737,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             &query,
                             filters.sort,
                             semantic_scholar_enabled,
+                            crate::entities::article::article_type_limitation_note(
+                                &filters,
+                                source_filter,
+                            ),
                             debug_plan,
                             results,
                             pagination,
@@ -5741,6 +5753,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                             &footer,
                             filters.sort,
                             semantic_scholar_enabled,
+                            crate::entities::article::article_type_limitation_note(
+                                &filters,
+                                source_filter,
+                            )
+                            .as_deref(),
                             debug_plan.as_ref(),
                         )?)
                     }
@@ -6827,11 +6844,11 @@ mod tests {
         ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, DrugRegionArg,
         EmaCommand, GeneCommand, GetEntity, McpChartPass, OutputStream, PaginationMeta,
         ProteinCommand, StudyCommand, VariantCommand, VariantSearchPlan, article_search_json,
-        execute, execute_mcp, extract_json_from_sections, paginate_trial_locations,
-        parse_simple_gene_change, parse_trial_location_paging, resolve_drug_search_region,
-        resolve_query_input, resolve_variant_query, rewrite_mcp_chart_args, run_outcome,
-        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
-        truncate_article_annotations,
+        build_article_debug_plan, execute, execute_mcp, extract_json_from_sections,
+        paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
+        resolve_drug_search_region, resolve_query_input, resolve_variant_query,
+        rewrite_mcp_chart_args, run_outcome, should_try_pathway_trial_fallback,
+        trial_locations_json, trial_search_query_summary, truncate_article_annotations,
     };
     use crate::entities::drug::{DrugRegion, DrugSearchFilters};
     use clap::{CommandFactory, FromArgMatches, Parser};
@@ -7618,6 +7635,9 @@ mod tests {
             "gene=BRAF, sort=relevance",
             crate::entities::article::ArticleSort::Relevance,
             true,
+            Some(
+                "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.".into(),
+            ),
             None,
             vec![crate::entities::article::ArticleSearchResult {
                 pmid: "22663011".into(),
@@ -7660,11 +7680,53 @@ mod tests {
         assert_eq!(value["query"], "gene=BRAF, sort=relevance");
         assert_eq!(value["sort"], "relevance");
         assert_eq!(value["semantic_scholar_enabled"], true);
+        assert_eq!(
+            value["note"],
+            "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
+        );
         assert!(value["ranking_policy"].as_str().is_some());
         assert_eq!(value["results"][0]["ranking"]["directness_tier"], 3);
         assert_eq!(
             value["results"][0]["matched_sources"][1],
             serde_json::Value::String("semanticscholar".into())
+        );
+    }
+
+    #[test]
+    fn build_article_debug_plan_includes_article_type_limitation_note() {
+        let filters = crate::entities::article::ArticleSearchFilters {
+            gene: Some("BRAF".into()),
+            gene_anchored: false,
+            disease: None,
+            drug: None,
+            author: None,
+            keyword: None,
+            date_from: None,
+            date_to: None,
+            article_type: Some("review".into()),
+            journal: None,
+            open_access: false,
+            no_preprints: false,
+            exclude_retracted: false,
+            sort: crate::entities::article::ArticleSort::Relevance,
+        };
+        let pagination = PaginationMeta::offset(0, 3, 0, Some(0));
+
+        let plan = build_article_debug_plan(
+            "gene=BRAF, type=review",
+            &filters,
+            crate::entities::article::ArticleSourceFilter::All,
+            &[],
+            &pagination,
+        )
+        .expect("debug plan should build");
+
+        assert_eq!(plan.legs.len(), 1);
+        assert!(
+            plan.legs[0]
+                .note
+                .as_deref()
+                .is_some_and(|value: &str| value.contains("Europe PMC"))
         );
     }
 
