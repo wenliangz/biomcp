@@ -738,6 +738,8 @@ pub fn from_mydisease_search_hit(hit: &MyDiseaseHit) -> DiseaseSearchResult {
         id: hit.id.clone(),
         name,
         synonyms_preview,
+        resolved_via: None,
+        source_id: None,
     }
 }
 

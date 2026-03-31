@@ -628,6 +628,9 @@ See also: biomcp list disease")]
         /// Filter by clinical onset period
         #[arg(long)]
         onset: Option<String>,
+        /// Disable automatic discover fallback when zero direct disease rows are found
+        #[arg(long)]
+        no_fallback: bool,
         /// Maximum results (default: 10)
         #[arg(short, long, default_value = "10")]
         limit: usize,
@@ -2784,9 +2787,9 @@ async fn try_alias_fallback_outcome(
     requested_entity: crate::entities::discover::DiscoverType,
     json_output: bool,
 ) -> anyhow::Result<Option<CommandOutcome>> {
-    match crate::cli::discover::resolve_query(
+    match crate::entities::discover::resolve_query(
         query,
-        crate::cli::discover::DiscoverMode::AliasFallback,
+        crate::entities::discover::DiscoverMode::AliasFallback,
     )
     .await
     {
@@ -3120,6 +3123,20 @@ struct SearchJsonResponse<T: serde::Serialize> {
     results: Vec<T>,
 }
 
+#[derive(serde::Serialize)]
+struct DiseaseSearchMeta {
+    fallback_used: bool,
+}
+
+#[derive(serde::Serialize)]
+struct DiseaseSearchJsonResponse<T: serde::Serialize> {
+    pagination: PaginationMeta,
+    count: usize,
+    results: Vec<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    _meta: Option<DiseaseSearchMeta>,
+}
+
 fn search_json<T: serde::Serialize>(
     results: Vec<T>,
     pagination: PaginationMeta,
@@ -3129,6 +3146,21 @@ fn search_json<T: serde::Serialize>(
         pagination,
         count,
         results,
+    })
+    .map_err(Into::into)
+}
+
+fn disease_search_json(
+    results: Vec<crate::entities::disease::DiseaseSearchResult>,
+    pagination: PaginationMeta,
+    fallback_used: bool,
+) -> anyhow::Result<String> {
+    let count = results.len();
+    crate::render::json::to_pretty(&DiseaseSearchJsonResponse {
+        pagination,
+        count,
+        results,
+        _meta: fallback_used.then_some(DiseaseSearchMeta { fallback_used }),
     })
     .map_err(Into::into)
 }
@@ -5502,6 +5534,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     inheritance,
                     phenotype,
                     onset,
+                    no_fallback,
                     limit,
                     offset,
                 } => {
@@ -5517,17 +5550,28 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     if offset > 0 {
                         query_summary = format!("{query_summary}, offset={offset}");
                     }
-                    let page = crate::entities::disease::search_page(&filters, limit, offset).await?;
+                    let mut page =
+                        crate::entities::disease::search_page(&filters, limit, offset).await?;
+                    let mut fallback_used = false;
+                    if page.results.is_empty() && !no_fallback
+                        && let Some(fallback_page) =
+                            crate::entities::disease::fallback_search_page(&filters, limit, offset)
+                                .await?
+                    {
+                        page = fallback_page;
+                        fallback_used = true;
+                    }
                     let results = page.results;
-                    let pagination =
-                        PaginationMeta::offset(offset, limit, results.len(), page.total);
+                    let pagination = PaginationMeta::offset(offset, limit, results.len(), page.total);
                     if cli.json {
-                        search_json(results, pagination)
+                        disease_search_json(results, pagination, fallback_used)
                     } else {
                         let footer = pagination_footer_offset(&pagination);
                         Ok(crate::render::markdown::disease_search_markdown_with_footer(
+                            filters.query.as_deref().map(str::trim).unwrap_or_default(),
                             &query_summary,
                             &results,
+                            fallback_used,
                             &footer,
                         )?)
                     }
@@ -6844,11 +6888,12 @@ mod tests {
         ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, DrugRegionArg,
         EmaCommand, GeneCommand, GetEntity, McpChartPass, OutputStream, PaginationMeta,
         ProteinCommand, StudyCommand, VariantCommand, VariantSearchPlan, article_search_json,
-        build_article_debug_plan, execute, execute_mcp, extract_json_from_sections,
-        paginate_trial_locations, parse_simple_gene_change, parse_trial_location_paging,
-        resolve_drug_search_region, resolve_query_input, resolve_variant_query,
-        rewrite_mcp_chart_args, run_outcome, should_try_pathway_trial_fallback,
-        trial_locations_json, trial_search_query_summary, truncate_article_annotations,
+        build_article_debug_plan, disease_search_json, execute, execute_mcp,
+        extract_json_from_sections, paginate_trial_locations, parse_simple_gene_change,
+        parse_trial_location_paging, resolve_drug_search_region, resolve_query_input,
+        resolve_variant_query, rewrite_mcp_chart_args, run_outcome,
+        should_try_pathway_trial_fallback, trial_locations_json, trial_search_query_summary,
+        truncate_article_annotations,
     };
     use crate::entities::drug::{DrugRegion, DrugSearchFilters};
     use clap::{CommandFactory, FromArgMatches, Parser};
@@ -7690,6 +7735,52 @@ mod tests {
             value["results"][0]["matched_sources"][1],
             serde_json::Value::String("semanticscholar".into())
         );
+    }
+
+    #[test]
+    fn disease_search_json_includes_fallback_meta_and_provenance() {
+        let pagination = PaginationMeta::offset(0, 10, 1, Some(1));
+        let json = disease_search_json(
+            vec![crate::entities::disease::DiseaseSearchResult {
+                id: "MONDO:0000115".into(),
+                name: "Arnold-Chiari malformation".into(),
+                synonyms_preview: Some("Chiari malformation".into()),
+                resolved_via: Some("MESH crosswalk".into()),
+                source_id: Some("MESH:D001139".into()),
+            }],
+            pagination,
+            true,
+        )
+        .expect("disease search json should render");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("json should parse successfully");
+        assert_eq!(value["results"][0]["resolved_via"], "MESH crosswalk");
+        assert_eq!(value["results"][0]["source_id"], "MESH:D001139");
+        assert_eq!(value["_meta"]["fallback_used"], true);
+    }
+
+    #[test]
+    fn disease_search_json_omits_meta_for_direct_hits() {
+        let pagination = PaginationMeta::offset(0, 10, 1, Some(1));
+        let json = disease_search_json(
+            vec![crate::entities::disease::DiseaseSearchResult {
+                id: "MONDO:0005105".into(),
+                name: "melanoma".into(),
+                synonyms_preview: Some("malignant melanoma".into()),
+                resolved_via: None,
+                source_id: None,
+            }],
+            pagination,
+            false,
+        )
+        .expect("disease search json should render");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("json should parse successfully");
+        assert!(value.get("_meta").is_none());
+        assert!(value["results"][0].get("resolved_via").is_none());
+        assert!(value["results"][0].get("source_id").is_none());
     }
 
     #[test]
@@ -9580,6 +9671,37 @@ mod tests {
     }
 
     #[test]
+    fn search_disease_parses_no_fallback_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "search",
+            "disease",
+            "Arnold Chiari syndrome",
+            "--no-fallback",
+            "--limit",
+            "2",
+        ])
+        .expect("search disease should parse --no-fallback");
+
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Disease {
+                        positional_query,
+                        no_fallback,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(positional_query.as_deref(), Some("Arnold Chiari syndrome"));
+                assert!(no_fallback);
+                assert_eq!(limit, 2);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn search_trial_parses_positional_query_with_status_flag() {
         let cli = Cli::try_parse_from([
             "biomcp",
@@ -10378,9 +10500,12 @@ mod tests {
             .mount(&ols)
             .await;
 
-        crate::cli::discover::resolve_query("ERBB1", crate::cli::discover::DiscoverMode::Command)
-            .await
-            .expect("warm cache with a successful discover lookup");
+        crate::entities::discover::resolve_query(
+            "ERBB1",
+            crate::entities::discover::DiscoverMode::Command,
+        )
+        .await
+        .expect("warm cache with a successful discover lookup");
 
         let cli = Cli::try_parse_from(["biomcp", "get", "gene", "ERBB1"]).expect("parse");
         let err = run_outcome(cli)

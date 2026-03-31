@@ -2262,20 +2262,23 @@ pub fn disease_search_markdown(
     query: &str,
     results: &[DiseaseSearchResult],
 ) -> Result<String, BioMcpError> {
-    disease_search_markdown_with_footer(query, results, "")
+    disease_search_markdown_with_footer(query, query, results, false, "")
 }
 
 pub fn disease_search_markdown_with_footer(
-    query: &str,
+    raw_query: &str,
+    query_summary: &str,
     results: &[DiseaseSearchResult],
+    fallback_used: bool,
     pagination_footer: &str,
 ) -> Result<String, BioMcpError> {
     let tmpl = env()?.get_template("disease_search.md.j2")?;
-    let discover_hint = discover_try_line(query, "resolve abbreviations and synonyms");
+    let discover_hint = discover_try_line(raw_query, "resolve abbreviations and synonyms");
     let body = tmpl.render(context! {
-        query => query,
+        query => query_summary,
         count => results.len(),
         results => results,
+        fallback_used => fallback_used,
         discover_hint => discover_hint,
         pagination_footer => pagination_footer,
     })?;
@@ -7648,10 +7651,54 @@ pub(crate) mod tests {
 
     #[test]
     fn disease_search_empty_state_includes_discover_hint() {
-        let markdown = disease_search_markdown_with_footer("definitelynotarealdisease", &[], "")
-            .expect("markdown");
+        let markdown = disease_search_markdown_with_footer(
+            "definitelynotarealdisease",
+            "definitelynotarealdisease",
+            &[],
+            false,
+            "",
+        )
+        .expect("markdown");
 
         assert!(markdown.contains("Try: biomcp discover definitelynotarealdisease"));
+    }
+
+    #[test]
+    fn disease_search_empty_state_uses_raw_query_in_discover_hint() {
+        let markdown = disease_search_markdown_with_footer(
+            "Arnold Chiari syndrome",
+            "Arnold Chiari syndrome, offset=5",
+            &[],
+            false,
+            "",
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("Try: biomcp discover \"Arnold Chiari syndrome\""));
+        assert!(!markdown.contains("offset=5\""));
+    }
+
+    #[test]
+    fn disease_search_fallback_renders_provenance_columns() {
+        let markdown = disease_search_markdown_with_footer(
+            "Arnold Chiari syndrome",
+            "Arnold Chiari syndrome",
+            &[DiseaseSearchResult {
+                id: "MONDO:0000115".into(),
+                name: "Arnold-Chiari malformation".into(),
+                synonyms_preview: Some("Chiari malformation".into()),
+                resolved_via: Some("MESH crosswalk".into()),
+                source_id: Some("MESH:D001139".into()),
+            }],
+            true,
+            "",
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("Resolved via discover + crosswalk"));
+        assert!(markdown.contains("| ID | Name | Resolved via | Source ID |"));
+        assert!(markdown.contains("MESH crosswalk"));
+        assert!(markdown.contains("MESH:D001139"));
     }
 
     #[test]

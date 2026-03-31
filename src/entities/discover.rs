@@ -1,13 +1,19 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use regex::Regex;
 use serde::Serialize;
 
+use crate::error::BioMcpError;
 use crate::sources::medlineplus::MedlinePlusTopic;
 use crate::sources::ols4::OlsDoc;
 use crate::sources::umls::{UmlsConcept, UmlsXref};
+
+const OLS4_TIMEOUT: Duration = Duration::from_millis(4000);
+const UMLS_TIMEOUT: Duration = Duration::from_millis(2500);
+const MEDLINEPLUS_TIMEOUT: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct DiscoverResult {
@@ -98,6 +104,12 @@ pub(crate) enum DiscoverConfidence {
     LabelOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiscoverMode {
+    Command,
+    AliasFallback,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct AliasCanonicalMatch {
     pub requested_entity: DiscoverType,
@@ -181,6 +193,115 @@ impl DiscoverConfidence {
             Self::LabelOnly => 2,
         }
     }
+}
+
+pub(crate) async fn resolve_query(
+    query: &str,
+    mode: DiscoverMode,
+) -> Result<DiscoverResult, BioMcpError> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(BioMcpError::InvalidArgument(
+            "Free-text query is required. Example: biomcp discover BRCA1".into(),
+        ));
+    }
+
+    let ols_client = crate::sources::ols4::OlsClient::new()?;
+    let umls_client = crate::sources::umls::UmlsClient::new()?;
+    let medline_client = match mode {
+        DiscoverMode::Command => Some(crate::sources::medlineplus::MedlinePlusClient::new()?),
+        DiscoverMode::AliasFallback => None,
+    };
+
+    let query_owned = query.to_string();
+    let ols_future = async {
+        match tokio::time::timeout(OLS4_TIMEOUT, ols_client.search(&query_owned)).await {
+            Ok(result) => result,
+            Err(_) => Err(BioMcpError::Api {
+                api: "ols4".to_string(),
+                message: format!(
+                    "Timed out after {}ms while resolving discover query",
+                    OLS4_TIMEOUT.as_millis()
+                ),
+            }),
+        }
+    };
+
+    let query_owned = query.to_string();
+    let umls_future = async move {
+        let Some(client) = umls_client else {
+            let note = match mode {
+                DiscoverMode::Command => {
+                    Some("UMLS enrichment unavailable (set UMLS_API_KEY)".to_string())
+                }
+                DiscoverMode::AliasFallback => None,
+            };
+            return (Vec::new(), note);
+        };
+
+        match tokio::time::timeout(UMLS_TIMEOUT, client.search(&query_owned)).await {
+            Ok(Ok(rows)) => (rows, None),
+            Ok(Err(err)) => (
+                Vec::new(),
+                match mode {
+                    DiscoverMode::Command => Some(format!("UMLS enrichment unavailable ({err})")),
+                    DiscoverMode::AliasFallback => None,
+                },
+            ),
+            Err(_) => (
+                Vec::new(),
+                match mode {
+                    DiscoverMode::Command => {
+                        Some("UMLS enrichment unavailable (timed out)".to_string())
+                    }
+                    DiscoverMode::AliasFallback => None,
+                },
+            ),
+        }
+    };
+
+    let query_owned = query.to_string();
+    let medline_future = async move {
+        let Some(client) = medline_client else {
+            return Vec::new();
+        };
+        match tokio::time::timeout(MEDLINEPLUS_TIMEOUT, client.search(&query_owned)).await {
+            Ok(Ok(rows)) => rows,
+            Ok(Err(_)) | Err(_) => Vec::new(),
+        }
+    };
+
+    let (ols_docs, (umls_rows, umls_note), medline_topics) = match mode {
+        DiscoverMode::Command => tokio::join!(ols_future, umls_future, medline_future),
+        DiscoverMode::AliasFallback => {
+            crate::sources::with_no_cache(true, async {
+                tokio::join!(ols_future, umls_future, medline_future)
+            })
+            .await
+        }
+    };
+
+    let ols_docs = ols_docs.map_err(|err| match err {
+        BioMcpError::Api { api, message } if api == "ols4" => BioMcpError::Api {
+            api,
+            message: format!("discover requires OLS4: {message}"),
+        },
+        other => other,
+    })?;
+    let mut notes = Vec::new();
+    if let Some(note) = umls_note
+        && !note.trim().is_empty()
+    {
+        notes.push(note);
+    }
+
+    Ok(build_result(
+        query,
+        &ols_docs,
+        &umls_rows,
+        &medline_topics,
+        notes,
+    ))
 }
 
 pub(crate) fn classify_alias_fallback(

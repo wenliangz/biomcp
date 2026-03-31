@@ -22,6 +22,96 @@ echo "$out" | mustmatch like "| ID | Name | Synonyms |"
 echo "$out" | mustmatch like "MONDO:0005105"
 ```
 
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json search disease melanoma --limit 1)"
+echo "$out" | jq -e '.count == 1' > /dev/null
+echo "$out" | jq -e '.results[0].id == "MONDO:0005105"' > /dev/null
+echo "$out" | jq -e '._meta == null or (._meta | has("fallback_used") | not)' > /dev/null
+echo "$out" | jq -e '.results[0] | has("resolved_via") | not' > /dev/null
+echo "$out" | jq -e '.results[0] | has("source_id") | not' > /dev/null
+```
+
+## Disease Search Discover Fallback
+
+When direct MyDisease search returns zero rows for a disease that is only
+recoverable through discover plus xref crosswalk, search should return the
+canonical disease row with provenance instead of stopping at "No diseases found".
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search disease "Arnold Chiari syndrome")"
+echo "$out" | mustmatch like "# Diseases: Arnold Chiari syndrome"
+echo "$out" | mustmatch like "Resolved via discover + crosswalk"
+echo "$out" | mustmatch like "| ID | Name | Resolved via | Source ID |"
+echo "$out" | mustmatch like "MONDO:0000115"
+echo "$out" | mustmatch like "Arnold Chiari Malformation"
+echo "$out" | mustmatch like "MESH crosswalk"
+echo "$out" | mustmatch like "MESH:D001139"
+```
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" --json search disease "Arnold Chiari syndrome")"
+echo "$out" | jq -e '.count >= 1' > /dev/null
+echo "$out" | jq -e '.results[0].id == "MONDO:0000115"' > /dev/null
+echo "$out" | jq -e '.results[0].resolved_via == "MESH crosswalk"' > /dev/null
+echo "$out" | jq -e '.results[0].source_id == "MESH:D001139"' > /dev/null
+echo "$out" | jq -e '._meta.fallback_used == true' > /dev/null
+```
+
+## Disease Search Discover Fallback Synonym
+
+Alternate user wording should still recover the same disease through the
+discover fallback path.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search disease "Chiari malformation")"
+echo "$out" | mustmatch like "Resolved via discover + crosswalk"
+echo "$out" | mustmatch like "MONDO:0000115"
+echo "$out" | mustmatch like "Chiari malformation"
+```
+
+## Disease Search Discover Fallback for T-PLL
+
+The fallback should also recover sparse hematologic disease labels that are
+missing from the direct MONDO/DOID-backed text index.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search disease "T-cell prolymphocytic leukemia")"
+echo "$out" | mustmatch like "Resolved via discover + crosswalk"
+echo "$out" | mustmatch like "MONDO:0019468"
+echo "$out" | mustmatch like "T-cell prolymphocytic leukemia"
+```
+
+## Disease Search Fallback Miss
+
+If discover also fails to produce a crosswalkable disease concept, the command
+should keep the existing empty-state message and discover hint.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search disease "nonexistent disease xyz")"
+echo "$out" | mustmatch like "No diseases found matching 'nonexistent disease xyz'."
+echo "$out" | mustmatch like 'Try: biomcp discover "nonexistent disease xyz"'
+echo "$out" | mustmatch not like "Resolved via discover + crosswalk"
+```
+
+## Disease Search No Fallback
+
+Operators should be able to disable the discover recovery path for
+performance-sensitive or scripting usage.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search disease "Arnold Chiari syndrome" --no-fallback)"
+echo "$out" | mustmatch like "No diseases found matching 'Arnold Chiari syndrome'."
+echo "$out" | mustmatch like 'Try: biomcp discover "Arnold Chiari syndrome"'
+echo "$out" | mustmatch not like "Resolved via discover + crosswalk"
+```
+
 ## Getting Disease Details
 
 The disease detail card should resolve the query label to a normalized concept. This check targets heading and canonical ID line.
