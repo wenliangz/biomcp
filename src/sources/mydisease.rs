@@ -370,6 +370,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lookup_disease_by_xref_queries_exact_omim_fields() {
+        let server = MockServer::start().await;
+        let client = MyDiseaseClient::new_for_test(format!("{}/v1", server.uri())).unwrap();
+
+        let body = r#"{
+          "total": 1,
+          "hits": [{"_id": "MONDO:0007947", "disease_ontology": {"name": "Marfan syndrome"}}]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param(
+                "q",
+                "(mondo.xrefs.omim:\"154700\" OR disease_ontology.xrefs.omim:\"154700\")",
+            ))
+            .and(query_param("size", "5"))
+            .and(query_param("from", "0"))
+            .and(query_param("fields", MYDISEASE_SEARCH_FIELDS))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resp = client
+            .lookup_disease_by_xref("omim", "154700", 5)
+            .await
+            .unwrap();
+        assert_eq!(resp.hits.len(), 1);
+        assert_eq!(resp.hits[0].id, "MONDO:0007947");
+    }
+
+    #[tokio::test]
+    async fn lookup_disease_by_xref_queries_exact_icd10cm_fields_with_prefixed_fallback() {
+        let server = MockServer::start().await;
+        let client = MyDiseaseClient::new_for_test(format!("{}/v1", server.uri())).unwrap();
+
+        let body = r#"{
+          "total": 1,
+          "hits": [{"_id": "MONDO:0012345", "disease_ontology": {"name": "Chiari malformation"}}]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param(
+                "q",
+                "(mondo.xrefs.icd10:\"Q07.0\" OR mondo.xrefs.icd10:\"ICD10:Q07.0\" OR disease_ontology.xrefs.icd10:\"Q07.0\" OR disease_ontology.xrefs.icd10:\"ICD10:Q07.0\" OR umls.icd10am:\"Q07.0\" OR umls.icd10am:\"ICD10:Q07.0\")",
+            ))
+            .and(query_param("size", "5"))
+            .and(query_param("from", "0"))
+            .and(query_param("fields", MYDISEASE_SEARCH_FIELDS))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resp = client
+            .lookup_disease_by_xref("icd10cm", "Q07.0", 5)
+            .await
+            .unwrap();
+        assert_eq!(resp.hits.len(), 1);
+        assert_eq!(resp.hits[0].id, "MONDO:0012345");
+    }
+
+    #[tokio::test]
     async fn get_sets_fields_and_path() {
         let server = MockServer::start().await;
         let client = MyDiseaseClient::new_for_test(format!("{}/v1", server.uri())).unwrap();
