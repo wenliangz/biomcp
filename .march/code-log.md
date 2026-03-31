@@ -1,61 +1,63 @@
-# Code Log — Ticket 089
+# Code Log — Ticket 090
 
 ## Commands Run
 
 ```text
 checkpoint status
-git status --short
 GIT_EDITOR=true git rebase main
 git diff --stat main..HEAD | tail -1
 sed -n '1,220p' .march/ticket.md
 sed -n '1,260p' .march/design-draft.md
-sed -n '1,260p' .march/design-final.md
+sed -n '1,320p' .march/design-final.md
 sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/rust-standards/SKILL.md
 sed -n '1,220p' /home/ian/workspace/planning/flows/build/skills/testing-mindset/SKILL.md
-uv run --extra dev pytest -q tests/test_public_skill_docs_contract.py
-cargo test -q query_sets_fields_and_size -- --nocapture
-cargo test -q normalize_disease_id_basic -- --nocapture
-cargo test -q planner_rejects_pubtator_with_unsupported_strict_filters -- --nocapture
-cargo fmt
-cargo test -q lookup_disease_by_xref_queries_exact_mesh_fields -- --nocapture
-cargo test -q parse_disease_lookup_input_distinguishes_canonical_crosswalk_and_text -- --nocapture
-cargo test -q preferred_crosswalk_hit_prefers_mondo_then_doid_then_lexicographic_id -- --nocapture
-cargo test -q article_type_limitation_note_is_emitted_for_all_and_europepmc -- --nocapture
-cargo test -q article_search_json_includes_query_and_ranking_context -- --nocapture
-cargo test -q article_search_markdown_preserves_rank_order_and_shows_rationale -- --nocapture
-cargo test -q build_article_debug_plan_includes_article_type_limitation_note -- --nocapture
+rg -n "add_genes_section|augment_genes_with_civic|attach_opentargets_scores|resolve_disease_id|Associated Genes" src spec docs
+cargo test -q augment_genes_with_opentargets_merges_sources_without_duplicates -- --nocapture
+cargo test -q augment_genes_with_opentargets_respects_twenty_gene_cap -- --nocapture
+cargo test -q enrich_sparse_disease_identity_prefers_exact_ols4_match -- --nocapture
+cargo test -q disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first -- --nocapture
+cargo test -q disease_markdown_renders_ot_only_gene_association_table -- --nocapture
+cargo test -q get_disease_genes_promotes_opentargets_rows_for_cll -- --nocapture
+cargo test -q get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity -- --nocapture
+cargo fmt --all
 cargo build --locked
-XDG_CACHE_HOME="$PWD/.cache" uv run --extra dev sh -c 'PATH="$PWD/target/debug:$PATH" pytest spec/06-article.md -k "Type and Filter and Warns and Restriction" --mustmatch-lang bash --mustmatch-timeout 60 -v'
-XDG_CACHE_HOME="$PWD/.cache" uv run --extra dev sh -c 'PATH="$PWD/target/debug:$PATH" pytest spec/07-disease.md -k "Disease and Crosswalk and Identifier and Resolution" --mustmatch-lang bash --mustmatch-timeout 60 -v'
-XDG_CACHE_HOME="$PWD/.cache" uv run --extra dev sh -c 'PATH="$PWD/target/debug:$PATH" pytest spec/06-article.md -k "Article and Debug and Plan" --mustmatch-lang bash --mustmatch-timeout 60 -v'
-make check < /dev/null > .march/make-check.log 2>&1
-git diff --stat
-rm -f .march/make-check.log
+./target/debug/biomcp get disease MONDO:0003864 genes
+./target/debug/biomcp get disease MONDO:0019468 genes
+./target/debug/biomcp get disease MONDO:0005180 genes
+./target/debug/biomcp get disease MONDO:0007309 genes
+rm -rf .cache .pytest_cache
+XDG_CACHE_HOME="$PWD/.cache" BIOMCP_BIN="$PWD/target/debug/biomcp" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -v
+bash tools/check-quality-ratchet.sh
+make check < /dev/null 2>&1
+git status --short
+git add src/entities/disease.rs src/sources/opentargets.rs src/render/markdown.rs src/cli/list.rs docs/user-guide/disease.md docs/sources/opentargets.md docs/reference/data-sources.md spec/07-disease.md .march/code-log.md
+git diff --cached --stat
+git diff --cached
+git commit -m "Fix disease gene enrichment for cancer MONDO IDs"
+git commit -m "Document repaired disease gene contract"
 ```
 
 ## What Changed
 
-- Taught the embedded BioMCP skill and article docs to prefer `article batch`, use `batch gene`, resolve weak disease names through `discover`, and treat `--type` as Europe-PMC-only when recall matters.
-- Added MyDisease xref lookup support for `MESH:`, `OMIM:`, and `ICD10CM:` disease inputs, with deterministic MONDO/DOID preference before the existing disease-card flow runs.
-- Expanded MyDisease free-text disease search to include synonym fields.
-- Added an article-search limitation note for `--type` and threaded it through markdown, JSON, and debug-plan output while keeping strict Europe PMC routing unchanged.
-- Refreshed article and disease specs plus the public skill/doc contract test to cover the new behavior.
+- Repaired sparse canonical disease lookups by backfilling MONDO disease labels and synonyms from OLS4 before disease-section enrichment runs.
+- Expanded disease-gene enrichment so OpenTargets results augment, rather than replace, Monarch and CIViC gene rows, with source merging and a 20-row cap that matches the approved design.
+- Tightened OpenTargets disease resolution to prefer disease-class `EFO_...` hits when a MONDO search alias would otherwise select a poorer match for cancer terms.
+- Added proof coverage for canonical CLL and T-PLL disease-gene output, OT-only markdown rendering, source merging, row caps, and OLS4 sparse-label fallback.
+- Updated operator-facing docs and disease specs to describe the repaired canonical disease-gene contract and the expected OpenTargets provenance.
 
 ## Tests / Proof
 
-- `uv run --extra dev pytest -q tests/test_public_skill_docs_contract.py`
-- `cargo test -q lookup_disease_by_xref_queries_exact_mesh_fields -- --nocapture`
-- `cargo test -q parse_disease_lookup_input_distinguishes_canonical_crosswalk_and_text -- --nocapture`
-- `cargo test -q preferred_crosswalk_hit_prefers_mondo_then_doid_then_lexicographic_id -- --nocapture`
-- `cargo test -q article_type_limitation_note_is_emitted_for_all_and_europepmc -- --nocapture`
-- `cargo test -q article_search_json_includes_query_and_ranking_context -- --nocapture`
-- `cargo test -q article_search_markdown_preserves_rank_order_and_shows_rationale -- --nocapture`
-- `cargo test -q build_article_debug_plan_includes_article_type_limitation_note -- --nocapture`
-- `XDG_CACHE_HOME="$PWD/.cache" uv run --extra dev sh -c 'PATH="$PWD/target/debug:$PATH" pytest spec/06-article.md -k "Type and Filter and Warns and Restriction" --mustmatch-lang bash --mustmatch-timeout 60 -v'`
-- `XDG_CACHE_HOME="$PWD/.cache" uv run --extra dev sh -c 'PATH="$PWD/target/debug:$PATH" pytest spec/07-disease.md -k "Disease and Crosswalk and Identifier and Resolution" --mustmatch-lang bash --mustmatch-timeout 60 -v'`
-- `XDG_CACHE_HOME="$PWD/.cache" uv run --extra dev sh -c 'PATH="$PWD/target/debug:$PATH" pytest spec/06-article.md -k "Article and Debug and Plan" --mustmatch-lang bash --mustmatch-timeout 60 -v'`
-- `make check < /dev/null > .march/make-check.log 2>&1`
+- `cargo test -q augment_genes_with_opentargets_merges_sources_without_duplicates -- --nocapture`
+- `cargo test -q augment_genes_with_opentargets_respects_twenty_gene_cap -- --nocapture`
+- `cargo test -q enrich_sparse_disease_identity_prefers_exact_ols4_match -- --nocapture`
+- `cargo test -q disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first -- --nocapture`
+- `cargo test -q disease_markdown_renders_ot_only_gene_association_table -- --nocapture`
+- `cargo test -q get_disease_genes_promotes_opentargets_rows_for_cll -- --nocapture`
+- `cargo test -q get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity -- --nocapture`
+- `XDG_CACHE_HOME="$PWD/.cache" BIOMCP_BIN="$PWD/target/debug/biomcp" uv run --extra dev pytest spec/07-disease.md --mustmatch-lang bash --mustmatch-timeout 60 -v`
+- `bash tools/check-quality-ratchet.sh`
+- `make check < /dev/null 2>&1`
 
 ## Deviations
 
-- The out-of-repo eval-project follow-up from the design is not implemented here: `users-guide-skill.md` still needs the mirrored skill wording in that separate repo.
+- The disease spec examples use longer row-level `mustmatch like` patterns instead of bare gene symbols so they satisfy the repo's quality-ratchet rules while proving the same user-visible contract.

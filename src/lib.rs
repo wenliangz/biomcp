@@ -15,3 +15,44 @@ mod sources;
 pub(crate) mod test_support;
 mod transform;
 mod utils;
+
+#[cfg(test)]
+#[tokio::test]
+async fn augment_genes_with_opentargets_merges_sources_without_duplicates() {
+    crate::entities::disease::tests::proof_augment_genes_with_opentargets_merges_sources_without_duplicates().await;
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn augment_genes_with_opentargets_respects_twenty_gene_cap() {
+    crate::entities::disease::tests::proof_augment_genes_with_opentargets_respects_twenty_gene_cap(
+    )
+    .await;
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn enrich_sparse_disease_identity_prefers_exact_ols4_match() {
+    crate::entities::disease::tests::proof_enrich_sparse_disease_identity_prefers_exact_ols4_match(
+    )
+    .await;
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn get_disease_genes_promotes_opentargets_rows_for_cll() {
+    crate::entities::disease::tests::proof_get_disease_genes_promotes_opentargets_rows_for_cll()
+        .await;
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity() {
+    crate::entities::disease::tests::proof_get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity().await;
+}
+
+#[cfg(test)]
+#[test]
+fn disease_markdown_renders_ot_only_gene_association_table() {
+    crate::render::markdown::tests::proof_disease_markdown_renders_ot_only_gene_association_table();
+}

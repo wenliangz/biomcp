@@ -4236,7 +4236,7 @@ pub fn render_discover(result: &DiscoverResult) -> Result<String, BioMcpError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::entities::adverse_event::DeviceEvent;
     use crate::entities::article::{
@@ -5038,8 +5038,7 @@ mod tests {
         assert!(genes.contains("| NRAS | associated | CIViC | - |"));
     }
 
-    #[test]
-    fn disease_markdown_renders_ot_only_gene_association_table() {
+    pub(crate) fn proof_disease_markdown_renders_ot_only_gene_association_table() {
         let disease = Disease {
             id: "MONDO:0003864".to_string(),
             name: "chronic lymphocytic leukemia".to_string(),
@@ -5117,6 +5116,11 @@ mod tests {
             "| TP53 | associated with disease | OpenTargets | overall 0.991; somatic 0.881 |"
         ));
         assert!(!genes.contains("TP53, ATM"));
+    }
+
+    #[test]
+    fn disease_markdown_renders_ot_only_gene_association_table() {
+        proof_disease_markdown_renders_ot_only_gene_association_table();
     }
 
     #[test]

@@ -2055,7 +2055,7 @@ pub async fn search_phenotype_page(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use wiremock::matchers::{body_string_contains, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -2522,8 +2522,7 @@ mod tests {
         assert_eq!(civic_gene_symbol_from_profile("V600E"), None);
     }
 
-    #[tokio::test]
-    async fn augment_genes_with_opentargets_merges_sources_without_duplicates() {
+    pub(crate) async fn proof_augment_genes_with_opentargets_merges_sources_without_duplicates() {
         let mut disease = test_disease("MONDO:0003864", "chronic lymphocytic leukemia");
         disease.associated_genes = vec!["TP53".into(), "BCL2".into()];
         disease.gene_associations = vec![
@@ -2592,7 +2591,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn augment_genes_with_opentargets_respects_twenty_gene_cap() {
+    async fn augment_genes_with_opentargets_merges_sources_without_duplicates() {
+        proof_augment_genes_with_opentargets_merges_sources_without_duplicates().await;
+    }
+
+    pub(crate) async fn proof_augment_genes_with_opentargets_respects_twenty_gene_cap() {
         let mut disease = test_disease("MONDO:0003864", "chronic lymphocytic leukemia");
         disease.associated_genes = (0..20).map(|index| format!("GENE{index}")).collect();
         disease.gene_associations = (0..20)
@@ -2628,7 +2631,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enrich_sparse_disease_identity_prefers_exact_ols4_match() {
+    async fn augment_genes_with_opentargets_respects_twenty_gene_cap() {
+        proof_augment_genes_with_opentargets_respects_twenty_gene_cap().await;
+    }
+
+    pub(crate) async fn proof_enrich_sparse_disease_identity_prefers_exact_ols4_match() {
         let _guard = lock_env().await;
         let ols4 = MockServer::start().await;
         let _ols4_env = set_env_var("BIOMCP_OLS4_BASE", Some(&ols4.uri()));
@@ -2677,7 +2684,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_disease_genes_promotes_opentargets_rows_for_cll() {
+    async fn enrich_sparse_disease_identity_prefers_exact_ols4_match() {
+        proof_enrich_sparse_disease_identity_prefers_exact_ols4_match().await;
+    }
+
+    pub(crate) async fn proof_get_disease_genes_promotes_opentargets_rows_for_cll() {
         let _guard = lock_env().await;
         let mydisease = MockServer::start().await;
         let opentargets = MockServer::start().await;
@@ -2756,6 +2767,36 @@ mod tests {
                                     "datatypeScores": [{"id": "somatic_mutation", "score": 0.69}],
                                     "datasourceScores": [],
                                     "target": {"approvedSymbol": "NOTCH1"}
+                                },
+                                {
+                                    "score": 0.89,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.66}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "XPO1"}
+                                },
+                                {
+                                    "score": 0.86,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.62}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "MYD88"}
+                                },
+                                {
+                                    "score": 0.85,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.61}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "SF3B1"}
+                                },
+                                {
+                                    "score": 0.82,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.58}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "FBXW7"}
+                                },
+                                {
+                                    "score": 0.81,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.57}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "BCL2"}
                                 }
                             ]
                         }
@@ -2814,19 +2855,33 @@ mod tests {
             .iter()
             .map(|row| row.gene.as_str())
             .collect::<Vec<_>>();
-        assert!(genes.contains(&"TP53"));
-        assert!(genes.contains(&"ATM"));
-        assert!(genes.contains(&"NOTCH1"));
-        assert!(genes.contains(&"BCL2"));
+        let cll_gold = [
+            "TP53", "ATM", "NOTCH1", "XPO1", "MYD88", "SF3B1", "FBXW7", "BCL2",
+        ];
+        let matched = cll_gold.iter().filter(|gene| genes.contains(gene)).count();
+        assert!(
+            matched >= 8,
+            "expected >=8 CLL gold genes, got {matched}: {genes:?}"
+        );
         assert!(disease.gene_associations.iter().any(|row| {
             row.gene == "TP53"
                 && row.source.as_deref() == Some("OpenTargets")
                 && row.opentargets_score.is_some()
         }));
+        assert!(disease.gene_associations.iter().any(|row| {
+            row.gene == "BCL2"
+                && row.source.as_deref() == Some("CIViC; OpenTargets")
+                && row.opentargets_score.is_some()
+        }));
     }
 
     #[tokio::test]
-    async fn get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity() {
+    async fn get_disease_genes_promotes_opentargets_rows_for_cll() {
+        proof_get_disease_genes_promotes_opentargets_rows_for_cll().await;
+    }
+
+    pub(crate) async fn proof_get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity()
+    {
         let _guard = lock_env().await;
         let mydisease = MockServer::start().await;
         let opentargets = MockServer::start().await;
@@ -2954,5 +3009,10 @@ mod tests {
         assert!(genes.contains(&"ATM"));
         assert!(genes.contains(&"JAK3"));
         assert!(genes.contains(&"STAT5B"));
+    }
+
+    #[tokio::test]
+    async fn get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity() {
+        proof_get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity().await;
     }
 }

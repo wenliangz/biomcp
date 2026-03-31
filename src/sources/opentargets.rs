@@ -1321,7 +1321,7 @@ fn summarize_safety_liabilities(rows: Vec<SafetyLiabilityRow>) -> Vec<OpenTarget
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1505,8 +1505,8 @@ mod tests {
         assert_eq!(genes[1].somatic_mutation_score, None);
     }
 
-    #[tokio::test]
-    async fn disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first() {
+    pub(crate) async fn proof_disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first()
+     {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
@@ -1566,6 +1566,11 @@ mod tests {
             .unwrap();
         assert_eq!(genes.len(), 1);
         assert_eq!(genes[0].symbol, "TP53");
+    }
+
+    #[tokio::test]
+    async fn disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first() {
+        proof_disease_associated_targets_prefers_efo_hit_when_search_returns_mondo_first().await;
     }
 
     #[tokio::test]

@@ -87,9 +87,9 @@ bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" get disease MONDO:0003864 genes)"
 echo "$out" | mustmatch like "## Associated Genes"
 echo "$out" | mustmatch like "| Gene | Relationship | Source | OpenTargets |"
-echo "$out" | mustmatch like "TP53"
-echo "$out" | mustmatch like "ATM"
-echo "$out" | mustmatch like "NOTCH1"
+echo "$out" | mustmatch like "| TP53 | associated with disease |"
+echo "$out" | mustmatch like "| ATM | associated with disease |"
+echo "$out" | mustmatch like "| NOTCH1 | associated with disease |"
 echo "$out" | mustmatch like "OpenTargets"
 echo "$out" | mustmatch '/overall [0-9.]+/'
 ```
@@ -103,9 +103,9 @@ bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" get disease MONDO:0019468 genes)"
 echo "$out" | mustmatch like "# T-cell prolymphocytic leukemia"
 echo "$out" | mustmatch like "## Associated Genes"
-echo "$out" | mustmatch like "ATM"
-echo "$out" | mustmatch like "JAK3"
-echo "$out" | mustmatch like "STAT5B"
+echo "$out" | mustmatch like "| ATM | associated with disease |"
+echo "$out" | mustmatch like "| JAK3 | associated with disease |"
+echo "$out" | mustmatch like "| STAT5B | associated with disease |"
 echo "$out" | mustmatch like "OpenTargets"
 ```
 
@@ -117,7 +117,7 @@ Germline-oriented diseases should still render a populated genes table with stab
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" get disease MONDO:0005180 genes)"
 echo "$out" | mustmatch like "## Associated Genes"
-echo "$out" | mustmatch like "SNCA"
+echo "$out" | mustmatch like "| SNCA | causes |"
 ```
 
 ## Canonical CMT1A Disease Genes
@@ -128,7 +128,7 @@ Narrow Mendelian diseases should keep their focused Monarch-style signal instead
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" get disease MONDO:0007309 genes)"
 echo "$out" | mustmatch like "## Associated Genes"
-echo "$out" | mustmatch like "PMP22"
+echo "$out" | mustmatch like "| PMP22 | causes |"
 ```
 
 ## Disease Top Variant Summary
