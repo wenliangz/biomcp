@@ -638,6 +638,123 @@ fn rank_disease_fallback_candidates(
     candidates
 }
 
+async fn resolve_fallback_row(
+    client: &MyDiseaseClient,
+    prefer_doid: bool,
+    source_id: &DiseaseFallbackId,
+) -> Result<Option<DiseaseSearchResult>, BioMcpError> {
+    let row = match source_id {
+        DiseaseFallbackId::CanonicalOntology(id) => {
+            let hit = client.get(id).await?;
+            let mut row = transform::disease::from_mydisease_search_hit(&hit);
+            if prefer_doid && let Some(doid) = transform::disease::doid_from_mydisease_hit(&hit) {
+                row.id = doid;
+            }
+            row.resolved_via = Some(if id.starts_with("DOID:") {
+                "DOID canonical".to_string()
+            } else {
+                "MONDO canonical".to_string()
+            });
+            row.source_id = Some(id.clone());
+            row
+        }
+        DiseaseFallbackId::Crosswalk(kind, source_value) => {
+            let response = client
+                .lookup_disease_by_xref(kind.source_key(), source_value, 5)
+                .await?;
+            let Some(best) = preferred_crosswalk_hit(response.hits) else {
+                return Ok(None);
+            };
+            let mut row = transform::disease::from_mydisease_search_hit(&best);
+            if prefer_doid && let Some(doid) = transform::disease::doid_from_mydisease_hit(&best) {
+                row.id = doid;
+            }
+            row.resolved_via = Some(kind.resolved_via_label());
+            row.source_id = Some(format!("{}:{source_value}", kind.display_name()));
+            row
+        }
+    };
+
+    Ok(Some(row))
+}
+
+async fn collect_fallback_search_page<F, Fut>(
+    query: &str,
+    limit: usize,
+    offset: usize,
+    candidates: Vec<RankedDiseaseFallbackCandidate>,
+    mut resolve_source_id: F,
+) -> Result<Option<SearchPage<DiseaseSearchResult>>, BioMcpError>
+where
+    F: FnMut(DiseaseFallbackId) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<DiseaseSearchResult>, BioMcpError>>,
+{
+    let needed = offset.saturating_add(limit);
+    let query_tokens = normalize_disease_text(query)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut lookups = 0usize;
+    let mut deduped = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    for candidate in candidates {
+        if deduped.len() >= needed || lookups >= FALLBACK_LOOKUP_CAP {
+            break;
+        }
+
+        for source_id in candidate.source_ids {
+            if deduped.len() >= needed || lookups >= FALLBACK_LOOKUP_CAP {
+                break;
+            }
+
+            lookups += 1;
+            let Some(mut row) = (match resolve_source_id(source_id.clone()).await {
+                Ok(row) => row,
+                Err(err) => {
+                    warn!("Disease search fallback row resolution failed: {err}");
+                    continue;
+                }
+            }) else {
+                continue;
+            };
+
+            let candidate_score = disease_candidate_score(query, &candidate.label);
+            let row_score = disease_candidate_score(query, &row.name);
+            if row.name == row.id || candidate_score > row_score {
+                row.name = candidate.label.clone();
+            }
+            let mut haystacks = vec![row.name.clone()];
+            haystacks.extend(candidate.synonyms.iter().cloned());
+            if !contains_all_query_tokens(&query_tokens, &haystacks) {
+                continue;
+            }
+            if !seen_ids.insert(row.id.clone()) {
+                break;
+            }
+
+            deduped.push(row);
+            break;
+        }
+    }
+
+    if deduped.len() <= offset {
+        return Ok(None);
+    }
+
+    let total = deduped.len();
+    let results = deduped
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
+    if results.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(SearchPage::offset(results, Some(total))))
+}
+
 pub(crate) async fn fallback_search_page(
     filters: &DiseaseSearchFilters,
     limit: usize,
@@ -692,120 +809,12 @@ pub(crate) async fn fallback_search_page(
         .as_deref()
         .map(str::trim)
         .is_some_and(|source| source.eq_ignore_ascii_case("doid"));
-    let needed = offset.saturating_add(limit);
-    let query_tokens = normalize_disease_text(query)
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
     let client = MyDiseaseClient::new()?;
-    let mut lookups = 0usize;
-    let mut deduped = Vec::new();
-    let mut seen_ids = HashSet::new();
-
-    for candidate in candidates {
-        if deduped.len() >= needed || lookups >= FALLBACK_LOOKUP_CAP {
-            break;
-        }
-
-        for source_id in candidate.source_ids {
-            if deduped.len() >= needed || lookups >= FALLBACK_LOOKUP_CAP {
-                break;
-            }
-
-            lookups += 1;
-            let (mut row, resolved_via, resolved_source_id) = match source_id {
-                DiseaseFallbackId::CanonicalOntology(id) => {
-                    let hit = match client.get(&id).await {
-                        Ok(hit) => hit,
-                        Err(err) => {
-                            warn!(
-                                "Disease search fallback canonical lookup failed for {id}: {err}"
-                            );
-                            continue;
-                        }
-                    };
-                    let mut row = transform::disease::from_mydisease_search_hit(&hit);
-                    if prefer_doid
-                        && let Some(doid) = transform::disease::doid_from_mydisease_hit(&hit)
-                    {
-                        row.id = doid;
-                    }
-                    let source = if id.starts_with("DOID:") {
-                        "DOID canonical".to_string()
-                    } else {
-                        "MONDO canonical".to_string()
-                    };
-                    (row, source, id)
-                }
-                DiseaseFallbackId::Crosswalk(kind, source_value) => {
-                    let response = match client
-                        .lookup_disease_by_xref(kind.source_key(), &source_value, 5)
-                        .await
-                    {
-                        Ok(response) => response,
-                        Err(err) => {
-                            warn!(
-                                "Disease search fallback xref lookup failed for {}:{}: {err}",
-                                kind.display_name(),
-                                source_value
-                            );
-                            continue;
-                        }
-                    };
-
-                    let Some(best) = preferred_crosswalk_hit(response.hits) else {
-                        continue;
-                    };
-                    let mut row = transform::disease::from_mydisease_search_hit(&best);
-                    if prefer_doid
-                        && let Some(doid) = transform::disease::doid_from_mydisease_hit(&best)
-                    {
-                        row.id = doid;
-                    }
-                    (
-                        row,
-                        kind.resolved_via_label(),
-                        format!("{}:{source_value}", kind.display_name()),
-                    )
-                }
-            };
-
-            let candidate_score = disease_candidate_score(query, &candidate.label);
-            let row_score = disease_candidate_score(query, &row.name);
-            if row.name == row.id || candidate_score > row_score {
-                row.name = candidate.label.clone();
-            }
-            let mut haystacks = vec![row.name.clone()];
-            haystacks.extend(candidate.synonyms.iter().cloned());
-            if !contains_all_query_tokens(&query_tokens, &haystacks) {
-                continue;
-            }
-            if !seen_ids.insert(row.id.clone()) {
-                break;
-            }
-
-            row.resolved_via = Some(resolved_via);
-            row.source_id = Some(resolved_source_id);
-            deduped.push(row);
-            break;
-        }
-    }
-
-    if deduped.len() <= offset {
-        return Ok(None);
-    }
-
-    let total = deduped.len();
-    let results = deduped
-        .into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect::<Vec<_>>();
-    if results.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(SearchPage::offset(results, Some(total))))
+    collect_fallback_search_page(query, limit, offset, candidates, |source_id| {
+        let client = client.clone();
+        async move { resolve_fallback_row(&client, prefer_doid, &source_id).await }
+    })
+    .await
 }
 
 fn normalize_disease_text(value: &str) -> String {
@@ -2865,6 +2874,125 @@ pub(crate) mod tests {
 
         assert_eq!(deduped.len(), 1);
         assert_eq!(deduped[0].source_id.as_deref(), Some("MESH:D001139"));
+    }
+
+    #[tokio::test]
+    async fn fallback_search_page_swallows_discover_errors() {
+        let candidates = rank_disease_fallback_candidates(
+            "Arnold Chiari syndrome",
+            &[test_discover_disease_concept(
+                "Arnold-Chiari malformation",
+                Some("MESH:D001139"),
+                &["Arnold Chiari syndrome"],
+                &[("MESH", "D001139")],
+                crate::entities::discover::MatchTier::Exact,
+                crate::entities::discover::DiscoverConfidence::CanonicalId,
+            )],
+        );
+
+        let page = collect_fallback_search_page(
+            "Arnold Chiari syndrome",
+            10,
+            0,
+            candidates,
+            |_source_id| async {
+                Err(BioMcpError::Api {
+                    api: "mydisease.info".into(),
+                    message: "lookup failed".into(),
+                })
+            },
+        )
+        .await
+        .expect("fallback should degrade to no rows");
+
+        assert!(page.is_none());
+    }
+
+    #[tokio::test]
+    async fn fallback_search_page_applies_offset_and_limit_after_dedupe() {
+        let candidates = rank_disease_fallback_candidates(
+            "Arnold Chiari syndrome",
+            &[
+                test_discover_disease_concept(
+                    "Arnold-Chiari malformation",
+                    Some("MESH:D001139"),
+                    &["Arnold Chiari syndrome"],
+                    &[("MESH", "D001139")],
+                    crate::entities::discover::MatchTier::Exact,
+                    crate::entities::discover::DiscoverConfidence::CanonicalId,
+                ),
+                test_discover_disease_concept(
+                    "Arnold Chiari syndrome",
+                    Some("OMIM:207950"),
+                    &[],
+                    &[("OMIM", "207950")],
+                    crate::entities::discover::MatchTier::Exact,
+                    crate::entities::discover::DiscoverConfidence::CanonicalId,
+                ),
+                test_discover_disease_concept(
+                    "Chiari malformation type II",
+                    Some("ICD10CM:Q07.0"),
+                    &["Arnold Chiari syndrome"],
+                    &[("ICD10CM", "Q07.0")],
+                    crate::entities::discover::MatchTier::Contains,
+                    crate::entities::discover::DiscoverConfidence::CanonicalId,
+                ),
+            ],
+        );
+
+        let page = collect_fallback_search_page(
+            "Arnold Chiari syndrome",
+            1,
+            1,
+            candidates,
+            |source_id| async move {
+                let row = match source_id {
+                    DiseaseFallbackId::Crosswalk(DiseaseXrefKind::Mesh, value)
+                        if value == "D001139" =>
+                    {
+                        DiseaseSearchResult {
+                            id: "MONDO:0000115".into(),
+                            name: "Arnold-Chiari malformation".into(),
+                            synonyms_preview: None,
+                            resolved_via: Some("MESH crosswalk".into()),
+                            source_id: Some("MESH:D001139".into()),
+                        }
+                    }
+                    DiseaseFallbackId::Crosswalk(DiseaseXrefKind::Omim, value)
+                        if value == "207950" =>
+                    {
+                        DiseaseSearchResult {
+                            id: "MONDO:0000115".into(),
+                            name: "Arnold-Chiari malformation".into(),
+                            synonyms_preview: None,
+                            resolved_via: Some("OMIM crosswalk".into()),
+                            source_id: Some("OMIM:207950".into()),
+                        }
+                    }
+                    DiseaseFallbackId::Crosswalk(DiseaseXrefKind::Icd10Cm, value)
+                        if value == "Q07.0" =>
+                    {
+                        DiseaseSearchResult {
+                            id: "MONDO:0002115".into(),
+                            name: "Chiari malformation type II".into(),
+                            synonyms_preview: None,
+                            resolved_via: Some("ICD10CM crosswalk".into()),
+                            source_id: Some("ICD10CM:Q07.0".into()),
+                        }
+                    }
+                    other => panic!("unexpected source id: {other:?}"),
+                };
+                Ok(Some(row))
+            },
+        )
+        .await
+        .expect("fallback page should build")
+        .expect("offset page should retain remaining unique rows");
+
+        assert_eq!(page.total, Some(2));
+        assert_eq!(page.results.len(), 1);
+        assert_eq!(page.results[0].id, "MONDO:0002115");
+        assert_eq!(page.results[0].source_id.as_deref(), Some("ICD10CM:Q07.0"));
     }
 
     #[test]

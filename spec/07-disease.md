@@ -14,22 +14,19 @@ Disease commands normalize labels to ontology-backed identifiers and provide cro
 
 ## Searching by Name
 
-Search should return ontology-backed disease rows and canonical MONDO identifiers. We assert table schema and the melanoma MONDO ID marker.
-
-```bash
-out="$(biomcp search disease melanoma --limit 3)"
-echo "$out" | mustmatch like "| ID | Name | Synonyms |"
-echo "$out" | mustmatch like "MONDO:0005105"
-```
+Search should return ontology-backed disease rows and canonical MONDO identifiers. We assert the markdown table schema, then confirm the direct-hit JSON shape stays free of fallback metadata.
 
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
-out="$("$bin" --json search disease melanoma --limit 1)"
-echo "$out" | jq -e '.count == 1' > /dev/null
-echo "$out" | jq -e '.results[0].id == "MONDO:0005105"' > /dev/null
-echo "$out" | jq -e '._meta == null or (._meta | has("fallback_used") | not)' > /dev/null
-echo "$out" | jq -e '.results[0] | has("resolved_via") | not' > /dev/null
-echo "$out" | jq -e '.results[0] | has("source_id") | not' > /dev/null
+out="$("$bin" search disease melanoma --limit 3)"
+echo "$out" | mustmatch like "| ID | Name | Synonyms |"
+echo "$out" | mustmatch like "MONDO:0005105"
+json="$("$bin" --json search disease melanoma --limit 1)"
+echo "$json" | jq -e '.count == 1' > /dev/null
+echo "$json" | jq -e '.results[0].id == "MONDO:0005105"' > /dev/null
+echo "$json" | jq -e '._meta == null or (._meta | has("fallback_used") | not)' > /dev/null
+echo "$json" | jq -e '.results[0] | has("resolved_via") | not' > /dev/null
+echo "$json" | jq -e '.results[0] | has("source_id") | not' > /dev/null
 ```
 
 ## Disease Search Discover Fallback
@@ -37,6 +34,7 @@ echo "$out" | jq -e '.results[0] | has("source_id") | not' > /dev/null
 When direct MyDisease search returns zero rows for a disease that is only
 recoverable through discover plus xref crosswalk, search should return the
 canonical disease row with provenance instead of stopping at "No diseases found".
+The same section also proves the fallback JSON metadata contract.
 
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
@@ -48,16 +46,12 @@ echo "$out" | mustmatch like "MONDO:0000115"
 echo "$out" | mustmatch like "Arnold Chiari Malformation"
 echo "$out" | mustmatch like "MESH crosswalk"
 echo "$out" | mustmatch like "MESH:D001139"
-```
-
-```bash
-bin="${BIOMCP_BIN:-biomcp}"
-out="$("$bin" --json search disease "Arnold Chiari syndrome")"
-echo "$out" | jq -e '.count >= 1' > /dev/null
-echo "$out" | jq -e '.results[0].id == "MONDO:0000115"' > /dev/null
-echo "$out" | jq -e '.results[0].resolved_via == "MESH crosswalk"' > /dev/null
-echo "$out" | jq -e '.results[0].source_id == "MESH:D001139"' > /dev/null
-echo "$out" | jq -e '._meta.fallback_used == true' > /dev/null
+json="$("$bin" --json search disease "Arnold Chiari syndrome")"
+echo "$json" | jq -e '.count >= 1' > /dev/null
+echo "$json" | jq -e '.results[0].id == "MONDO:0000115"' > /dev/null
+echo "$json" | jq -e '.results[0].resolved_via == "MESH crosswalk"' > /dev/null
+echo "$json" | jq -e '.results[0].source_id == "MESH:D001139"' > /dev/null
+echo "$json" | jq -e '._meta.fallback_used == true' > /dev/null
 ```
 
 ## Disease Search Discover Fallback Synonym
@@ -84,6 +78,18 @@ out="$("$bin" search disease "T-cell prolymphocytic leukemia")"
 echo "$out" | mustmatch like "Resolved via discover + crosswalk"
 echo "$out" | mustmatch like "MONDO:0019468"
 echo "$out" | mustmatch like "T-cell prolymphocytic leukemia"
+```
+
+## Disease Search Offset Hint
+
+Paginating past the available fallback rows should keep the raw query in the
+discover hint instead of leaking the display summary with `offset=...`.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search disease "Arnold Chiari syndrome" --offset 5)"
+echo "$out" | mustmatch like 'Try: biomcp discover "Arnold Chiari syndrome"'
+echo "$out" | mustmatch not like 'Try: biomcp discover "Arnold Chiari syndrome, offset=5"'
 ```
 
 ## Disease Search Fallback Miss
