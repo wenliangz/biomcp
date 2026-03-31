@@ -2404,7 +2404,7 @@ pub fn trial_search_markdown(
     results: &[TrialSearchResult],
     total: Option<u32>,
 ) -> Result<String, BioMcpError> {
-    trial_search_markdown_with_footer(query, results, total, "")
+    trial_search_markdown_with_footer(query, results, total, "", false, None)
 }
 
 pub fn trial_search_markdown_with_footer(
@@ -2412,6 +2412,8 @@ pub fn trial_search_markdown_with_footer(
     results: &[TrialSearchResult],
     total: Option<u32>,
     pagination_footer: &str,
+    show_zero_result_nickname_hint: bool,
+    nickname_query: Option<&str>,
 ) -> Result<String, BioMcpError> {
     let tmpl = env()?.get_template("trial_search.md.j2")?;
     let body = tmpl.render(context! {
@@ -2420,6 +2422,8 @@ pub fn trial_search_markdown_with_footer(
         total => total,
         results => results,
         pagination_footer => pagination_footer,
+        show_zero_result_nickname_hint => show_zero_result_nickname_hint,
+        nickname_query => nickname_query,
     })?;
     Ok(with_pagination_footer(body, pagination_footer))
 }
@@ -3138,6 +3142,7 @@ pub fn drug_markdown_with_region(
     drug: &Drug,
     requested_sections: &[String],
     region: DrugRegion,
+    raw_label: bool,
 ) -> Result<String, BioMcpError> {
     let tmpl = env()?.get_template("drug.md.j2")?;
     let section_only = is_section_only_requested(requested_sections);
@@ -3186,6 +3191,7 @@ pub fn drug_markdown_with_region(
         interaction_text => &drug.interaction_text,
         pharm_classes => &drug.pharm_classes,
         label => &drug.label,
+        raw_label => raw_label,
         civic => &drug.civic,
         show_label_section => show_label_section,
         show_targets_section => show_targets_section,
@@ -3207,7 +3213,7 @@ pub fn drug_markdown_with_region(
 }
 
 pub fn drug_markdown(drug: &Drug, requested_sections: &[String]) -> Result<String, BioMcpError> {
-    drug_markdown_with_region(drug, requested_sections, DrugRegion::Us)
+    drug_markdown_with_region(drug, requested_sections, DrugRegion::Us, false)
 }
 
 pub fn drug_search_markdown(
@@ -4273,6 +4279,32 @@ pub(crate) mod tests {
         assert_eq!(quote_arg("BRAF"), "BRAF");
         assert_eq!(quote_arg("BRAF V600E"), "\"BRAF V600E\"");
         assert_eq!(quote_arg("BRAF \"V600E\""), "\"BRAF \\\"V600E\\\"\"");
+    }
+
+    #[test]
+    fn trial_search_markdown_with_footer_shows_scoped_zero_result_nickname_hint() {
+        let markdown = trial_search_markdown_with_footer(
+            "condition=CodeBreaK 300",
+            &[],
+            Some(0),
+            "",
+            true,
+            Some("CodeBreaK 300"),
+        )
+        .expect("markdown");
+
+        assert!(markdown.contains("ClinicalTrials.gov does not index trial nicknames."));
+        assert!(markdown.contains("biomcp search trial -i \"<drug>\" -c \"<condition>\""));
+        assert!(markdown.contains("biomcp search article \"CodeBreaK 300\" to find the NCT ID"));
+    }
+
+    #[test]
+    fn trial_search_markdown_with_footer_omits_zero_result_nickname_hint_without_flag() {
+        let markdown =
+            trial_search_markdown_with_footer("condition=melanoma", &[], Some(0), "", false, None)
+                .expect("markdown");
+
+        assert!(!markdown.contains("ClinicalTrials.gov does not index trial nicknames."));
     }
 
     #[test]
@@ -7166,6 +7198,7 @@ pub(crate) mod tests {
                     .to_string(),
             ),
             label: Some(crate::entities::drug::DrugLabel {
+                indication_summary: Vec::new(),
                 indications: None,
                 warnings: Some("Warnings".to_string()),
                 dosage: None,
@@ -7488,8 +7521,9 @@ pub(crate) mod tests {
             civic: None,
         };
 
-        let markdown = drug_markdown_with_region(&drug, &["all".to_string()], DrugRegion::All)
-            .expect("markdown");
+        let markdown =
+            drug_markdown_with_region(&drug, &["all".to_string()], DrugRegion::All, false)
+                .expect("markdown");
         assert!(markdown.contains("## Regulatory (US - Drugs@FDA)"));
         assert!(markdown.contains("## Regulatory (EU - EMA)"));
         assert!(markdown.contains("## Safety (US - OpenFDA)"));
@@ -7552,8 +7586,9 @@ pub(crate) mod tests {
             civic: None,
         };
 
-        let markdown = drug_markdown_with_region(&drug, &["all".to_string()], DrugRegion::Eu)
-            .expect("markdown");
+        let markdown =
+            drug_markdown_with_region(&drug, &["all".to_string()], DrugRegion::Eu, false)
+                .expect("markdown");
 
         // EU EMA section must be present
         assert!(markdown.contains("## Regulatory (EU - EMA)"));
@@ -7617,8 +7652,9 @@ pub(crate) mod tests {
             civic: None,
         };
 
-        let markdown = drug_markdown_with_region(&drug, &["safety".to_string()], DrugRegion::Eu)
-            .expect("markdown");
+        let markdown =
+            drug_markdown_with_region(&drug, &["safety".to_string()], DrugRegion::Eu, false)
+                .expect("markdown");
         assert!(markdown.contains("## Safety (EU - EMA)"));
         assert!(markdown.contains("### DHPCs"));
         assert!(markdown.contains("Medicine shortage"));

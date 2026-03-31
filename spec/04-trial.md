@@ -128,6 +128,21 @@ echo "$out" | mustmatch like "intervention=HRS 4642"
 echo "$out" | mustmatch like "|NCT ID|Title|Status|Phase|Conditions|"
 ```
 
+## Zero-Result Positional Hint
+
+Free-text trial nicknames on the positional ClinicalTrials.gov path should
+explain the upstream limitation and point the operator at the two intended
+recovery moves.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search trial "CodeBreaK 300")"
+echo "$out" | mustmatch like "No trials found matching the filters."
+echo "$out" | mustmatch like "ClinicalTrials.gov does not index trial nicknames."
+echo "$out" | mustmatch like 'biomcp search trial -i "<drug>" -c "<condition>"'
+echo "$out" | mustmatch like 'biomcp search article "CodeBreaK 300" to find the NCT ID'
+```
+
 ## Getting Trial Details
 
 `get trial` provides protocol identity and key metadata in a compact card. We assert on stable NCT heading and status field marker.

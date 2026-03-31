@@ -45,6 +45,19 @@ cat "$err" | mustmatch not like "Downloading EMA data"
 test ! -d "$tmp_data/biomcp/ema"
 ```
 
+## Brand Name Get Fallback
+
+Brand-only names should transparently reuse the plain drug-search fallback when
+direct `get drug` lookup misses but the name resolves to one canonical drug.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get drug XIPERE)"
+echo "$out" | mustmatch like "# triamcinolone acetonide"
+echo "$out" | mustmatch not like "Error: drug 'XIPERE' not found."
+echo "$out" | mustmatch not like "Did you mean:"
+```
+
 ## Search Help Shows Region Defaults
 
 The inline help should advertise the no-flag cross-region default while keeping
@@ -104,17 +117,50 @@ echo "$out" | mustmatch not like "Cannot query field"
 echo "$out" | mustmatch '/\((Approved|Phase [0-9](\/[0-9])?|Early Phase 1)\)/'
 ```
 
+## Compact FDA Label Summary
+
+Default `label` mode should render a compact approved-indications summary and
+keep the verbose FDA subsections behind `--raw`.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get drug pembrolizumab label)"
+echo "$out" | mustmatch like "## FDA Label"
+echo "$out" | mustmatch like "### Approved Indications"
+echo "$out" | mustmatch like "triple-negative breast cancer"
+echo "$out" | mustmatch like 'Use `--raw` for the full truncated FDA label text.'
+echo "$out" | mustmatch not like "### Warnings and Precautions"
+echo "$out" | mustmatch not like "### Dosage and Administration"
+```
+
+## Raw FDA Label Output
+
+Raw label mode should preserve the current truncated FDA subsections when the
+operator explicitly asks for them.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get drug pembrolizumab label --raw)"
+echo "$out" | mustmatch like "### Indications and Usage"
+echo "$out" | mustmatch like "### Warnings and Precautions"
+echo "$out" | mustmatch like "### Dosage and Administration"
+echo "$out" | mustmatch not like "### Approved Indications"
+```
+
 ## Get Drug Help Surfaces Supported Sections
 
 The inline help should agree with `biomcp list drug` and the implementation for
 supported typed sections, including the regional EMA additions.
 
 ```bash
-out="$(biomcp get drug --help)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get drug --help)"
 echo "$out" | mustmatch like "Sections to include (label, regulatory, safety, shortage, targets, indications, interactions, civic, approvals, all)"
 echo "$out" | mustmatch like "Data region for regional sections"
 echo "$out" | mustmatch like "--region <REGION>"
+echo "$out" | mustmatch like "--raw"
 echo "$out" | mustmatch like "biomcp get drug pembrolizumab approvals"
+echo "$out" | mustmatch like "biomcp get drug pembrolizumab label --raw"
 echo "$out" | mustmatch like "biomcp get drug Keytruda regulatory --region eu"
 ```
 
@@ -125,10 +171,38 @@ sections and the MCP help mirror. The list output should continue to document
 the same regional section grammar that `get drug --help` exposes.
 
 ```bash
-out="$(biomcp list drug)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" list drug)"
+echo "$out" | mustmatch like "get drug <name> label [--raw]"
 echo "$out" | mustmatch like "get drug <name> regulatory [--region <us|eu|all>]"
 echo "$out" | mustmatch like "get drug <name> safety [--region <us|eu|all>]"
 echo "$out" | mustmatch like "get drug <name> shortage [--region <us|eu|all>]"
+```
+
+## Compact FDA Label JSON
+
+Default label JSON should expose `indication_summary` without the raw warning
+and dosage dumps.
+
+```bash
+out="$(biomcp --json get drug pembrolizumab label)"
+echo "$out" | jq -e '.label.indication_summary | type == "array" and length > 0' > /dev/null
+echo "$out" | jq -e '.label.indications == null' > /dev/null
+echo "$out" | jq -e '.label.warnings == null' > /dev/null
+echo "$out" | jq -e '.label.dosage == null' > /dev/null
+```
+
+## Raw FDA Label JSON
+
+Raw label JSON should preserve both the compact summary rows and the truncated
+raw text fields.
+
+```bash
+out="$(biomcp --json get drug pembrolizumab label --raw)"
+echo "$out" | jq -e '.label.indication_summary | type == "array" and length > 0' > /dev/null
+echo "$out" | jq -e '.label.indications | type == "string"' > /dev/null
+echo "$out" | jq -e '.label.warnings | type == "string"' > /dev/null
+echo "$out" | jq -e '.label.dosage | type == "string"' > /dev/null
 ```
 
 ## Compact Approval Fields

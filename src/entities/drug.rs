@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use std::time::Duration;
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -11,6 +13,7 @@ use crate::sources::civic::{CivicClient, CivicContext};
 use crate::sources::ema::{EmaClient, EmaDrugIdentity, EmaSyncMode};
 use crate::sources::mychem::{
     MYCHEM_FIELDS_GET, MYCHEM_FIELDS_SEARCH, MyChemClient, MyChemHit, MyChemNdcField,
+    MyChemQueryResponse,
 };
 use crate::sources::openfda::{DrugsFdaResult, OpenFdaClient, OpenFdaResponse};
 use crate::sources::opentargets::{OpenTargetsClient, OpenTargetsTarget};
@@ -95,7 +98,18 @@ pub struct DrugInteraction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrugLabelIndication {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pivotal_trial: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrugLabel {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub indication_summary: Vec<DrugLabelIndication>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub indications: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -964,7 +978,190 @@ fn truncate_with_note(value: &str, max_chars: usize) -> String {
     format!("{truncated}\n\n(truncated, {total} chars total)")
 }
 
-fn extract_inline_label(label_response: &serde_json::Value) -> Option<DrugLabel> {
+fn label_subsection_boundary_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\(\s*1\.\d+\s*\)").expect("valid label subsection regex"))
+}
+
+fn label_heading_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?i)^\s*1\s+indications and usage\b[:\s-]*").expect("valid heading regex")
+    })
+}
+
+fn normalize_label_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn strip_label_intro_prefix(segment: &str) -> &str {
+    let lower = segment.to_ascii_lowercase();
+    for needle in ["indicated:", "indicated for:", "indicated for"] {
+        if let Some(idx) = lower.rfind(needle) {
+            return segment[idx + needle.len()..].trim();
+        }
+    }
+    segment.trim()
+}
+
+fn label_continuation_prefix(lower: &str) -> bool {
+    [
+        "for ",
+        "as ",
+        "in combination",
+        "continued as ",
+        "following ",
+        "after ",
+        "where ",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
+fn label_patient_phrase_start<'a>(segment: &'a str, lower: &str) -> Option<&'a str> {
+    [
+        "adult patients with ",
+        "pediatric patients with ",
+        "patients with ",
+        "patient with ",
+        "children with ",
+        "women with ",
+        "people with ",
+        "treatment of ",
+    ]
+    .iter()
+    .find_map(|needle| lower.find(needle).map(|idx| &segment[idx + needle.len()..]))
+}
+
+fn label_candidate_cutoff(segment: &str) -> &str {
+    let lower = segment.to_ascii_lowercase();
+    let mut end = segment.len();
+    for needle in [
+        ",",
+        ";",
+        " keytruda",
+        " pembrolizumab",
+        " qlex",
+        " in combination",
+        " as a single agent",
+        " as first-line",
+        " as first line",
+        " as adjuvant",
+        " for ",
+        " in adult",
+        " in pediatric",
+        " in patients",
+        " after ",
+        " following ",
+        " where ",
+    ] {
+        if let Some(idx) = lower.find(needle) {
+            end = end.min(idx);
+        }
+    }
+    segment[..end].trim()
+}
+
+fn normalize_label_indication_name(segment: &str) -> Option<String> {
+    let candidate = label_candidate_cutoff(segment)
+        .trim_matches(|c: char| c.is_whitespace() || matches!(c, ':' | ';' | '.' | '-'))
+        .trim();
+    if candidate.is_empty() {
+        return None;
+    }
+    let lower = candidate.to_ascii_lowercase();
+    let has_intro_prefix = [
+        "the treatment of ",
+        "treatment of ",
+        "adult patients with ",
+        "pediatric patients with ",
+        "patients with ",
+        "patient with ",
+        "children with ",
+        "women with ",
+        "people with ",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix));
+    if has_intro_prefix {
+        return None;
+    }
+    let has_disease_signal = [
+        "cancer",
+        "carcinoma",
+        "melanoma",
+        "lymphoma",
+        "leukemia",
+        "tumor",
+        "tumours",
+        "myeloma",
+        "sarcoma",
+        "nsclc",
+        "hnscc",
+        "rcc",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if !has_disease_signal {
+        return None;
+    }
+    Some(lower)
+}
+
+fn extract_label_indication_name(segment: &str) -> Option<String> {
+    let segment = strip_label_intro_prefix(segment);
+    let lower = segment.to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+    if !label_continuation_prefix(&lower)
+        && let Some(candidate) = normalize_label_indication_name(segment)
+    {
+        return Some(candidate);
+    }
+    let patient_slice = label_patient_phrase_start(segment, &lower)?;
+    normalize_label_indication_name(patient_slice)
+}
+
+fn extract_label_indication_summary(
+    label_response: &serde_json::Value,
+) -> Vec<DrugLabelIndication> {
+    const MAX_SUMMARY_ROWS: usize = 20;
+
+    let Some(indications_text) = label_response
+        .get("results")
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.first())
+        .and_then(|top| label_text(top.get("indications_and_usage")))
+    else {
+        return Vec::new();
+    };
+
+    let normalized = normalize_label_whitespace(&indications_text);
+    let stripped = label_heading_regex().replace(&normalized, "").into_owned();
+
+    let mut out: Vec<DrugLabelIndication> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for segment in label_subsection_boundary_regex().split(&stripped) {
+        let Some(name) = extract_label_indication_name(segment) else {
+            continue;
+        };
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        out.push(DrugLabelIndication {
+            name,
+            approval_date: None,
+            pivotal_trial: None,
+        });
+        if out.len() >= MAX_SUMMARY_ROWS {
+            break;
+        }
+    }
+    out
+}
+
+fn extract_inline_label(label_response: &serde_json::Value, raw_mode: bool) -> Option<DrugLabel> {
     const LABEL_MAX_CHARS: usize = 2000;
 
     let top = label_response
@@ -972,18 +1169,32 @@ fn extract_inline_label(label_response: &serde_json::Value) -> Option<DrugLabel>
         .and_then(|v| v.as_array())
         .and_then(|v| v.first())?;
 
-    let indications = label_text(top.get("indications_and_usage"))
-        .map(|v| truncate_with_note(&v, LABEL_MAX_CHARS));
-    let warnings = label_text(top.get("warnings_and_cautions"))
-        .map(|v| truncate_with_note(&v, LABEL_MAX_CHARS));
-    let dosage = label_text(top.get("dosage_and_administration"))
-        .map(|v| truncate_with_note(&v, LABEL_MAX_CHARS));
+    let indication_summary = extract_label_indication_summary(label_response);
+    let raw_indications = label_text(top.get("indications_and_usage"))
+        .map(|v| truncate_with_note(&normalize_label_whitespace(&v), LABEL_MAX_CHARS));
+    let raw_warnings = label_text(top.get("warnings_and_cautions"))
+        .map(|v| truncate_with_note(&normalize_label_whitespace(&v), LABEL_MAX_CHARS));
+    let raw_dosage = label_text(top.get("dosage_and_administration"))
+        .map(|v| truncate_with_note(&normalize_label_whitespace(&v), LABEL_MAX_CHARS));
 
-    if indications.is_none() && warnings.is_none() && dosage.is_none() {
+    let indications = if raw_mode || indication_summary.is_empty() {
+        raw_indications
+    } else {
+        None
+    };
+    let warnings = if raw_mode { raw_warnings } else { None };
+    let dosage = if raw_mode { raw_dosage } else { None };
+
+    if indication_summary.is_empty()
+        && indications.is_none()
+        && warnings.is_none()
+        && dosage.is_none()
+    {
         return None;
     }
 
     Some(DrugLabel {
+        indication_summary,
         indications,
         warnings,
         dosage,
@@ -1937,21 +2148,51 @@ async fn resolve_drug_base(
         ));
     }
 
-    let client = MyChemClient::new()?;
-    let resp = client
-        .query_with_fields(name, 25, 0, MYCHEM_FIELDS_GET)
-        .await?;
+    let original_not_found = || BioMcpError::NotFound {
+        entity: "drug".into(),
+        id: name.to_string(),
+        suggestion: format!("Try searching: biomcp search drug -q \"{name}\""),
+    };
+
+    let mut lookup_name = name.to_string();
+    let mut resp = direct_drug_lookup(name).await?;
 
     if resp.hits.is_empty() {
-        return Err(BioMcpError::NotFound {
-            entity: "drug".into(),
-            id: name.to_string(),
-            suggestion: format!("Try searching: biomcp search drug -q \"{name}\""),
-        });
+        let fallback_filters = DrugSearchFilters {
+            query: Some(name.to_string()),
+            ..Default::default()
+        };
+        let fallback_name = search_page(&fallback_filters, 2, 0)
+            .await
+            .ok()
+            .and_then(|page| {
+                if page.results.len() != 1 {
+                    return None;
+                }
+                let candidate = page.results[0].name.trim();
+                if candidate.is_empty() || candidate.eq_ignore_ascii_case(name) {
+                    None
+                } else {
+                    Some(candidate.to_string())
+                }
+            });
+
+        if let Some(candidate) = fallback_name {
+            if let Ok(fallback_resp) = direct_drug_lookup(&candidate).await
+                && !fallback_resp.hits.is_empty()
+            {
+                lookup_name = candidate;
+                resp = fallback_resp;
+            } else {
+                return Err(original_not_found());
+            }
+        } else {
+            return Err(original_not_found());
+        }
     }
 
-    let selected = transform::drug::select_hits_for_name(&resp.hits, name);
-    let mut drug = transform::drug::merge_mychem_hits(&selected, name);
+    let selected = transform::drug::select_hits_for_name(&resp.hits, &lookup_name);
+    let mut drug = transform::drug::merge_mychem_hits(&selected, &lookup_name);
 
     let mut label_response_opt: Option<serde_json::Value> = None;
     if fetch_label_response {
@@ -1983,6 +2224,12 @@ async fn resolve_drug_base(
     })
 }
 
+async fn direct_drug_lookup(query: &str) -> Result<MyChemQueryResponse, BioMcpError> {
+    MyChemClient::new()?
+        .query_with_fields(query, 25, 0, MYCHEM_FIELDS_GET)
+        .await
+}
+
 async fn try_resolve_drug_identity(name: &str) -> Option<Drug> {
     match resolve_drug_base(name, false, false).await {
         Ok(resolved) => Some(resolved.drug),
@@ -1997,6 +2244,7 @@ async fn populate_common_sections(
     drug: &mut Drug,
     label_response: Option<&serde_json::Value>,
     section_flags: &DrugSections,
+    raw_label: bool,
 ) {
     let civic_context = if section_flags.include_targets || section_flags.include_civic {
         fetch_civic_therapy_context(&drug.name).await
@@ -2005,7 +2253,7 @@ async fn populate_common_sections(
     };
 
     drug.label = if section_flags.include_label {
-        label_response.and_then(extract_inline_label)
+        label_response.and_then(|response| extract_inline_label(response, raw_label))
     } else {
         None
     };
@@ -2155,14 +2403,25 @@ fn validate_region_usage(
     Ok(())
 }
 
+fn validate_raw_usage(section_flags: &DrugSections, raw_label: bool) -> Result<(), BioMcpError> {
+    if raw_label && !section_flags.include_label {
+        return Err(BioMcpError::InvalidArgument(
+            "--raw can only be used with label or all.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn get_with_region(
     name: &str,
     sections: &[String],
     region: DrugRegion,
     region_explicit: bool,
+    raw_label: bool,
 ) -> Result<Drug, BioMcpError> {
     let section_flags = parse_sections(sections)?;
     validate_region_usage(&section_flags, region_explicit)?;
+    validate_raw_usage(&section_flags, raw_label)?;
 
     let section_only = is_section_only_requested(sections);
     let fetch_label_response = !section_only
@@ -2176,6 +2435,7 @@ pub async fn get_with_region(
         &mut resolved.drug,
         resolved.label_response.as_ref(),
         &section_flags,
+        raw_label,
     )
     .await;
 
@@ -2267,7 +2527,7 @@ pub async fn search_name_query_with_region(
 }
 
 pub async fn get(name: &str, sections: &[String]) -> Result<Drug, BioMcpError> {
-    get_with_region(name, sections, DrugRegion::Us, false).await
+    get_with_region(name, sections, DrugRegion::Us, false, false).await
 }
 
 pub fn search_query_summary(filters: &DrugSearchFilters) -> String {
@@ -2493,6 +2753,57 @@ mod tests {
         });
 
         assert_eq!(extract_interaction_text_from_label(&response), None);
+    }
+
+    #[test]
+    fn extract_inline_label_summary_mode_preserves_subtype_wording() {
+        let response = serde_json::json!({
+            "results": [{
+                "indications_and_usage": [
+                    "1 INDICATIONS AND USAGE",
+                    "(1.1) KEYTRUDA, in combination with chemotherapy, is indicated for the treatment of patients with high-risk early-stage triple-negative breast cancer.",
+                    "(1.2) KEYTRUDA, as a single agent, is indicated for the treatment of adult patients with renal cell carcinoma."
+                ],
+                "warnings_and_cautions": ["Warnings"],
+                "dosage_and_administration": ["Dosage"]
+            }]
+        });
+
+        let label = extract_inline_label(&response, false).expect("summary label");
+        assert_eq!(
+            label
+                .indication_summary
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "high-risk early-stage triple-negative breast cancer",
+                "renal cell carcinoma"
+            ]
+        );
+        assert!(label.warnings.is_none());
+        assert!(label.dosage.is_none());
+        assert!(label.indications.is_none());
+    }
+
+    #[test]
+    fn extract_inline_label_raw_mode_preserves_truncated_raw_subsections() {
+        let response = serde_json::json!({
+            "results": [{
+                "indications_and_usage": [
+                    "1 INDICATIONS AND USAGE",
+                    "(1.1) KEYTRUDA, in combination with chemotherapy, is indicated for the treatment of patients with high-risk early-stage triple-negative breast cancer."
+                ],
+                "warnings_and_cautions": ["Warnings"],
+                "dosage_and_administration": ["Dosage"]
+            }]
+        });
+
+        let label = extract_inline_label(&response, true).expect("raw label");
+        assert!(!label.indication_summary.is_empty());
+        assert!(label.indications.as_deref().is_some());
+        assert!(label.warnings.as_deref().is_some());
+        assert!(label.dosage.as_deref().is_some());
     }
 
     #[test]
