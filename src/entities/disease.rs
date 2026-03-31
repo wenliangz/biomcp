@@ -16,6 +16,7 @@ use crate::sources::monarch::{
     MonarchClient, MonarchGeneAssociation, MonarchModelAssociation, MonarchPhenotypeMatch,
 };
 use crate::sources::mydisease::{MyDiseaseClient, MyDiseaseHit};
+use crate::sources::ols4::OlsClient;
 use crate::sources::opentargets::OpenTargetsClient;
 use crate::sources::reactome::ReactomeClient;
 use crate::transform;
@@ -648,14 +649,27 @@ async fn resolve_disease_hit_by_name(
 
 async fn add_genes_section(disease: &mut Disease) -> Result<(), BioMcpError> {
     let mut queries: Vec<String> = Vec::new();
-    for candidate in [disease.name.trim(), disease.id.trim()] {
+    let mut push_query = |candidate: &str| {
+        let candidate = candidate.trim();
         if candidate.is_empty() {
-            continue;
+            return;
         }
         if queries.iter().any(|q| q.eq_ignore_ascii_case(candidate)) {
-            continue;
+            return;
         }
         queries.push(candidate.to_string());
+    };
+    let synonym_candidates = disease.synonyms.iter().take(3).map(String::as_str);
+    for candidate in std::iter::once(disease.name.as_str())
+        .chain(synonym_candidates)
+        .chain(std::iter::once(disease.id.as_str()))
+    {
+        if candidate.contains('/') {
+            for segment in candidate.split('/') {
+                push_query(segment);
+            }
+        }
+        push_query(candidate);
     }
     if queries.is_empty() {
         return Ok(());
@@ -663,7 +677,7 @@ async fn add_genes_section(disease: &mut Disease) -> Result<(), BioMcpError> {
 
     let client = OpenTargetsClient::new()?;
     for query in queries {
-        let rows = client.disease_associated_targets(&query, 10).await?;
+        let rows = client.disease_associated_targets(&query, 20).await?;
         if rows.is_empty() {
             continue;
         }
@@ -694,13 +708,13 @@ async fn add_genes_section(disease: &mut Disease) -> Result<(), BioMcpError> {
         if !associated_genes.is_empty() {
             disease.associated_genes = associated_genes;
             disease.top_gene_scores = top_gene_scores;
-            disease.associated_genes.truncate(10);
-            disease.top_gene_scores.truncate(10);
+            disease.associated_genes.truncate(20);
+            disease.top_gene_scores.truncate(20);
             return Ok(());
         }
     }
 
-    disease.associated_genes.truncate(10);
+    disease.associated_genes.truncate(20);
     disease.top_gene_scores.clear();
     Ok(())
 }
@@ -855,6 +869,67 @@ fn attach_opentargets_scores(disease: &mut Disease) {
     }
 }
 
+fn normalize_ols_disease_id(value: &str) -> Option<String> {
+    normalize_disease_id(value).or_else(|| normalize_disease_id(&value.replace('_', ":")))
+}
+
+async fn enrich_sparse_disease_identity(disease: &mut Disease) -> Result<(), BioMcpError> {
+    let name = disease.name.trim();
+    let id = disease.id.trim();
+    if !name.eq_ignore_ascii_case(id) || !disease.synonyms.is_empty() {
+        return Ok(());
+    }
+
+    let canonical_id = match normalize_disease_id(id) {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let client = OlsClient::new()?;
+    let exact = client.search(&canonical_id).await?.into_iter().find(|doc| {
+        doc.obo_id
+            .as_deref()
+            .and_then(normalize_ols_disease_id)
+            .is_some_and(|value| value == canonical_id)
+            || doc
+                .short_form
+                .as_deref()
+                .and_then(normalize_ols_disease_id)
+                .is_some_and(|value| value == canonical_id)
+    });
+    let Some(doc) = exact else {
+        return Ok(());
+    };
+
+    let label = doc.label.trim();
+    if !label.is_empty() {
+        disease.name = label.to_string();
+    }
+
+    let mut seen = disease
+        .synonyms
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    seen.insert(disease.name.to_ascii_lowercase());
+    for synonym in doc.exact_synonyms {
+        let synonym = synonym.trim();
+        if synonym.is_empty() {
+            continue;
+        }
+        let key = synonym.to_ascii_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        disease.synonyms.push(synonym.to_string());
+        if disease.synonyms.len() >= 10 {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
 async fn add_monarch_gene_section(disease: &mut Disease) -> Result<(), BioMcpError> {
     let disease_id = match normalize_disease_id(&disease.id) {
         Some(v) => v,
@@ -885,6 +960,62 @@ async fn add_monarch_gene_section(disease: &mut Disease) -> Result<(), BioMcpErr
     disease.gene_associations = out;
     disease.associated_genes.truncate(20);
     Ok(())
+}
+
+fn normalize_gene_source_label(label: &str) -> Option<String> {
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("monarch") {
+        Some("Monarch".to_string())
+    } else if lower.contains("civic") {
+        Some("CIViC".to_string())
+    } else if lower.contains("opentarget") || lower.contains("open targets") {
+        Some("OpenTargets".to_string())
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn merge_gene_source(existing: &mut Option<String>, new_source: &str) {
+    let mut labels: Vec<String> = existing
+        .as_deref()
+        .into_iter()
+        .flat_map(|value| value.split(';'))
+        .filter_map(normalize_gene_source_label)
+        .collect();
+    if let Some(new_label) = normalize_gene_source_label(new_source)
+        && !labels
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(&new_label))
+    {
+        labels.push(new_label);
+    }
+
+    let mut merged = Vec::new();
+    for preferred in ["Monarch", "CIViC", "OpenTargets"] {
+        if labels.iter().any(|value| value == preferred) {
+            merged.push(preferred.to_string());
+        }
+    }
+    for label in labels {
+        if merged
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(&label))
+        {
+            continue;
+        }
+        merged.push(label);
+    }
+
+    *existing = if merged.is_empty() {
+        None
+    } else {
+        Some(merged.join("; "))
+    };
 }
 
 async fn add_monarch_phenotypes(disease: &mut Disease) -> Result<(), BioMcpError> {
@@ -1063,6 +1194,34 @@ async fn augment_genes_with_civic(disease: &mut Disease) -> Result<(), BioMcpErr
         if disease.gene_associations.len() >= 20 {
             break;
         }
+    }
+
+    disease.gene_associations.truncate(20);
+    disease.associated_genes.truncate(20);
+    Ok(())
+}
+
+async fn augment_genes_with_opentargets(disease: &mut Disease) -> Result<(), BioMcpError> {
+    for score in disease.top_gene_scores.clone() {
+        let existing = disease
+            .gene_associations
+            .iter_mut()
+            .find(|row| row.gene.eq_ignore_ascii_case(&score.symbol));
+        if let Some(row) = existing {
+            merge_gene_source(&mut row.source, "OpenTargets");
+            continue;
+        }
+        if disease.gene_associations.len() >= 20 {
+            break;
+        }
+
+        push_associated_gene(disease, &score.symbol);
+        disease.gene_associations.push(DiseaseGeneAssociation {
+            gene: score.symbol,
+            relationship: Some("associated with disease".into()),
+            source: Some("OpenTargets".into()),
+            opentargets_score: None,
+        });
     }
 
     disease.gene_associations.truncate(20);
@@ -1361,6 +1520,9 @@ async fn apply_requested_sections(
         if let Err(err) = augment_genes_with_civic(disease).await {
             warn!("CIViC unavailable for disease gene augmentation: {err}");
         }
+        if let Err(err) = augment_genes_with_opentargets(disease).await {
+            warn!("OpenTargets unavailable for disease gene augmentation: {err}");
+        }
         attach_opentargets_scores(disease);
     }
     if sections.include_pathways
@@ -1450,6 +1612,9 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
         DiseaseLookupInput::CanonicalOntologyId(id) => {
             let hit = client.get(&id).await?;
             let mut disease = transform::disease::from_mydisease_hit(hit);
+            if let Err(err) = enrich_sparse_disease_identity(&mut disease).await {
+                warn!("OLS4 unavailable for sparse disease identity repair: {err}");
+            }
             disease.parents = resolve_parent_names(&client, &disease.parents).await;
             enrich_base_context(&mut disease).await;
             apply_requested_sections(&mut disease, parsed_sections).await?;
@@ -1466,6 +1631,9 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
             })?;
             let hit = client.get(&best.id).await?;
             let mut disease = transform::disease::from_mydisease_hit(hit);
+            if let Err(err) = enrich_sparse_disease_identity(&mut disease).await {
+                warn!("OLS4 unavailable for sparse disease identity repair: {err}");
+            }
             disease.parents = resolve_parent_names(&client, &disease.parents).await;
             enrich_base_context(&mut disease).await;
             apply_requested_sections(&mut disease, parsed_sections).await?;
@@ -1478,6 +1646,9 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
 
     let hit = client.get(&best.id).await?;
     let mut disease = transform::disease::from_mydisease_hit(hit);
+    if let Err(err) = enrich_sparse_disease_identity(&mut disease).await {
+        warn!("OLS4 unavailable for sparse disease identity repair: {err}");
+    }
     disease.parents = resolve_parent_names(&client, &disease.parents).await;
     enrich_base_context(&mut disease).await;
     apply_requested_sections(&mut disease, parsed_sections).await?;
@@ -1884,9 +2055,9 @@ pub async fn search_phenotype_page(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{body_string_contains, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     async fn lock_env() -> tokio::sync::MutexGuard<'static, ()> {
@@ -1920,6 +2091,85 @@ mod tests {
             }
         }
         EnvVarGuard { name, previous }
+    }
+
+    fn test_disease(id: &str, name: &str) -> Disease {
+        Disease {
+            id: id.to_string(),
+            name: name.to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: Vec::new(),
+            gene_associations: Vec::new(),
+            top_genes: Vec::new(),
+            top_gene_scores: Vec::new(),
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            key_features: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: HashMap::new(),
+        }
+    }
+
+    async fn mock_empty_monarch(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/v3/api/association"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": []
+            })))
+            .mount(server)
+            .await;
+    }
+
+    async fn mock_empty_civic(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "evidenceItems": {
+                        "totalCount": 0,
+                        "nodes": []
+                    },
+                    "assertions": {
+                        "totalCount": 0,
+                        "nodes": []
+                    }
+                }
+            })))
+            .mount(server)
+            .await;
+    }
+
+    async fn mock_empty_mychem(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total": 0,
+                "hits": []
+            })))
+            .mount(server)
+            .await;
+    }
+
+    async fn mock_empty_ctgov(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/studies"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "studies": [],
+                "nextPageToken": null,
+                "totalCount": 0
+            })))
+            .mount(server)
+            .await;
     }
 
     #[test]
@@ -2270,5 +2520,499 @@ mod tests {
             Some("BRAF")
         );
         assert_eq!(civic_gene_symbol_from_profile("V600E"), None);
+    }
+
+    pub(crate) async fn proof_augment_genes_with_opentargets_merges_sources_without_duplicates() {
+        let mut disease = test_disease("MONDO:0003864", "chronic lymphocytic leukemia");
+        disease.associated_genes = vec!["TP53".into(), "BCL2".into()];
+        disease.gene_associations = vec![
+            DiseaseGeneAssociation {
+                gene: "TP53".into(),
+                relationship: Some("causal".into()),
+                source: Some("Monarch".into()),
+                opentargets_score: None,
+            },
+            DiseaseGeneAssociation {
+                gene: "BCL2".into(),
+                relationship: Some("associated with disease".into()),
+                source: Some("CIViC".into()),
+                opentargets_score: None,
+            },
+        ];
+        disease.top_gene_scores = vec![
+            DiseaseTargetScore {
+                symbol: "TP53".into(),
+                summary: DiseaseAssociationScoreSummary {
+                    overall_score: 0.99,
+                    gwas_score: None,
+                    rare_variant_score: None,
+                    somatic_mutation_score: Some(0.88),
+                },
+            },
+            DiseaseTargetScore {
+                symbol: "BCL2".into(),
+                summary: DiseaseAssociationScoreSummary {
+                    overall_score: 0.91,
+                    gwas_score: None,
+                    rare_variant_score: None,
+                    somatic_mutation_score: Some(0.72),
+                },
+            },
+            DiseaseTargetScore {
+                symbol: "ATM".into(),
+                summary: DiseaseAssociationScoreSummary {
+                    overall_score: 0.84,
+                    gwas_score: None,
+                    rare_variant_score: None,
+                    somatic_mutation_score: Some(0.67),
+                },
+            },
+        ];
+
+        augment_genes_with_opentargets(&mut disease)
+            .await
+            .expect("augmentation should succeed");
+        attach_opentargets_scores(&mut disease);
+
+        assert_eq!(disease.gene_associations.len(), 3);
+        assert_eq!(
+            disease.gene_associations[0].source.as_deref(),
+            Some("Monarch; OpenTargets")
+        );
+        assert_eq!(
+            disease.gene_associations[1].source.as_deref(),
+            Some("CIViC; OpenTargets")
+        );
+        assert_eq!(disease.gene_associations[2].gene, "ATM");
+        assert_eq!(
+            disease.gene_associations[2].source.as_deref(),
+            Some("OpenTargets")
+        );
+    }
+
+    #[tokio::test]
+    async fn augment_genes_with_opentargets_merges_sources_without_duplicates() {
+        proof_augment_genes_with_opentargets_merges_sources_without_duplicates().await;
+    }
+
+    pub(crate) async fn proof_augment_genes_with_opentargets_respects_twenty_gene_cap() {
+        let mut disease = test_disease("MONDO:0003864", "chronic lymphocytic leukemia");
+        disease.associated_genes = (0..20).map(|index| format!("GENE{index}")).collect();
+        disease.gene_associations = (0..20)
+            .map(|index| DiseaseGeneAssociation {
+                gene: format!("GENE{index}"),
+                relationship: Some("associated".into()),
+                source: Some("Monarch".into()),
+                opentargets_score: None,
+            })
+            .collect();
+        disease.top_gene_scores = vec![DiseaseTargetScore {
+            symbol: "TP53".into(),
+            summary: DiseaseAssociationScoreSummary {
+                overall_score: 0.99,
+                gwas_score: None,
+                rare_variant_score: None,
+                somatic_mutation_score: Some(0.88),
+            },
+        }];
+
+        augment_genes_with_opentargets(&mut disease)
+            .await
+            .expect("augmentation should succeed");
+
+        assert_eq!(disease.gene_associations.len(), 20);
+        assert!(
+            !disease
+                .gene_associations
+                .iter()
+                .any(|row| row.gene == "TP53")
+        );
+        assert_eq!(disease.associated_genes.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn augment_genes_with_opentargets_respects_twenty_gene_cap() {
+        proof_augment_genes_with_opentargets_respects_twenty_gene_cap().await;
+    }
+
+    pub(crate) async fn proof_enrich_sparse_disease_identity_prefers_exact_ols4_match() {
+        let _guard = lock_env().await;
+        let ols4 = MockServer::start().await;
+        let _ols4_env = set_env_var("BIOMCP_OLS4_BASE", Some(&ols4.uri()));
+
+        Mock::given(method("GET"))
+            .and(path("/api/search"))
+            .and(query_param("q", "MONDO:0019468"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "response": {
+                    "docs": [
+                        {
+                            "iri": "http://purl.obolibrary.org/obo/MONDO_0019469",
+                            "ontology_name": "mondo",
+                            "ontology_prefix": "mondo",
+                            "short_form": "MONDO_0019469",
+                            "obo_id": "MONDO:0019469",
+                            "label": "wrong disease",
+                            "description": [],
+                            "exact_synonyms": ["Wrong"],
+                            "type": "class"
+                        },
+                        {
+                            "iri": "http://purl.obolibrary.org/obo/MONDO_0019468",
+                            "ontology_name": "mondo",
+                            "ontology_prefix": "mondo",
+                            "short_form": "MONDO_0019468",
+                            "obo_id": "MONDO:0019468",
+                            "label": "T-cell prolymphocytic leukemia",
+                            "description": [],
+                            "exact_synonyms": ["T-PLL"],
+                            "type": "class"
+                        }
+                    ]
+                }
+            })))
+            .mount(&ols4)
+            .await;
+
+        let mut disease = test_disease("MONDO:0019468", "MONDO:0019468");
+        enrich_sparse_disease_identity(&mut disease)
+            .await
+            .expect("identity repair should succeed");
+
+        assert_eq!(disease.name, "T-cell prolymphocytic leukemia");
+        assert_eq!(disease.synonyms, vec!["T-PLL".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn enrich_sparse_disease_identity_prefers_exact_ols4_match() {
+        proof_enrich_sparse_disease_identity_prefers_exact_ols4_match().await;
+    }
+
+    pub(crate) async fn proof_get_disease_genes_promotes_opentargets_rows_for_cll() {
+        let _guard = lock_env().await;
+        let mydisease = MockServer::start().await;
+        let opentargets = MockServer::start().await;
+        let monarch = MockServer::start().await;
+        let civic = MockServer::start().await;
+        let mychem = MockServer::start().await;
+        let ctgov = MockServer::start().await;
+        let _mydisease_env = set_env_var(
+            "BIOMCP_MYDISEASE_BASE",
+            Some(&format!("{}/v1", mydisease.uri())),
+        );
+        let _opentargets_env = set_env_var("BIOMCP_OPENTARGETS_BASE", Some(&opentargets.uri()));
+        let _monarch_env = set_env_var("BIOMCP_MONARCH_BASE", Some(&monarch.uri()));
+        let _civic_env = set_env_var("BIOMCP_CIVIC_BASE", Some(&civic.uri()));
+        let _mychem_env = set_env_var("BIOMCP_MYCHEM_BASE", Some(&format!("{}/v1", mychem.uri())));
+        let _ctgov_env = set_env_var(
+            "BIOMCP_CTGOV_BASE",
+            Some(&format!("{}/api/v2", ctgov.uri())),
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/v1/disease/MONDO:0003864"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "_id": "MONDO:0003864",
+                "mondo": {
+                    "name": "chronic lymphocytic leukemia",
+                    "synonym": ["CLL"]
+                },
+                "disease_ontology": {
+                    "name": "chronic lymphocytic leukemia"
+                }
+            })))
+            .mount(&mydisease)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SearchDisease"))
+            .and(body_string_contains("\"query\":\"chronic lymphocytic leukemia\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "search": {
+                        "hits": [
+                            {"id": "EFO_0000095", "name": "chronic lymphocytic leukemia", "entity": "disease"}
+                        ]
+                    }
+                }
+            })))
+            .mount(&opentargets)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DiseaseGenes"))
+            .and(body_string_contains("\"efoId\":\"EFO_0000095\""))
+            .and(body_string_contains("\"size\":20"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "disease": {
+                        "associatedTargets": {
+                            "rows": [
+                                {
+                                    "score": 0.99,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.88}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "TP53"}
+                                },
+                                {
+                                    "score": 0.94,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.71}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "ATM"}
+                                },
+                                {
+                                    "score": 0.91,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.69}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "NOTCH1"}
+                                },
+                                {
+                                    "score": 0.89,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.66}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "XPO1"}
+                                },
+                                {
+                                    "score": 0.86,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.62}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "MYD88"}
+                                },
+                                {
+                                    "score": 0.85,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.61}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "SF3B1"}
+                                },
+                                {
+                                    "score": 0.82,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.58}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "FBXW7"}
+                                },
+                                {
+                                    "score": 0.81,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.57}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "BCL2"}
+                                }
+                            ]
+                        }
+                    }
+                }
+            })))
+            .mount(&opentargets)
+            .await;
+
+        mock_empty_monarch(&monarch).await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("CivicContext"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "evidenceItems": {
+                        "totalCount": 1,
+                        "nodes": [
+                            {
+                                "id": 1,
+                                "name": "BCL2 evidence",
+                                "status": "ACCEPTED",
+                                "evidenceType": "PREDICTIVE",
+                                "evidenceLevel": "A",
+                                "significance": "SUPPORTS",
+                                "molecularProfile": {"name": "BCL2 amplification"},
+                                "disease": {"displayName": "chronic lymphocytic leukemia"},
+                                "therapies": [],
+                                "source": {
+                                    "citation": "PMID:1",
+                                    "sourceType": "PUBMED",
+                                    "publicationYear": 2024
+                                }
+                            }
+                        ]
+                    },
+                    "assertions": {
+                        "totalCount": 0,
+                        "nodes": []
+                    }
+                }
+            })))
+            .mount(&civic)
+            .await;
+
+        mock_empty_mychem(&mychem).await;
+        mock_empty_ctgov(&ctgov).await;
+
+        let disease = get("MONDO:0003864", &["genes".to_string()])
+            .await
+            .expect("CLL should resolve");
+
+        let genes = disease
+            .gene_associations
+            .iter()
+            .map(|row| row.gene.as_str())
+            .collect::<Vec<_>>();
+        let cll_gold = [
+            "TP53", "ATM", "NOTCH1", "XPO1", "MYD88", "SF3B1", "FBXW7", "BCL2",
+        ];
+        let matched = cll_gold.iter().filter(|gene| genes.contains(gene)).count();
+        assert!(
+            matched >= 8,
+            "expected >=8 CLL gold genes, got {matched}: {genes:?}"
+        );
+        assert!(disease.gene_associations.iter().any(|row| {
+            row.gene == "TP53"
+                && row.source.as_deref() == Some("OpenTargets")
+                && row.opentargets_score.is_some()
+        }));
+        assert!(disease.gene_associations.iter().any(|row| {
+            row.gene == "BCL2"
+                && row.source.as_deref() == Some("CIViC; OpenTargets")
+                && row.opentargets_score.is_some()
+        }));
+    }
+
+    #[tokio::test]
+    async fn get_disease_genes_promotes_opentargets_rows_for_cll() {
+        proof_get_disease_genes_promotes_opentargets_rows_for_cll().await;
+    }
+
+    pub(crate) async fn proof_get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity()
+    {
+        let _guard = lock_env().await;
+        let mydisease = MockServer::start().await;
+        let opentargets = MockServer::start().await;
+        let monarch = MockServer::start().await;
+        let civic = MockServer::start().await;
+        let ols4 = MockServer::start().await;
+        let mychem = MockServer::start().await;
+        let ctgov = MockServer::start().await;
+        let _mydisease_env = set_env_var(
+            "BIOMCP_MYDISEASE_BASE",
+            Some(&format!("{}/v1", mydisease.uri())),
+        );
+        let _opentargets_env = set_env_var("BIOMCP_OPENTARGETS_BASE", Some(&opentargets.uri()));
+        let _monarch_env = set_env_var("BIOMCP_MONARCH_BASE", Some(&monarch.uri()));
+        let _civic_env = set_env_var("BIOMCP_CIVIC_BASE", Some(&civic.uri()));
+        let _ols4_env = set_env_var("BIOMCP_OLS4_BASE", Some(&ols4.uri()));
+        let _mychem_env = set_env_var("BIOMCP_MYCHEM_BASE", Some(&format!("{}/v1", mychem.uri())));
+        let _ctgov_env = set_env_var(
+            "BIOMCP_CTGOV_BASE",
+            Some(&format!("{}/api/v2", ctgov.uri())),
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/v1/disease/MONDO:0019468"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "_id": "MONDO:0019468",
+                "mondo": {
+                    "name": "MONDO:0019468"
+                }
+            })))
+            .mount(&mydisease)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/search"))
+            .and(query_param("q", "MONDO:0019468"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "response": {
+                    "docs": [
+                        {
+                            "iri": "http://purl.obolibrary.org/obo/MONDO_0019468",
+                            "ontology_name": "mondo",
+                            "ontology_prefix": "mondo",
+                            "short_form": "MONDO_0019468",
+                            "obo_id": "MONDO:0019468",
+                            "label": "T-cell prolymphocytic leukemia",
+                            "description": [],
+                            "exact_synonyms": ["T-PLL"],
+                            "type": "class"
+                        }
+                    ]
+                }
+            })))
+            .mount(&ols4)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SearchDisease"))
+            .and(body_string_contains("\"query\":\"T-cell prolymphocytic leukemia\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "search": {
+                        "hits": [
+                            {"id": "EFO_1000560", "name": "T-cell prolymphocytic leukemia", "entity": "disease"}
+                        ]
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&opentargets)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DiseaseGenes"))
+            .and(body_string_contains("\"efoId\":\"EFO_1000560\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "disease": {
+                        "associatedTargets": {
+                            "rows": [
+                                {
+                                    "score": 0.95,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.82}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "ATM"}
+                                },
+                                {
+                                    "score": 0.88,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.77}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "JAK3"}
+                                },
+                                {
+                                    "score": 0.81,
+                                    "datatypeScores": [{"id": "somatic_mutation", "score": 0.72}],
+                                    "datasourceScores": [],
+                                    "target": {"approvedSymbol": "STAT5B"}
+                                }
+                            ]
+                        }
+                    }
+                }
+            })))
+            .mount(&opentargets)
+            .await;
+
+        mock_empty_monarch(&monarch).await;
+        mock_empty_civic(&civic).await;
+        mock_empty_mychem(&mychem).await;
+        mock_empty_ctgov(&ctgov).await;
+
+        let disease = get("MONDO:0019468", &["genes".to_string()])
+            .await
+            .expect("T-PLL should resolve");
+
+        assert_eq!(disease.name, "T-cell prolymphocytic leukemia");
+        assert!(disease.synonyms.iter().any(|value| value == "T-PLL"));
+        let genes = disease
+            .gene_associations
+            .iter()
+            .map(|row| row.gene.as_str())
+            .collect::<Vec<_>>();
+        assert!(genes.contains(&"ATM"));
+        assert!(genes.contains(&"JAK3"));
+        assert!(genes.contains(&"STAT5B"));
+    }
+
+    #[tokio::test]
+    async fn get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity() {
+        proof_get_disease_genes_uses_ols4_label_fallback_for_sparse_mondo_identity().await;
     }
 }

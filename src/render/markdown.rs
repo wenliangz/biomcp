@@ -4236,7 +4236,7 @@ pub fn render_discover(result: &DiscoverResult) -> Result<String, BioMcpError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::entities::adverse_event::DeviceEvent;
     use crate::entities::article::{
@@ -5036,6 +5036,91 @@ mod tests {
         assert!(genes.contains("| Gene | Relationship | Source | OpenTargets |"));
         assert!(genes.contains("overall 0.912; GWAS 0.321; rare 0.654; somatic 0.876"));
         assert!(genes.contains("| NRAS | associated | CIViC | - |"));
+    }
+
+    pub(crate) fn proof_disease_markdown_renders_ot_only_gene_association_table() {
+        let disease = Disease {
+            id: "MONDO:0003864".to_string(),
+            name: "chronic lymphocytic leukemia".to_string(),
+            definition: None,
+            synonyms: Vec::new(),
+            parents: Vec::new(),
+            associated_genes: vec!["TP53".to_string(), "ATM".to_string()],
+            gene_associations: vec![
+                crate::entities::disease::DiseaseGeneAssociation {
+                    gene: "TP53".to_string(),
+                    relationship: Some("associated with disease".to_string()),
+                    source: Some("OpenTargets".to_string()),
+                    opentargets_score: Some(
+                        crate::entities::disease::DiseaseAssociationScoreSummary {
+                            overall_score: 0.991,
+                            gwas_score: None,
+                            rare_variant_score: None,
+                            somatic_mutation_score: Some(0.881),
+                        },
+                    ),
+                },
+                crate::entities::disease::DiseaseGeneAssociation {
+                    gene: "ATM".to_string(),
+                    relationship: Some("associated with disease".to_string()),
+                    source: Some("OpenTargets".to_string()),
+                    opentargets_score: Some(
+                        crate::entities::disease::DiseaseAssociationScoreSummary {
+                            overall_score: 0.942,
+                            gwas_score: None,
+                            rare_variant_score: None,
+                            somatic_mutation_score: Some(0.731),
+                        },
+                    ),
+                },
+            ],
+            top_genes: vec!["TP53".to_string(), "ATM".to_string()],
+            top_gene_scores: vec![
+                crate::entities::disease::DiseaseTargetScore {
+                    symbol: "TP53".to_string(),
+                    summary: crate::entities::disease::DiseaseAssociationScoreSummary {
+                        overall_score: 0.991,
+                        gwas_score: None,
+                        rare_variant_score: None,
+                        somatic_mutation_score: Some(0.881),
+                    },
+                },
+                crate::entities::disease::DiseaseTargetScore {
+                    symbol: "ATM".to_string(),
+                    summary: crate::entities::disease::DiseaseAssociationScoreSummary {
+                        overall_score: 0.942,
+                        gwas_score: None,
+                        rare_variant_score: None,
+                        somatic_mutation_score: Some(0.731),
+                    },
+                },
+            ],
+            treatment_landscape: Vec::new(),
+            recruiting_trial_count: None,
+            pathways: Vec::new(),
+            phenotypes: Vec::new(),
+            key_features: Vec::new(),
+            variants: Vec::new(),
+            top_variant: None,
+            models: Vec::new(),
+            prevalence: Vec::new(),
+            prevalence_note: None,
+            civic: None,
+            disgenet: None,
+            xrefs: std::collections::HashMap::new(),
+        };
+
+        let genes = disease_markdown(&disease, &["genes".to_string()]).expect("rendered markdown");
+        assert!(genes.contains("| Gene | Relationship | Source | OpenTargets |"));
+        assert!(genes.contains(
+            "| TP53 | associated with disease | OpenTargets | overall 0.991; somatic 0.881 |"
+        ));
+        assert!(!genes.contains("TP53, ATM"));
+    }
+
+    #[test]
+    fn disease_markdown_renders_ot_only_gene_association_table() {
+        proof_disease_markdown_renders_ot_only_gene_association_table();
     }
 
     #[test]

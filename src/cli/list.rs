@@ -346,7 +346,7 @@ fn list_disease() -> String {
 ## Commands
 
 - `get disease <name_or_id>` - resolve MONDO/DOID or best match by name with OpenTargets gene scores
-- `get disease <name_or_id> genes` - Monarch associations augmented with CIViC drivers and OpenTargets scores
+- `get disease <name_or_id> genes` - Monarch rows plus additive CIViC/OpenTargets disease-gene associations with merged OpenTargets scores
 - `get disease <name_or_id> pathways` - Reactome pathways from associated genes
 - `get disease <name_or_id> phenotypes` - HPO phenotypes with resolved names
 - `get disease <name_or_id> variants` - CIViC disease-associated molecular profiles
