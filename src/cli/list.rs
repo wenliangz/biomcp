@@ -362,6 +362,7 @@ fn list_disease() -> String {
 - `search disease -q <query> --inheritance <pattern>`
 - `search disease -q <query> --phenotype <HP:...>`
 - `search disease -q <query> --onset <period>`
+- `search disease -q <query> --no-fallback` - skip discover recovery and keep the direct zero-result response
 - `search disease ... --limit <N> --offset <N>`
 
 ## Helpers
