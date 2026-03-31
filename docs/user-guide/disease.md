@@ -26,11 +26,12 @@ biomcp get disease MONDO:0005105
 ```
 
 The base disease card includes concise OpenTargets gene-score summaries when OpenTargets
-returns ranked associated targets.
+returns ranked associated targets. Prefer canonical `MONDO:<id>` values in automation:
+they are the stable form BioMCP uses for normalization and fallback repair.
 
 ## Disease sections
 
-Genes (Monarch-backed associations with relationship/source when available, augmented with OpenTargets scores when present):
+Genes (Monarch-backed rows plus additive CIViC and OpenTargets disease-gene associations; OpenTargets scores attach to any rendered row with a matching target score):
 
 ```bash
 biomcp get disease MONDO:0005105 genes

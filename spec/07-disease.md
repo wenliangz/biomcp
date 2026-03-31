@@ -1,6 +1,6 @@
 # Disease Queries
 
-Disease commands normalize labels to ontology-backed identifiers and provide cross-entity pivots. This file validates melanoma-centric disease workflows including genes, trials, articles, and drugs. Assertions focus on stable schema and identifier markers rather than dynamic counts.
+Disease commands normalize labels to ontology-backed identifiers and provide cross-entity pivots. This file validates melanoma-centric workflows plus canonical MONDO-ID disease-gene paths for somatic and germline coverage. Assertions focus on stable schema and identifier markers rather than dynamic counts.
 
 | Section | Command focus | Why it matters |
 |---|---|---|
@@ -76,6 +76,59 @@ out="$(biomcp get disease melanoma genes)"
 echo "$out" | mustmatch like "## Associated Genes"
 echo "$out" | mustmatch like "| Gene | Relationship | Source | OpenTargets |"
 echo "$out" | mustmatch '/overall [0-9.]+/'
+```
+
+## Canonical CLL Disease Genes
+
+Canonical MONDO IDs should surface OpenTargets-contributed cancer genes directly in the disease-gene table rather than only in the compact summary.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0003864 genes)"
+echo "$out" | mustmatch like "## Associated Genes"
+echo "$out" | mustmatch like "| Gene | Relationship | Source | OpenTargets |"
+echo "$out" | mustmatch like "TP53"
+echo "$out" | mustmatch like "ATM"
+echo "$out" | mustmatch like "NOTCH1"
+echo "$out" | mustmatch like "OpenTargets"
+echo "$out" | mustmatch '/overall [0-9.]+/'
+```
+
+## Canonical T-PLL Disease Genes
+
+Sparse canonical MONDO cards should recover a human-readable disease label and associated genes through the OLS4-to-OpenTargets path.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0019468 genes)"
+echo "$out" | mustmatch like "# T-cell prolymphocytic leukemia"
+echo "$out" | mustmatch like "## Associated Genes"
+echo "$out" | mustmatch like "ATM"
+echo "$out" | mustmatch like "JAK3"
+echo "$out" | mustmatch like "STAT5B"
+echo "$out" | mustmatch like "OpenTargets"
+```
+
+## Canonical Parkinson Disease Genes
+
+Germline-oriented diseases should still render a populated genes table with stable Parkinson anchors.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0005180 genes)"
+echo "$out" | mustmatch like "## Associated Genes"
+echo "$out" | mustmatch like "SNCA"
+```
+
+## Canonical CMT1A Disease Genes
+
+Narrow Mendelian diseases should keep their focused Monarch-style signal instead of regressing into unrelated OT noise.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get disease MONDO:0007309 genes)"
+echo "$out" | mustmatch like "## Associated Genes"
+echo "$out" | mustmatch like "PMP22"
 ```
 
 ## Disease Top Variant Summary

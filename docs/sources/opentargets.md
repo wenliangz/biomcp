@@ -17,7 +17,7 @@ In BioMCP, OpenTargets powers the gene `druggability` section and contributes ra
 | `get gene <symbol> druggability` | Tractability, safety, and targetability context | Combined with DGIdb interactions in one gene section |
 | `get drug <name> targets` | Generic drug-target context for known therapies | Mixed with ChEMBL target evidence; CIViC may add separate variant-target annotations |
 | `get drug <name> indications` | Disease and indication context for drugs | Mixed with ChEMBL indication enrichment |
-| `get disease <id> genes` | Ranked associated genes for a disease | Monarch-backed rows can be augmented with OpenTargets scores |
+| `get disease <id> genes` | Ranked associated genes for a disease | OpenTargets can add OT-only disease-gene rows and also attach scores to Monarch/CIViC rows |
 | `get disease <id> prevalence` | Prevalence-like evidence and disease burden context | OpenTargets-backed disease section |
 
 ## Example commands
@@ -38,7 +38,7 @@ Returns a druggability section with tractability and safety signals.
 biomcp get disease MONDO:0005105 genes
 ```
 
-Returns disease-associated genes with OpenTargets score summaries when available.
+Returns disease-associated genes where OpenTargets can both add disease-gene rows and attach score summaries.
 
 ```bash
 biomcp get disease MONDO:0005105 prevalence

@@ -32,7 +32,7 @@ Use [Source Licensing and Terms](source-licensing.md) for provider terms, reuse 
 | Discover clinical crosswalks | UMLS REST API | `https://uts-ws.nlm.nih.gov/rest` | Optional (`UMLS_API_KEY`) | Adds ICD-10, SNOMED CT, RxNorm, OMIM, and related cross-vocabulary IDs to discover results |
 | Discover plain-language topics | MedlinePlus Search | `https://wsearch.nlm.nih.gov/ws/query` | No | Best-effort disease/symptom context for `biomcp discover`; suppressed for gene/drug/pathway flows |
 | Phenotype term resolution | HPO JAX API | `https://ontology.jax.org/api/hp` | No | Direct HPO term lookup and normalization used by phenotype workflows |
-| Disease genes/pathways/prevalence | OpenTargets GraphQL + Reactome | `https://api.platform.opentargets.org/api/v4/graphql`, `https://reactome.org/ContentService` | No | Baseline disease context with ranked associated targets and OpenTargets score summaries |
+| Disease genes/pathways/prevalence | OpenTargets GraphQL + Reactome | `https://api.platform.opentargets.org/api/v4/graphql`, `https://reactome.org/ContentService` | No | Baseline disease context with ranked associated targets; disease `genes` can promote OpenTargets rows directly into the disease-gene table and attach OT score summaries |
 | Disease `genes` and `phenotypes` sections | Monarch Initiative API v3 | `https://api-v3.monarchinitiative.org` | No | Core disease associations and phenotype evidence |
 | Disease `genes` and `variants` augmentation | CIViC | `https://civicdb.org/api` | No | Somatic driver augmentation for genes and disease-associated molecular profiles |
 | Disease `models` section | Monarch Initiative API v3 | `https://api-v3.monarchinitiative.org` | No | Model-organism evidence with relationship and provenance |
