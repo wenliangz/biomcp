@@ -647,7 +647,7 @@ fn plan_backends(
         ArticleSourceFilter::PubTator => {
             if has_strict_europepmc_filters(filters) {
                 return Err(BioMcpError::InvalidArgument(
-                    "--source pubtator does not support strict filters --open-access or --type. Use --source europepmc or --source all.".into(),
+                    "--source pubtator does not support strict filters --open-access or --type. --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering. Use --source europepmc or remove --type.".into(),
                 ));
             }
             Ok(BackendPlan::PubTatorOnly)
@@ -667,6 +667,26 @@ pub fn semantic_scholar_search_enabled(
     source: ArticleSourceFilter,
 ) -> bool {
     source == ArticleSourceFilter::All && !has_strict_europepmc_filters(filters)
+}
+
+pub(crate) fn article_type_limitation_note(
+    filters: &ArticleSearchFilters,
+    source: ArticleSourceFilter,
+) -> Option<String> {
+    let has_type = filters
+        .article_type
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    if !has_type {
+        return None;
+    }
+    match source {
+        ArticleSourceFilter::All | ArticleSourceFilter::EuropePmc => Some(
+            "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.".into(),
+        ),
+        ArticleSourceFilter::PubTator => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2865,6 +2885,29 @@ mod tests {
         let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
             .expect_err("planner should reject strict-only filter on pubtator");
         assert!(err.to_string().contains("--type"));
+        assert!(err.to_string().contains("Europe PMC"));
+    }
+
+    #[test]
+    fn article_type_limitation_note_is_emitted_for_all_and_europepmc() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.article_type = Some("review".into());
+
+        assert!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::All)
+                .as_deref()
+                .is_some_and(|value| value.contains("Europe PMC"))
+        );
+        assert!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::EuropePmc)
+                .as_deref()
+                .is_some_and(|value| value.contains("Europe PMC"))
+        );
+        assert_eq!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::PubTator),
+            None
+        );
     }
 
     #[tokio::test]

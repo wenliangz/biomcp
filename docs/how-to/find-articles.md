@@ -49,6 +49,16 @@ DOIs and want compact title/journal/year/entity cards before opening one paper
 in full detail. The helper preserves input order and still works when
 `S2_API_KEY` is unset.
 
+## Use `--type` carefully
+
+```bash
+biomcp search article -g BRAF --type review --limit 5
+```
+
+`--type` is Europe PMC only today. BioMCP keeps the filter strict instead of
+guessing publication type across PubTator3 or Semantic Scholar rows, so avoid
+`--type` when recall across sources matters for niche queries.
+
 ## Inspect the ranking rationale in JSON
 
 ```bash

@@ -21,6 +21,7 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     reproduce = _read("docs/how-to/reproduce-papers.md")
     cli_reference = _read("docs/user-guide/cli-reference.md")
     article_guide = _read("docs/user-guide/article.md")
+    find_articles = _read("docs/how-to/find-articles.md")
     data_sources = _read("docs/reference/data-sources.md")
     quick_reference = _read("docs/reference/quick-reference.md")
     pivot_guide = _read("docs/how-to/cross-entity-pivots.md")
@@ -93,8 +94,32 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "## Output and evidence rules" in skill_file
     assert 'biomcp search drug --indication "<disease>"' in skill_file
     assert 'biomcp discover "<free text>"' in skill_file
+    assert (
+        "After `search article`, default to `biomcp article batch <id1> <id2> ...` instead of repeated `get article` calls."
+        in skill_file
+    )
+    assert (
+        "Use `biomcp batch gene <GENE1,GENE2,...>` when you need the same basic card fields, chromosome, or sectioned output for multiple genes."
+        in skill_file
+    )
+    assert (
+        "For diseases with weak ontology-name coverage, run `biomcp discover \"<disease>\"` first, then pass a resolved `MESH:...`, `OMIM:...`, `ICD10CM:...`, `MONDO:...`, or `DOID:...` identifier to `biomcp get disease`."
+        in skill_file
+    )
+    assert (
+        "Avoid `--type` when recall matters across sources. `--type` is Europe PMC only today because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
+        in skill_file
+    )
     assert "_meta.next_commands" in skill_file
     assert "Run `biomcp skill list` for worked examples" in skill_file
+
+    assert "Use `article batch` as the default follow-up after `search article`" in article_guide
+    assert "--type" in article_guide and "Europe PMC only" in article_guide
+    assert (
+        "Use `article batch` after search when you already know the candidate PMIDs or"
+        in find_articles
+    )
+    assert "`--type` is Europe PMC only today." in find_articles
 
     assert "# Pattern: Treatment / approved-drug lookup" in treatment_use_case
     assert 'biomcp search drug --indication "myasthenia gravis" --limit 5' in treatment_use_case

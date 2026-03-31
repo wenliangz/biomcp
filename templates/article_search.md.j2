@@ -7,6 +7,10 @@ Try broader search terms or check spelling.
 {% else -%}
 Found {{ count }} article{% if count != 1 %}s{% endif %}
 
+{% if note %}
+{{ note }}
+
+{% endif %}
 Semantic Scholar: {% if semantic_scholar_enabled %}enabled{% else %}disabled{% endif %}
 {% if sort == "relevance" %}
 Ranking: {{ ranking_policy }}

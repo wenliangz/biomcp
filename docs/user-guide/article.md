@@ -55,6 +55,9 @@ Default article search excludes confirmed retractions unless you pass
 `--include-retracted`. Sources that do not expose retraction metadata still
 participate in the search, and JSON search rows keep the tri-state contract:
 `"is_retracted": true`, `false`, or `null`.
+`--type` is Europe PMC only today; BioMCP surfaces that note in markdown, JSON,
+and debug-plan output instead of silently pretending the filter applies across
+PubTator3 and Semantic Scholar.
 
 To search a single backend:
 
@@ -116,6 +119,8 @@ biomcp article recommendations 22663011 --limit 3   # Semantic Scholar related p
 `requested_id` together with resolved PMID/PMCID/DOI fields. When Semantic
 Scholar data is available, the batch helper can add optional TLDR and citation
 metadata. `S2_API_KEY` makes that enrichment authenticated and more reliable.
+Use `article batch` as the default follow-up after `search article` when you
+already have several shortlisted PMIDs or DOIs.
 
 The Semantic Scholar graph helpers also work without `S2_API_KEY`, but they use
 the shared pool and can fail fast on HTTP 429 with guidance to set the key for

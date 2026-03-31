@@ -307,6 +307,82 @@ fn normalize_disease_id(value: &str) -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DiseaseLookupInput {
+    CanonicalOntologyId(String),
+    CrosswalkId(DiseaseXrefKind, String),
+    FreeText,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiseaseXrefKind {
+    Mesh,
+    Omim,
+    Icd10Cm,
+}
+
+impl DiseaseXrefKind {
+    fn source_key(self) -> &'static str {
+        match self {
+            Self::Mesh => "mesh",
+            Self::Omim => "omim",
+            Self::Icd10Cm => "icd10cm",
+        }
+    }
+}
+
+fn parse_disease_lookup_input(value: &str) -> DiseaseLookupInput {
+    if let Some(id) = normalize_disease_id(value) {
+        return DiseaseLookupInput::CanonicalOntologyId(id);
+    }
+
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return DiseaseLookupInput::FreeText;
+    }
+
+    let Some((prefix, raw_value)) = trimmed.split_once(':') else {
+        return DiseaseLookupInput::FreeText;
+    };
+    let raw_value = raw_value.trim();
+    if raw_value.is_empty() {
+        return DiseaseLookupInput::FreeText;
+    }
+
+    let kind = if prefix.eq_ignore_ascii_case("MESH") {
+        Some(DiseaseXrefKind::Mesh)
+    } else if prefix.eq_ignore_ascii_case("OMIM") {
+        Some(DiseaseXrefKind::Omim)
+    } else if prefix.eq_ignore_ascii_case("ICD10CM") {
+        Some(DiseaseXrefKind::Icd10Cm)
+    } else {
+        None
+    };
+
+    if let Some(kind) = kind {
+        DiseaseLookupInput::CrosswalkId(kind, raw_value.to_string())
+    } else {
+        DiseaseLookupInput::FreeText
+    }
+}
+
+fn preferred_crosswalk_hit(hits: Vec<MyDiseaseHit>) -> Option<MyDiseaseHit> {
+    hits.into_iter().min_by(|left, right| {
+        let rank = |id: &str| {
+            if id.starts_with("MONDO:") {
+                0u8
+            } else if id.starts_with("DOID:") {
+                1u8
+            } else {
+                2u8
+            }
+        };
+        rank(&left.id)
+            .cmp(&rank(&right.id))
+            .then_with(|| left.id.cmp(&right.id))
+    })
+}
+
 fn normalize_disease_text(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -1370,13 +1446,32 @@ pub async fn get(name_or_id: &str, sections: &[String]) -> Result<Disease, BioMc
 
     let client = MyDiseaseClient::new()?;
 
-    if let Some(id) = normalize_disease_id(name_or_id) {
-        let hit = client.get(&id).await?;
-        let mut disease = transform::disease::from_mydisease_hit(hit);
-        disease.parents = resolve_parent_names(&client, &disease.parents).await;
-        enrich_base_context(&mut disease).await;
-        apply_requested_sections(&mut disease, parsed_sections).await?;
-        return Ok(disease);
+    match parse_disease_lookup_input(name_or_id) {
+        DiseaseLookupInput::CanonicalOntologyId(id) => {
+            let hit = client.get(&id).await?;
+            let mut disease = transform::disease::from_mydisease_hit(hit);
+            disease.parents = resolve_parent_names(&client, &disease.parents).await;
+            enrich_base_context(&mut disease).await;
+            apply_requested_sections(&mut disease, parsed_sections).await?;
+            return Ok(disease);
+        }
+        DiseaseLookupInput::CrosswalkId(kind, value) => {
+            let resp = client
+                .lookup_disease_by_xref(kind.source_key(), &value, 5)
+                .await?;
+            let best = preferred_crosswalk_hit(resp.hits).ok_or_else(|| BioMcpError::NotFound {
+                entity: "disease".into(),
+                id: name_or_id.trim().to_string(),
+                suggestion: "Try biomcp discover \"<disease name>\" to resolve a supported disease identifier.".into(),
+            })?;
+            let hit = client.get(&best.id).await?;
+            let mut disease = transform::disease::from_mydisease_hit(hit);
+            disease.parents = resolve_parent_names(&client, &disease.parents).await;
+            enrich_base_context(&mut disease).await;
+            apply_requested_sections(&mut disease, parsed_sections).await?;
+            return Ok(disease);
+        }
+        DiseaseLookupInput::FreeText => {}
     }
 
     let best = resolve_disease_hit_by_name(&client, name_or_id).await?;
@@ -1791,6 +1886,41 @@ pub async fn search_phenotype_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn lock_env() -> tokio::sync::MutexGuard<'static, ()> {
+        crate::test_support::env_lock().lock().await
+    }
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // Safety: tests serialize environment mutation with `lock_env()`.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.name, value),
+                    None => std::env::remove_var(self.name),
+                }
+            }
+        }
+    }
+
+    fn set_env_var(name: &'static str, value: Option<&str>) -> EnvVarGuard {
+        let previous = std::env::var(name).ok();
+        // Safety: tests serialize environment mutation with `lock_env()`.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        EnvVarGuard { name, previous }
+    }
 
     #[test]
     fn normalize_disease_id_basic() {
@@ -1809,6 +1939,41 @@ mod tests {
         assert_eq!(normalize_disease_id("lung cancer"), None);
         assert_eq!(normalize_disease_id("MONDO:"), None);
         assert_eq!(normalize_disease_id("HP:0002861"), None);
+    }
+
+    #[test]
+    fn parse_disease_lookup_input_distinguishes_canonical_crosswalk_and_text() {
+        assert_eq!(
+            parse_disease_lookup_input("MONDO:0005105"),
+            DiseaseLookupInput::CanonicalOntologyId("MONDO:0005105".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("mesh:D008545"),
+            DiseaseLookupInput::CrosswalkId(DiseaseXrefKind::Mesh, "D008545".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("OMIM:155600"),
+            DiseaseLookupInput::CrosswalkId(DiseaseXrefKind::Omim, "155600".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("ICD10CM:Q07.0"),
+            DiseaseLookupInput::CrosswalkId(DiseaseXrefKind::Icd10Cm, "Q07.0".into())
+        );
+        assert_eq!(
+            parse_disease_lookup_input("Arnold Chiari syndrome"),
+            DiseaseLookupInput::FreeText
+        );
+    }
+
+    #[test]
+    fn preferred_crosswalk_hit_prefers_mondo_then_doid_then_lexicographic_id() {
+        let best = preferred_crosswalk_hit(vec![
+            test_disease_hit("DOID:1909", "melanoma", &[], &[]),
+            test_disease_hit("MONDO:0005105", "melanoma", &[], &[]),
+            test_disease_hit("MESH:D008545", "melanoma", &[], &[]),
+        ])
+        .expect("a best hit should be selected");
+        assert_eq!(best.id, "MONDO:0005105");
     }
 
     #[test]
@@ -1932,6 +2097,166 @@ mod tests {
         let queries = resolver_queries("breast cancer");
         assert!(queries.iter().any(|q| q == "breast cancer"));
         assert!(queries.iter().any(|q| q == "breast carcinoma"));
+    }
+
+    #[tokio::test]
+    async fn get_disease_preserves_canonical_mondo_lookup_path() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _env = set_env_var(
+            "BIOMCP_MYDISEASE_BASE",
+            Some(&format!("{}/v1", server.uri())),
+        );
+
+        let body = r#"{
+          "_id": "MONDO:0005105",
+          "mondo": {
+            "name": "melanoma",
+            "definition": "Example disease."
+          }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/disease/MONDO:0005105"))
+            .and(query_param(
+                "fields",
+                "_id,mondo.name,mondo.definition,mondo.parents,mondo.synonym,mondo.xrefs,disease_ontology.name,disease_ontology.doid,disease_ontology.def,disease_ontology.parents,disease_ontology.synonyms,disease_ontology.xrefs,umls.mesh,umls.nci,umls.snomed,umls.icd10am,disgenet.genes_related_to_disease,hpo.phenotype_related_to_disease.hpo_id,hpo.phenotype_related_to_disease.evidence,hpo.phenotype_related_to_disease.hp_freq,hpo.inheritance.hpo_id",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let disease = get("MONDO:0005105", &[])
+            .await
+            .expect("canonical get should resolve");
+        assert_eq!(disease.id, "MONDO:0005105");
+        assert_eq!(disease.name, "melanoma");
+    }
+
+    #[tokio::test]
+    async fn get_disease_resolves_mesh_and_omim_crosswalk_ids_before_fetch() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _env = set_env_var(
+            "BIOMCP_MYDISEASE_BASE",
+            Some(&format!("{}/v1", server.uri())),
+        );
+
+        let melanoma_get = r#"{
+          "_id": "MONDO:0005105",
+          "mondo": {
+            "name": "melanoma",
+            "definition": "Example disease."
+          },
+          "disease_ontology": {
+            "name": "melanoma"
+          }
+        }"#;
+        let marfan_get = r#"{
+          "_id": "MONDO:0007947",
+          "mondo": {
+            "name": "Marfan syndrome",
+            "definition": "Example syndrome."
+          },
+          "disease_ontology": {
+            "name": "Marfan syndrome"
+          }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param(
+                "q",
+                "(mondo.xrefs.mesh:\"D008545\" OR disease_ontology.xrefs.mesh:\"D008545\" OR umls.mesh:\"D008545\")",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"total":2,"hits":[{"_id":"DOID:1909","disease_ontology":{"name":"melanoma"}},{"_id":"MONDO:0005105","mondo":{"name":"melanoma"}}]}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param(
+                "q",
+                "(mondo.xrefs.omim:\"154700\" OR disease_ontology.xrefs.omim:\"154700\")",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"total":1,"hits":[{"_id":"MONDO:0007947","mondo":{"name":"Marfan syndrome"}}]}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/disease/MONDO:0005105"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(melanoma_get, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/disease/MONDO:0007947"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(marfan_get, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mesh = get("MESH:D008545", &[])
+            .await
+            .expect("mesh crosswalk should resolve");
+        assert_eq!(mesh.id, "MONDO:0005105");
+        assert_eq!(mesh.name, "melanoma");
+
+        let omim = get("OMIM:154700", &[])
+            .await
+            .expect("omim crosswalk should resolve");
+        assert_eq!(omim.id, "MONDO:0007947");
+        assert_eq!(omim.name, "Marfan syndrome");
+    }
+
+    #[tokio::test]
+    async fn get_disease_returns_not_found_for_unresolved_crosswalk_without_name_fallback() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _env = set_env_var(
+            "BIOMCP_MYDISEASE_BASE",
+            Some(&format!("{}/v1", server.uri())),
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/v1/query"))
+            .and(query_param(
+                "q",
+                "(mondo.xrefs.omim:\"000000\" OR disease_ontology.xrefs.omim:\"000000\")",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"total":0,"hits":[]}"#, "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = get("OMIM:000000", &[])
+            .await
+            .expect_err("unresolved crosswalk should return not found");
+        match err {
+            BioMcpError::NotFound {
+                entity,
+                id,
+                suggestion,
+            } => {
+                assert_eq!(entity, "disease");
+                assert_eq!(id, "OMIM:000000");
+                assert!(suggestion.contains("biomcp discover"));
+            }
+            other => panic!("expected not found, got {other:?}"),
+        }
     }
 
     #[test]

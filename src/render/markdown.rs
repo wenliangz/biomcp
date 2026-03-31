@@ -2135,6 +2135,7 @@ pub fn article_search_markdown_with_footer_and_context(
     pagination_footer: &str,
     sort: ArticleSort,
     semantic_scholar_enabled: bool,
+    note: Option<&str>,
     debug_plan: Option<&DebugPlan>,
 ) -> Result<String, BioMcpError> {
     let rows = results
@@ -2156,6 +2157,7 @@ pub fn article_search_markdown_with_footer_and_context(
         count => results.len(),
         rows => rows,
         semantic_scholar_enabled => semantic_scholar_enabled,
+        note => note,
         sort => sort.as_str(),
         ranking_policy => "directness-first (title coverage > title+abstract coverage > study/review cue > citation support)",
         pagination_footer => pagination_footer,
@@ -7986,9 +7988,15 @@ mod tests {
             "",
             crate::entities::article::ArticleSort::Relevance,
             true,
+            Some(
+                "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.",
+            ),
             None,
         )
         .expect("markdown should render");
+        assert!(markdown.contains(
+            "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
+        ));
         assert!(markdown.contains("Semantic Scholar: enabled"));
         assert!(markdown.contains("Ranking: directness-first"));
         assert!(markdown.contains("| PMID | Title | Source(s) | Date | Why | Cit. |"));
@@ -8119,6 +8127,7 @@ mod tests {
             "",
             crate::entities::article::ArticleSort::Relevance,
             true,
+            None,
             Some(&debug_plan),
         )
         .expect("markdown should render");
