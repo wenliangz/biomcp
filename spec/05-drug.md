@@ -158,7 +158,7 @@ out="$("$bin" get drug --help)"
 echo "$out" | mustmatch like "Sections to include (label, regulatory, safety, shortage, targets, indications, interactions, civic, approvals, all)"
 echo "$out" | mustmatch like "Data region for regional sections"
 echo "$out" | mustmatch like "--region <REGION>"
-echo "$out" | mustmatch like "--raw"
+echo "$out" | mustmatch '/Preserve raw FDA label subsections when used with .*label.*all/'
 echo "$out" | mustmatch like "biomcp get drug pembrolizumab approvals"
 echo "$out" | mustmatch like "biomcp get drug pembrolizumab label --raw"
 echo "$out" | mustmatch like "biomcp get drug Keytruda regulatory --region eu"
