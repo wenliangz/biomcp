@@ -5,26 +5,8 @@ use tokio::io::AsyncWriteExt;
 
 use crate::error::BioMcpError;
 
-#[allow(dead_code)]
-pub fn biomcp_cache_dir() -> PathBuf {
-    match dirs::cache_dir() {
-        Some(dir) => dir.join("biomcp"),
-        None => std::env::temp_dir().join("biomcp"),
-    }
-}
-
-#[allow(dead_code)]
-pub fn biomcp_downloads_dir() -> PathBuf {
-    std::env::temp_dir().join("biomcp")
-}
-
 pub fn cache_key(id: &str) -> String {
     format!("{:x}", md5::compute(id.as_bytes()))
-}
-
-#[allow(dead_code)]
-pub fn cache_path(id: &str) -> PathBuf {
-    biomcp_downloads_dir().join(format!("{}.txt", cache_key(id)))
 }
 
 fn download_path(id: &str) -> Result<PathBuf, BioMcpError> {
