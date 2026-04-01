@@ -320,7 +320,7 @@ mod tests {
     fn env_cache_dir_overrides_file_and_default() {
         let default_root = PathBuf::from("/tmp/default-cache");
         let config = resolve_cache_config_from_parts(
-            Some("/env-cache"),
+            Some("  /env-cache  "),
             None,
             Some("[cache]\ndir = \"/file-cache\"\n"),
             default_root,
@@ -333,7 +333,7 @@ mod tests {
     fn env_max_size_overrides_file_and_default() {
         let config = resolve_cache_config_from_parts(
             None,
-            Some("5000"),
+            Some(" 5000 "),
             Some("[cache]\nmax_size = 42\n"),
             PathBuf::from("/tmp/default-cache"),
         )
@@ -456,8 +456,13 @@ mod tests {
     #[test]
     fn toml_without_cache_section_uses_defaults() {
         let default_root = PathBuf::from("/tmp/default-cache");
-        let config = resolve_cache_config_from_parts(None, None, Some(""), default_root.clone())
-            .expect("missing [cache] should use defaults");
+        let config = resolve_cache_config_from_parts(
+            None,
+            None,
+            Some("# no [cache] section\n"),
+            default_root.clone(),
+        )
+        .expect("missing [cache] should use defaults");
         assert_eq!(config, default_config_with_root(default_root));
     }
 
@@ -549,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_cache_config_reports_path_on_parse_failure() {
+    fn resolve_cache_config_reports_path_on_failure() {
         let _lock = env_lock();
         let root = TempDirGuard::new("parse-error");
         let cache_home = root.path().join("cache-home");
@@ -569,6 +574,31 @@ mod tests {
         assert!(
             message.contains(&*config_path.to_string_lossy()),
             "expected parse error to include config path, got: {message}"
+        );
+    }
+
+    #[test]
+    fn resolve_cache_config_reports_path_on_read_failure() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("read-error");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let config_dir = config_home.join("biomcp");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_path = config_dir.join("cache.toml");
+        std::fs::create_dir_all(&config_path).expect("create directory at cache.toml path");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+
+        let err = resolve_cache_config().expect_err("directory at cache.toml path should fail");
+        let message = err.to_string();
+        assert!(matches!(err, BioMcpError::Io(_)));
+        assert!(
+            message.contains(&*config_path.to_string_lossy()),
+            "expected read error to include config path, got: {message}"
         );
     }
 }
