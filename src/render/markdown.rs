@@ -1061,7 +1061,7 @@ fn section_description(entity: &str, section: &str) -> &'static str {
 }
 
 fn is_trial_results_search_command(command: &str) -> bool {
-    command.starts_with("biomcp search article -q \"NCT")
+    (command.starts_with("biomcp search article -q \"NCT") && command.ends_with(" --limit 5"))
         || (command.starts_with("biomcp search article --drug ")
             && command.contains(" -q \"NCT")
             && command.ends_with(" --limit 5"))
@@ -1465,7 +1465,7 @@ fn trial_results_search_command(trial: &Trial) -> Option<String> {
     } else {
         format!("{nct_id} {title_seed}")
     };
-    let seed_q = quote_arg(&seed);
+    let seed_q = format!("\"{}\"", seed.replace('\"', "\\\""));
     if seed_q.is_empty() {
         return None;
     }
@@ -7039,6 +7039,73 @@ pub(crate) mod tests {
         assert!(!related.iter().any(|cmd| {
             cmd.starts_with("biomcp search article --drug ") && cmd.contains(" --limit 5")
         }));
+    }
+
+    #[test]
+    fn related_trial_completed_promotes_results_search_before_condition_pivots() {
+        let trial = crate::entities::trial::Trial {
+            nct_id: "NCT01234567".to_string(),
+            source: None,
+            title: "Example completed trial".to_string(),
+            status: "Completed".to_string(),
+            phase: None,
+            study_type: None,
+            age_range: None,
+            conditions: vec!["melanoma".to_string()],
+            interventions: vec!["dabrafenib".to_string()],
+            sponsor: None,
+            enrollment: None,
+            summary: None,
+            start_date: None,
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        let related = related_trial(&trial);
+        assert_eq!(
+            related[0],
+            "biomcp search article --drug dabrafenib -q \"NCT01234567 Example completed trial\" --limit 5"
+        );
+        assert_eq!(related[1], "biomcp search disease --query melanoma");
+    }
+
+    #[test]
+    fn related_trial_results_search_without_intervention_keeps_seed_quoted() {
+        let trial = crate::entities::trial::Trial {
+            nct_id: "NCT09999999".to_string(),
+            source: None,
+            title: "   ".to_string(),
+            status: "Completed".to_string(),
+            phase: None,
+            study_type: None,
+            age_range: None,
+            conditions: vec!["melanoma".to_string()],
+            interventions: Vec::new(),
+            sponsor: None,
+            enrollment: None,
+            summary: None,
+            start_date: None,
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        let related = related_trial(&trial);
+        assert_eq!(
+            related[0],
+            "biomcp search article -q \"NCT09999999\" --limit 5"
+        );
+        assert_eq!(
+            related_command_description(&related[0]),
+            Some("find publications or conference reports from this completed/terminated trial")
+        );
     }
 
     #[test]

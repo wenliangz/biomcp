@@ -10815,6 +10815,7 @@ mod next_commands_validity {
         assert_parses(
             r#"biomcp search article --drug dabrafenib -q "NCT01234567 Example trial" --limit 5"#,
         );
+        assert_parses(r#"biomcp search article -q "NCT01234567 Example trial" --limit 5"#);
         assert_parses("biomcp search disease --query melanoma");
         assert_parses("biomcp search article -d melanoma");
         assert_parses("biomcp search trial -c melanoma");

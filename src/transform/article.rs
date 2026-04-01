@@ -471,31 +471,38 @@ fn annotation_kind(kind: &str) -> Option<AnnotationKind> {
     None
 }
 
-fn push_annotation_count(map: &mut HashMap<String, (String, u32)>, text: &str) {
+fn push_annotation_count(
+    map: &mut HashMap<String, (String, u32, usize)>,
+    text: &str,
+    order: usize,
+) {
     let t = text.trim();
     if t.is_empty() || t.len() > 128 {
         return;
     }
     let key = t.to_ascii_lowercase();
-    let entry = map.entry(key).or_insert_with(|| (t.to_string(), 0));
+    let entry = map.entry(key).or_insert_with(|| (t.to_string(), 0, order));
     entry.1 += 1;
 }
 
-fn finalize_counts(map: HashMap<String, (String, u32)>) -> Vec<AnnotationCount> {
+fn finalize_counts(map: HashMap<String, (String, u32, usize)>) -> Vec<AnnotationCount> {
     let mut out = map
         .into_values()
-        .map(|(text, count)| AnnotationCount { text, count })
+        .map(|(text, count, first_seen_order)| (AnnotationCount { text, count }, first_seen_order))
         .collect::<Vec<_>>();
-    out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.text.cmp(&b.text)));
+    out.sort_by(|(a, a_order), (b, b_order)| {
+        b.count.cmp(&a.count).then_with(|| a_order.cmp(b_order))
+    });
     out.truncate(8);
-    out
+    out.into_iter().map(|(row, _)| row).collect()
 }
 
 pub fn extract_annotations(doc: &PubTatorDocument) -> Option<ArticleAnnotations> {
-    let mut genes: HashMap<String, (String, u32)> = HashMap::new();
-    let mut diseases: HashMap<String, (String, u32)> = HashMap::new();
-    let mut chemicals: HashMap<String, (String, u32)> = HashMap::new();
-    let mut mutations: HashMap<String, (String, u32)> = HashMap::new();
+    let mut genes: HashMap<String, (String, u32, usize)> = HashMap::new();
+    let mut diseases: HashMap<String, (String, u32, usize)> = HashMap::new();
+    let mut chemicals: HashMap<String, (String, u32, usize)> = HashMap::new();
+    let mut mutations: HashMap<String, (String, u32, usize)> = HashMap::new();
+    let mut next_order = 0usize;
 
     for passage in &doc.passages {
         for ann in &passage.annotations {
@@ -512,11 +519,12 @@ pub fn extract_annotations(doc: &PubTatorDocument) -> Option<ArticleAnnotations>
             };
 
             match kind {
-                AnnotationKind::Gene => push_annotation_count(&mut genes, text),
-                AnnotationKind::Disease => push_annotation_count(&mut diseases, text),
-                AnnotationKind::Chemical => push_annotation_count(&mut chemicals, text),
-                AnnotationKind::Mutation => push_annotation_count(&mut mutations, text),
+                AnnotationKind::Gene => push_annotation_count(&mut genes, text, next_order),
+                AnnotationKind::Disease => push_annotation_count(&mut diseases, text, next_order),
+                AnnotationKind::Chemical => push_annotation_count(&mut chemicals, text, next_order),
+                AnnotationKind::Mutation => push_annotation_count(&mut mutations, text, next_order),
             }
+            next_order += 1;
         }
     }
 
@@ -1118,6 +1126,41 @@ mod tests {
                 text: "vemurafenib".into(),
                 count: 1
             }]
+        );
+    }
+
+    #[test]
+    fn extract_annotations_preserves_first_seen_order_for_equal_counts() {
+        let doc: PubTatorDocument = serde_json::from_value(serde_json::json!({
+            "pmid": 22663011,
+            "passages": [
+                {
+                    "infons": {"type": "title"},
+                    "text": "Example title",
+                    "annotations": [
+                        {"text": "TP53", "infons": {"type": "Gene"}},
+                        {"text": "BRAF", "infons": {"type": "Gene"}},
+                        {"text": "TP53", "infons": {"type": "Gene"}},
+                        {"text": "BRAF", "infons": {"type": "Gene"}}
+                    ]
+                }
+            ]
+        }))
+        .expect("valid JSON");
+
+        let ann = extract_annotations(&doc).expect("annotations should exist");
+        assert_eq!(
+            ann.genes,
+            vec![
+                AnnotationCount {
+                    text: "TP53".into(),
+                    count: 2
+                },
+                AnnotationCount {
+                    text: "BRAF".into(),
+                    count: 2
+                }
+            ]
         );
     }
 
