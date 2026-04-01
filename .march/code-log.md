@@ -1,59 +1,74 @@
 ## Execution Order
-1. Record scope and baseline proof surfaces in `.march/code-log.md`, then run the existing targeted checks for `src/utils/download.rs` and static searches — [status: done]
-2. Add proof-first coverage that fails while legacy helpers still exist, then rerun the targeted test to confirm the red state — [status: done]
-3. Remove the legacy helpers from `src/utils/download.rs`, rerun targeted tests/searches, and commit the logical cleanup change — [status: done]
-4. Run `make check`, review/stage only intended repo changes, and finalize this code log — [status: done]
+1. Record T107 scope, out-of-scope guardrails, and baseline proof surfaces in this code log; run the existing cache path tests that cover the current `src/sources/mod.rs` seam — [status: done]
+2. Add proof-first tests for migration outcomes and startup-boundary behavior, then run the targeted test set to confirm the intended red state — [status: done]
+3. Implement the migration helper, internal exports, and `build_http_client` wiring; rerun the targeted tests to reach green and commit the implementation change — [status: done]
+4. Run `make check`, review/stage only intended repo changes, and finalize this code log with commands, proof, and any deviations — [status: done]
 
 ## Resume State
 - Last completed batch: 4
-- Files edited so far: [.march/code-log.md, src/utils/download.rs, tests/legacy_cache_helper_cleanup.rs]
-- Existing partial edits: preserve
-- Tests passing: `cargo test utils::download --lib`; `cargo test --test legacy_cache_helper_cleanup`; `rg 'biomcp_cache_dir\\(|biomcp_downloads_dir\\(|cache_path\\(' src`; `rg '^(pub fn biomcp_cache_dir|pub fn biomcp_downloads_dir|pub fn cache_path)' src/utils/download.rs`; `rg 'biomcp_cache_dir|biomcp_downloads_dir|cache_path' spec`; `make check < /dev/null 2>&1`
+- Files edited so far: [.march/code-log.md, src/cache/migration.rs, src/cache/mod.rs, src/sources/mod.rs]
+- Existing partial edits: preserve committed repo changes; keep `.march/code-log.md` unstaged as runtime artifact
+- Tests passing: `cargo test renames_legacy_http_cache_directory_when_only_legacy_dir_exists --lib`; `cargo test skips_when_legacy_http_cache_directory_is_missing --lib`; `cargo test skips_when_runtime_http_directory_already_exists --lib`; `cargo test errors_when_legacy_path_is_not_a_directory --lib`; `cargo test errors_when_runtime_http_target_is_not_a_directory --lib`; `cargo test apply_migration_non_fatal_warns_and_continues_on_error --lib`; `cargo test build_http_client_renames_legacy_http_cache_before_client_init --lib`; `cargo test http_cache_dir_default_root_uses_xdg_cache_home_biomcp_http --lib`; `cargo test http_cache_dir_env_override_uses_biomcp_cache_dir_http --lib`; `make check < /dev/null 2>&1`
 - Next concrete action: none
 - Current blocker: none
 
 ## Out of Scope
-- Any cache-root behavior changes or rewiring to `resolve_cache_config()`
-- Changes to `src/sources/mod.rs`, `src/cli/health.rs`, `src/entities/article.rs`, or `src/sources/ema.rs`
-- Removing the `dirs` dependency from `Cargo.toml`
-- Editing `spec/*.md` for operator-facing behavior that did not change
+- Any runtime cache path cutover beyond the already-live `<cache_root>/http/`
+- Changes to `src/cli/health.rs`, `src/utils/download.rs`, docs, or `spec/*.md`
+- Shared temp-dir test helper refactors outside the file-local duplication acknowledged by the design
+- Platform-specific permission-failure filesystem tests without a deterministic cross-platform proof
 
 ## Commands and Changes
 - `checkpoint status`
 - `GIT_EDITOR=true git rebase main`
 - `git --no-pager diff --stat main..HEAD | tail -1`
-- Reviewed `.march/design-final.md` as authoritative plus `.march/design-draft.md`, `.march/investigation-notes.md`, and `.march/ticket.md` for background and scope confirmation.
-- Found and replaced a stale carried-over `.march/code-log.md` from the prior ticket so this step has a T105-specific execution log.
-- Verified baseline proof surface:
-  - `cargo test utils::download --lib`
-  - `rg 'biomcp_cache_dir\(|biomcp_downloads_dir\(|cache_path\(' src`
-  - `rg 'biomcp_cache_dir|biomcp_downloads_dir|cache_path' spec`
-- Transition note recorded: batch 1 complete, moving to proof-first red coverage for the helper removal.
-- Added proof-first source-shape test `legacy_cache_helpers_are_removed` to `src/utils/download.rs`.
-- Red proof confirmed: `cargo test utils::download::tests::legacy_cache_helpers_are_removed --lib` failed because `biomcp_cache_dir()` still exists in the module source.
-- Transition note recorded: batch 2 complete, moving to helper deletion and green proof.
-- Removed `biomcp_cache_dir()`, `biomcp_downloads_dir()`, and `cache_path()` from `src/utils/download.rs` while preserving `cache_key()`, `download_path()`, `write_atomic_bytes()`, and `save_atomic()`.
-- Relocated the source-shape proof into `tests/legacy_cache_helper_cleanup.rs` so `rg ... src` acceptance checks stay clean.
-- Green proof after implementation:
-  - `cargo test --test legacy_cache_helper_cleanup`
-  - `cargo test utils::download --lib`
-  - `rg 'biomcp_cache_dir\(|biomcp_downloads_dir\(|cache_path\(' src`
-  - `rg '^(pub fn biomcp_cache_dir|pub fn biomcp_downloads_dir|pub fn cache_path)' src/utils/download.rs`
-  - `rg 'biomcp_cache_dir|biomcp_downloads_dir|cache_path' spec`
-- Staged repo changes: `git add src/utils/download.rs tests/legacy_cache_helper_cleanup.rs`
-- Logical commit created: `cfac6b6` — `Remove legacy download cache helpers`
-- Transition note recorded: batch 4 start, moving to full verification and final git hygiene.
-- Full verification gate:
+- Read `.march/design-final.md` as authoritative; read `.march/design-draft.md`, `.march/investigation-notes.md`, and `.march/ticket.md` as background only.
+- Reviewed the current implementation seams in `src/cache/mod.rs`, `src/cache/config.rs`, and `src/sources/mod.rs`.
+- Replaced a stale carried-over `.march/code-log.md` from another ticket with this T107-specific execution log before code changes.
+- Verified the baseline proof surface called out by the design:
+  - `cargo test http_cache_dir_default_root_uses_xdg_cache_home_biomcp_http --lib`
+  - `cargo test http_cache_dir_env_override_uses_biomcp_cache_dir_http --lib`
+- Confirmed there is no spec surface for this internal migration and that `make check` is the repo-wide verification gate.
+- Added proof-first tests in `src/cache/migration.rs` and `src/sources/mod.rs` for the rename/skip/error outcomes, non-fatal warning seam, and end-to-end builder migration wiring.
+- Confirmed the red state with:
+  - `cargo test renames_legacy_http_cache_directory_when_only_legacy_dir_exists --lib`
+  - current failure: missing `apply_migration_non_fatal` seam in `src/sources/mod.rs`, plus closure type inference pending that new helper signature
+- Implemented `src/cache/migration.rs` with `MigrationOutcome`, metadata-based directory inspection that preserves real I/O failures, explicit non-directory errors, and `std::fs::rename` when the legacy directory exists and the runtime target is absent.
+- Updated `src/cache/mod.rs` to export `migration`, `MigrationOutcome`, and `migrate_http_cache` internally.
+- Refactored `src/sources/mod.rs` to:
+  - resolve `cache_root` once from `resolve_cache_config()`
+  - apply migration before `create_dir_all`
+  - warn and continue through a private `apply_migration_non_fatal` seam
+  - remove the redundant production `http_cache_dir()` helper
+  - update path-resolution tests to assert via `resolve_cache_config()?.cache_root.join("http")`
+- Green targeted proof after implementation:
+  - `cargo test renames_legacy_http_cache_directory_when_only_legacy_dir_exists --lib`
+  - `cargo test skips_when_legacy_http_cache_directory_is_missing --lib`
+  - `cargo test skips_when_runtime_http_directory_already_exists --lib`
+  - `cargo test errors_when_legacy_path_is_not_a_directory --lib`
+  - `cargo test errors_when_runtime_http_target_is_not_a_directory --lib`
+  - `cargo test apply_migration_non_fatal_warns_and_continues_on_error --lib`
+  - `cargo test build_http_client_renames_legacy_http_cache_before_client_init --lib`
+  - `cargo test http_cache_dir_default_root_uses_xdg_cache_home_biomcp_http --lib`
+  - `cargo test http_cache_dir_env_override_uses_biomcp_cache_dir_http --lib`
+- Formatted the Rust changes with `cargo fmt --all`.
+- Ran the full repo verification gate:
   - `make check < /dev/null 2>&1`
-  - repo lint passed
-  - repo tests passed, including `tests/legacy_cache_helper_cleanup.rs`
+  - lint passed
+  - cargo test passed
   - quality ratchet passed
-- Reviewed final repo diff and status:
-  - `git --no-pager diff -- src/utils/download.rs tests/legacy_cache_helper_cleanup.rs`
+- Reviewed repo hygiene:
+  - `git --no-pager diff -- src/cache/mod.rs src/cache/migration.rs src/sources/mod.rs`
+  - `git add src/cache/mod.rs src/cache/migration.rs src/sources/mod.rs`
+  - `git --no-pager diff --cached -- src/cache/mod.rs src/cache/migration.rs src/sources/mod.rs`
+  - `git --no-pager diff --cached --check`
   - `git --no-pager status --short`
-  - only `.march/code-log.md` remains unstaged by design
-- Docs/scripts assessment: no operator-facing or runtime-facing contract changed, so no docs or script updates were needed.
-- Spec assessment: no new contract was introduced and `rg 'biomcp_cache_dir|biomcp_downloads_dir|cache_path' spec` stayed empty, so no spec updates were needed.
+- Created logical commit:
+  - `git commit -m "Add HTTP cache migration helper" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"`
+  - commit: `192d537`
+- Docs/scripts/spec review:
+  - No docs or operator-facing script updates were needed because the approved design explicitly keeps docs and specs out of scope for this internal startup-side-effect ticket.
+  - No new spec files or spec edits were needed because the migration adds no CLI/MCP/runtime contract surface beyond internal startup behavior.
 
 ## Deviations from Design
 - None.
