@@ -10800,7 +10800,8 @@ mod next_commands_validity {
 
     #[test]
     fn article_next_commands_parse() {
-        assert_parses("biomcp get gene EGFR");
+        assert_parses("biomcp search gene -q EGFR");
+        assert_parses(r#"biomcp search gene -q "serine-threonine protein kinase""#);
         assert_parses("biomcp search disease --query melanoma");
         assert_parses("biomcp get drug osimertinib");
         assert_parses("biomcp article entities 12345");
@@ -10811,6 +10812,9 @@ mod next_commands_validity {
 
     #[test]
     fn trial_next_commands_parse() {
+        assert_parses(
+            r#"biomcp search article --drug dabrafenib -q "NCT01234567 Example trial" --limit 5"#,
+        );
         assert_parses("biomcp search disease --query melanoma");
         assert_parses("biomcp search article -d melanoma");
         assert_parses("biomcp search trial -c melanoma");
@@ -11046,7 +11050,7 @@ mod next_commands_json_property {
             pmid: Some("22663011".to_string()),
             pmcid: Some("PMC9984800".to_string()),
             doi: Some("10.1056/NEJMoa1203421".to_string()),
-            title: "Example".to_string(),
+            title: "Example about melanoma".to_string(),
             authors: Vec::new(),
             journal: None,
             date: None,
@@ -11058,7 +11062,7 @@ mod next_commands_json_property {
             full_text_note: None,
             annotations: Some(ArticleAnnotations {
                 genes: vec![AnnotationCount {
-                    text: "EGFR".to_string(),
+                    text: "serine-threonine protein kinase".to_string(),
                     count: 1,
                 }],
                 diseases: vec![AnnotationCount {
@@ -11074,12 +11078,23 @@ mod next_commands_json_property {
             semantic_scholar: None,
             pubtator_fallback: false,
         };
+        let next_commands = crate::render::markdown::related_article(&article);
+        assert!(
+            next_commands
+                .iter()
+                .any(|cmd| { cmd == "biomcp search gene -q \"serine-threonine protein kinase\"" })
+        );
+        assert!(
+            !next_commands
+                .iter()
+                .any(|cmd| cmd == "biomcp get gene serine-threonine protein kinase")
+        );
 
         assert_entity_json_next_commands(
             "article",
             &article,
             crate::render::markdown::article_evidence_urls(&article),
-            crate::render::markdown::related_article(&article),
+            next_commands,
             crate::render::provenance::article_section_sources(&article),
         );
     }
@@ -11149,7 +11164,7 @@ mod next_commands_json_property {
             nct_id: "NCT01234567".to_string(),
             source: None,
             title: "Example trial".to_string(),
-            status: "Recruiting".to_string(),
+            status: "Completed".to_string(),
             phase: None,
             study_type: None,
             age_range: None,
@@ -11166,12 +11181,16 @@ mod next_commands_json_property {
             arms: None,
             references: None,
         };
+        let next_commands = crate::render::markdown::related_trial(&trial);
+        assert!(next_commands.iter().any(|cmd| {
+            cmd == "biomcp search article --drug dabrafenib -q \"NCT01234567 Example trial\" --limit 5"
+        }));
 
         assert_entity_json_next_commands(
             "trial",
             &trial,
             crate::render::markdown::trial_evidence_urls(&trial),
-            crate::render::markdown::related_trial(&trial),
+            next_commands,
             crate::render::provenance::trial_section_sources(&trial),
         );
     }

@@ -1039,27 +1039,45 @@ fn section_description(entity: &str, section: &str) -> &'static str {
         ("disease", "prevalence") => "prevalence and epidemiology context",
         ("disease", "civic") => "CIViC disease-context evidence",
         ("disease", "disgenet") => "DisGeNET scored disease-gene links",
-        ("drug", "label") => "FDA label indications, warnings, and dosage",
-        ("drug", "regulatory") => "regulatory summary",
-        ("drug", "safety") => "safety context and warnings",
+        ("drug", "label") => "approved-indication and FDA label detail beyond the base card",
+        ("drug", "regulatory") => {
+            "approval and supplement history; use only if the base card lacks approval context"
+        }
+        ("drug", "safety") => {
+            "regulatory safety detail; use `biomcp drug adverse-events <name>` first when you want post-marketing signal"
+        }
         ("drug", "targets") => "ChEMBL and OpenTargets targets",
         ("drug", "indications") => "OpenTargets indication evidence",
         ("drug", "interactions") => "label interactions and public-data fallback",
         ("drug", "civic") => "CIViC therapy evidence",
         ("drug", "approvals") => "Drugs@FDA approval history",
+        ("trial", "eligibility") => "inclusion and exclusion criteria",
+        ("trial", "locations") => "site list and contact details",
+        ("trial", "outcomes") => "endpoint measures and time frames",
+        ("trial", "arms") => "study arms and assigned interventions",
+        ("trial", "references") => "linked publications and PMID citations",
         _ => "additional detail",
     }
+}
+
+fn is_trial_results_search_command(command: &str) -> bool {
+    command.starts_with("biomcp search article -q \"NCT")
+        || (command.starts_with("biomcp search article --drug ")
+            && command.contains(" -q \"NCT")
+            && command.ends_with(" --limit 5"))
 }
 
 fn related_command_description(command: &str) -> Option<&'static str> {
     if command.starts_with("biomcp article entities ") {
         Some("standardized entity extraction from this article")
+    } else if is_trial_results_search_command(command) {
+        Some("find publications or conference reports from this completed/terminated trial")
     } else if command.starts_with("biomcp article citations ") {
-        Some("follow papers that cite this article")
+        Some("later papers that cite this article; use only if the primary paper lacks your answer")
     } else if command.starts_with("biomcp article references ") {
-        Some("inspect the evidence this article builds on")
+        Some("background evidence this paper builds on; use if the primary paper lacks context")
     } else if command.starts_with("biomcp article recommendations ") {
-        Some("find related papers to broaden coverage")
+        Some("related papers to broaden coverage; use only if the primary paper lacks your answer")
     } else if command.contains(" --type review --limit 5") {
         Some("supplement sparse structured data with review literature for indication context")
     } else if command.starts_with("biomcp get gene ") && command.ends_with(" protein") {
@@ -1243,12 +1261,31 @@ fn sections_article(article: &Article, requested: &[String]) -> Vec<String> {
     sections_for(requested, crate::entities::article::ARTICLE_SECTION_NAMES)
 }
 
+const COMPLETED_TRIAL_SECTION_NAMES: &[&str] = &[
+    "outcomes",
+    "references",
+    "arms",
+    "eligibility",
+    "locations",
+    "all",
+];
+
+fn is_completed_or_terminated_trial_status(status: &str) -> bool {
+    let status = status.trim();
+    status.eq_ignore_ascii_case("COMPLETED") || status.eq_ignore_ascii_case("TERMINATED")
+}
+
 fn sections_trial(trial: &Trial, requested: &[String]) -> Vec<String> {
     let nct_id = trial.nct_id.trim();
     if nct_id.is_empty() {
         return Vec::new();
     }
-    sections_for(requested, crate::entities::trial::TRIAL_SECTION_NAMES)
+    let available = if is_completed_or_terminated_trial_status(&trial.status) {
+        COMPLETED_TRIAL_SECTION_NAMES
+    } else {
+        crate::entities::trial::TRIAL_SECTION_NAMES
+    };
+    sections_for(requested, available)
 }
 
 fn sections_drug(drug: &Drug, requested: &[String]) -> Vec<String> {
@@ -1352,6 +1389,99 @@ pub(crate) fn related_variant(variant: &Variant) -> Vec<String> {
     out
 }
 
+#[derive(Clone, Copy)]
+enum ArticleAnnotationBucket {
+    Gene,
+    Disease,
+    Chemical,
+    Mutation,
+}
+
+fn article_annotation_command(bucket: ArticleAnnotationBucket, text: &str) -> Option<String> {
+    let text = text.trim();
+    let quoted = quote_arg(text);
+    if quoted.is_empty() {
+        return None;
+    }
+
+    Some(match bucket {
+        ArticleAnnotationBucket::Gene => format!("biomcp search gene -q {quoted}"),
+        ArticleAnnotationBucket::Disease => format!("biomcp search disease --query {quoted}"),
+        ArticleAnnotationBucket::Chemical => format!("biomcp get drug {quoted}"),
+        ArticleAnnotationBucket::Mutation => format!("biomcp get variant {quoted}"),
+    })
+}
+
+fn ranked_article_annotation_commands(
+    title: &str,
+    rows: &[AnnotationCount],
+    bucket: ArticleAnnotationBucket,
+    limit: usize,
+) -> Vec<String> {
+    if limit == 0 {
+        return Vec::new();
+    }
+
+    let normalized_title = normalize_match_text(title);
+    let mut ranked = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let command = article_annotation_command(bucket, &row.text)?;
+            let normalized_text = normalize_match_text(&row.text);
+            let title_hit =
+                !normalized_text.is_empty() && normalized_title.contains(normalized_text.as_str());
+            Some((title_hit, row.count, index, command))
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, _, command)| command)
+        .collect()
+}
+
+fn trial_results_search_command(trial: &Trial) -> Option<String> {
+    let nct_id = trial.nct_id.trim();
+    if nct_id.is_empty() {
+        return None;
+    }
+
+    let title_seed = trial
+        .title
+        .split_whitespace()
+        .take(6)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let seed = if title_seed.is_empty() {
+        nct_id.to_string()
+    } else {
+        format!("{nct_id} {title_seed}")
+    };
+    let seed_q = quote_arg(&seed);
+    if seed_q.is_empty() {
+        return None;
+    }
+
+    if let Some(intervention) = trial.interventions.first().map(String::as_str) {
+        let intervention_q = quote_arg(intervention);
+        if !intervention_q.is_empty() {
+            return Some(format!(
+                "biomcp search article --drug {intervention_q} -q {seed_q} --limit 5"
+            ));
+        }
+    }
+
+    Some(format!("biomcp search article -q {seed_q} --limit 5"))
+}
+
 pub(crate) fn related_article(article: &Article) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     if let Some(pmid) = article
@@ -1359,42 +1489,51 @@ pub(crate) fn related_article(article: &Article) -> Vec<String> {
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
+        && article.annotations.is_some()
     {
-        if article.annotations.is_some() {
-            out.push(format!("biomcp article entities {pmid}"));
-        }
-        out.push(format!("biomcp article citations {pmid} --limit 3"));
-        out.push(format!("biomcp article references {pmid} --limit 3"));
-        out.push(format!("biomcp article recommendations {pmid} --limit 3"));
+        out.push(format!("biomcp article entities {pmid}"));
     }
     if let Some(ann) = article.annotations.as_ref() {
-        for g in &ann.genes {
-            let sym = g.text.trim();
-            if sym.is_empty() {
-                continue;
-            }
-            out.push(format!("biomcp get gene {sym}"));
-        }
-        for d in &ann.diseases {
-            let name = quote_arg(&d.text);
-            if name.is_empty() {
-                continue;
-            }
-            out.push(format!("biomcp search disease --query {name}"));
-        }
-        for c in &ann.chemicals {
-            let name = quote_arg(&c.text);
-            if name.is_empty() {
-                continue;
-            }
-            out.push(format!("biomcp get drug {name}"));
-        }
+        out.extend(ranked_article_annotation_commands(
+            &article.title,
+            &ann.genes,
+            ArticleAnnotationBucket::Gene,
+            2,
+        ));
+        out.extend(ranked_article_annotation_commands(
+            &article.title,
+            &ann.diseases,
+            ArticleAnnotationBucket::Disease,
+            2,
+        ));
+        out.extend(ranked_article_annotation_commands(
+            &article.title,
+            &ann.chemicals,
+            ArticleAnnotationBucket::Chemical,
+            2,
+        ));
     }
-    out
+    if let Some(pmid) = article
+        .pmid
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        out.push(format!("biomcp article references {pmid} --limit 3"));
+        out.push(format!("biomcp article citations {pmid} --limit 3"));
+        out.push(format!("biomcp article recommendations {pmid} --limit 3"));
+    }
+    dedupe_markdown_commands(out)
 }
 
 pub(crate) fn related_trial(trial: &Trial) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+
+    if is_completed_or_terminated_trial_status(&trial.status)
+        && let Some(command) = trial_results_search_command(trial)
+    {
+        out.push(command);
+    }
 
     if let Some(condition) = trial.conditions.first().map(String::as_str) {
         let cond = quote_arg(condition);
@@ -1413,7 +1552,7 @@ pub(crate) fn related_trial(trial: &Trial) -> Vec<String> {
         }
     }
 
-    out
+    dedupe_markdown_commands(out)
 }
 
 pub(crate) fn related_disease(disease: &Disease) -> Vec<String> {
@@ -1853,47 +1992,35 @@ pub fn article_entities_markdown(
                 .iter()
                 .filter_map(|g| {
                     let text = g.text.trim();
-                    if text.is_empty() {
-                        return None;
-                    }
-                    Some(row(text, g.count, format!("biomcp get gene {text}")))
+                    let command = article_annotation_command(ArticleAnnotationBucket::Gene, text)?;
+                    Some(row(text, g.count, command))
                 })
                 .collect::<Vec<_>>(),
             ann.diseases
                 .iter()
                 .filter_map(|d| {
                     let text = d.text.trim();
-                    let quoted = quote_arg(text);
-                    if quoted.is_empty() {
-                        return None;
-                    }
-                    Some(row(
-                        text,
-                        d.count,
-                        format!("biomcp search disease --query {quoted}"),
-                    ))
+                    let command =
+                        article_annotation_command(ArticleAnnotationBucket::Disease, text)?;
+                    Some(row(text, d.count, command))
                 })
                 .collect::<Vec<_>>(),
             ann.chemicals
                 .iter()
                 .filter_map(|c| {
                     let text = c.text.trim();
-                    let quoted = quote_arg(text);
-                    if quoted.is_empty() {
-                        return None;
-                    }
-                    Some(row(text, c.count, format!("biomcp get drug {quoted}")))
+                    let command =
+                        article_annotation_command(ArticleAnnotationBucket::Chemical, text)?;
+                    Some(row(text, c.count, command))
                 })
                 .collect::<Vec<_>>(),
             ann.mutations
                 .iter()
                 .filter_map(|m| {
                     let text = m.text.trim();
-                    let quoted = quote_arg(text);
-                    if quoted.is_empty() {
-                        return None;
-                    }
-                    Some(row(text, m.count, format!("biomcp get variant {quoted}")))
+                    let command =
+                        article_annotation_command(ArticleAnnotationBucket::Mutation, text)?;
+                    Some(row(text, m.count, command))
                 })
                 .collect::<Vec<_>>(),
         )
@@ -4767,8 +4894,8 @@ pub(crate) mod tests {
                 genesymbol: "CYP2D6".to_string(),
                 allele: "*4".to_string(),
                 population_group: Some("European".to_string()),
-                subject_count: Some(100),
-                frequency: Some(0.2),
+                subject_count: None,
+                frequency: None,
                 min_frequency: None,
                 max_frequency: None,
             }],
@@ -4786,6 +4913,7 @@ pub(crate) mod tests {
         assert!(pgx_markdown.contains("## Interactions (CPIC)"));
         assert!(pgx_markdown.contains("## Recommendations (CPIC)"));
         assert!(pgx_markdown.contains("## Population Frequencies (CPIC)"));
+        assert!(pgx_markdown.contains("| CYP2D6 | *4 | European | - | - |"));
         assert!(pgx_markdown.contains("## Guidelines (CPIC)"));
 
         let faers = crate::entities::adverse_event::AdverseEvent {
@@ -5462,6 +5590,76 @@ pub(crate) mod tests {
             .expect("diseases command");
         assert!(pathways < ontology);
         assert!(ontology < diseases);
+    }
+
+    #[test]
+    fn format_sections_block_describes_guardrailed_drug_and_trial_sections() {
+        let drug_block = format_sections_block(
+            "drug",
+            "pembrolizumab",
+            vec![
+                "label".to_string(),
+                "regulatory".to_string(),
+                "safety".to_string(),
+            ],
+        );
+
+        assert!(drug_block.contains(
+            "biomcp get drug pembrolizumab label   - approved-indication and FDA label detail beyond the base card"
+        ));
+        assert!(drug_block.contains(
+            "biomcp get drug pembrolizumab regulatory   - approval and supplement history; use only if the base card lacks approval context"
+        ));
+        assert!(drug_block.contains(
+            "biomcp get drug pembrolizumab safety   - regulatory safety detail; use `biomcp drug adverse-events <name>` first when you want post-marketing signal"
+        ));
+
+        let terminated = crate::entities::trial::Trial {
+            nct_id: "NCT02576665".to_string(),
+            source: None,
+            title: "Completed trial".to_string(),
+            status: "TERMINATED".to_string(),
+            phase: None,
+            study_type: None,
+            age_range: None,
+            conditions: vec!["melanoma".to_string()],
+            interventions: vec!["trametinib".to_string()],
+            sponsor: None,
+            enrollment: None,
+            summary: None,
+            start_date: None,
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+        let terminated_sections = sections_trial(&terminated, &[]);
+        assert_eq!(terminated_sections[0], "outcomes");
+        assert_eq!(terminated_sections[1], "references");
+        assert_eq!(terminated_sections[2], "arms");
+
+        let trial_block =
+            format_sections_block("trial", &terminated.nct_id, terminated_sections.clone());
+        assert!(trial_block.contains(
+            "biomcp get trial NCT02576665 outcomes   - endpoint measures and time frames"
+        ));
+        assert!(trial_block.contains(
+            "biomcp get trial NCT02576665 references   - linked publications and PMID citations"
+        ));
+        assert!(trial_block.contains(
+            "biomcp get trial NCT02576665 arms   - study arms and assigned interventions"
+        ));
+
+        let recruiting = crate::entities::trial::Trial {
+            status: "Recruiting".to_string(),
+            ..terminated
+        };
+        let recruiting_sections = sections_trial(&recruiting, &[]);
+        assert_eq!(recruiting_sections[0], "eligibility");
+        assert_eq!(recruiting_sections[1], "locations");
+        assert_eq!(recruiting_sections[2], "outcomes");
     }
 
     #[test]
@@ -6624,7 +6822,7 @@ pub(crate) mod tests {
             pmid: Some("22663011".to_string()),
             pmcid: None,
             doi: None,
-            title: "Example".to_string(),
+            title: "Improved survival with MEK inhibition in BRAF-mutated melanoma.".to_string(),
             authors: Vec::new(),
             journal: None,
             date: None,
@@ -6635,12 +6833,38 @@ pub(crate) mod tests {
             full_text_path: None,
             full_text_note: None,
             annotations: Some(ArticleAnnotations {
-                genes: vec![AnnotationCount {
-                    text: "BRAF".to_string(),
-                    count: 1,
+                genes: vec![
+                    AnnotationCount {
+                        text: "serine-threonine protein kinase".to_string(),
+                        count: 7,
+                    },
+                    AnnotationCount {
+                        text: "BRAF".to_string(),
+                        count: 5,
+                    },
+                    AnnotationCount {
+                        text: "MEK".to_string(),
+                        count: 3,
+                    },
+                    AnnotationCount {
+                        text: "B-RAF".to_string(),
+                        count: 1,
+                    },
+                ],
+                diseases: vec![
+                    AnnotationCount {
+                        text: "melanoma".to_string(),
+                        count: 2,
+                    },
+                    AnnotationCount {
+                        text: "metastatic melanoma".to_string(),
+                        count: 1,
+                    },
+                ],
+                chemicals: vec![AnnotationCount {
+                    text: "trametinib".to_string(),
+                    count: 8,
                 }],
-                diseases: Vec::new(),
-                chemicals: Vec::new(),
                 mutations: Vec::new(),
             }),
             semantic_scholar: None,
@@ -6649,13 +6873,172 @@ pub(crate) mod tests {
 
         let related = related_article(&article);
         assert_eq!(related[0], "biomcp article entities 22663011");
-        assert!(related.contains(&"biomcp article citations 22663011 --limit 3".to_string()));
-        assert!(related.contains(&"biomcp article references 22663011 --limit 3".to_string()));
-        assert!(related.contains(&"biomcp article recommendations 22663011 --limit 3".to_string()));
+        let braf = related
+            .iter()
+            .position(|cmd| cmd == "biomcp search gene -q BRAF")
+            .expect("curated BRAF pivot should be promoted");
+        let mek = related
+            .iter()
+            .position(|cmd| cmd == "biomcp search gene -q MEK")
+            .expect("curated MEK pivot should be promoted");
+        let melanoma = related
+            .iter()
+            .position(|cmd| cmd == "biomcp search disease --query melanoma")
+            .expect("disease pivot should be promoted");
+        let trametinib = related
+            .iter()
+            .position(|cmd| cmd == "biomcp get drug trametinib")
+            .expect("drug pivot should be promoted");
+        let references = related
+            .iter()
+            .position(|cmd| cmd == "biomcp article references 22663011 --limit 3")
+            .expect("references command should remain available");
+        let citations = related
+            .iter()
+            .position(|cmd| cmd == "biomcp article citations 22663011 --limit 3")
+            .expect("citations command should remain available");
+        let recommendations = related
+            .iter()
+            .position(|cmd| cmd == "biomcp article recommendations 22663011 --limit 3")
+            .expect("recommendations command should remain available");
+
+        assert!(braf < references);
+        assert!(mek < references);
+        assert!(melanoma < citations);
+        assert!(trametinib < recommendations);
+        assert!(references < citations);
+        assert!(citations < recommendations);
+        assert!(
+            !related
+                .iter()
+                .any(|cmd| cmd == "biomcp get gene serine-threonine protein kinase")
+        );
+        assert!(
+            !related
+                .iter()
+                .any(|cmd| cmd == "biomcp search gene -q \"serine-threonine protein kinase\"")
+        );
         assert!(!related.iter().any(|cmd| cmd.contains("biomcp get article")));
 
         let rendered = format_related_block(related);
         assert!(rendered.contains("standardized entity extraction"));
+        assert!(rendered.contains(
+            "background evidence this paper builds on; use if the primary paper lacks context"
+        ));
+        assert!(rendered.contains(
+            "later papers that cite this article; use only if the primary paper lacks your answer"
+        ));
+        assert!(rendered.contains(
+            "related papers to broaden coverage; use only if the primary paper lacks your answer"
+        ));
+    }
+
+    #[test]
+    fn article_entities_markdown_uses_safe_gene_search_commands() {
+        let annotations = ArticleAnnotations {
+            genes: vec![
+                AnnotationCount {
+                    text: "BRAF".to_string(),
+                    count: 5,
+                },
+                AnnotationCount {
+                    text: "serine-threonine protein kinase".to_string(),
+                    count: 1,
+                },
+            ],
+            diseases: Vec::new(),
+            chemicals: Vec::new(),
+            mutations: vec![AnnotationCount {
+                text: "V600E".to_string(),
+                count: 2,
+            }],
+        };
+
+        let markdown =
+            article_entities_markdown("22663011", Some(&annotations), Some(5)).expect("markdown");
+        assert!(markdown.contains("`biomcp search gene -q BRAF`"));
+        assert!(markdown.contains("`biomcp search gene -q \"serine-threonine protein kinase\"`"));
+        assert!(!markdown.contains("`biomcp get gene serine-threonine protein kinase`"));
+        assert!(markdown.contains("`biomcp get variant V600E`"));
+    }
+
+    #[test]
+    fn related_trial_promotes_results_search_for_completed_or_terminated_studies() {
+        let trial = crate::entities::trial::Trial {
+            nct_id: "NCT02576665".to_string(),
+            source: None,
+            title: "A Study of Toca 511, a Retroviral Replicating Vector, Combined With Toca FC in Patients With Solid Tumors or Lymphoma (Toca 6)".to_string(),
+            status: "TERMINATED".to_string(),
+            phase: None,
+            study_type: None,
+            age_range: None,
+            conditions: vec!["Colorectal Cancer".to_string()],
+            interventions: vec!["Toca 511".to_string()],
+            sponsor: None,
+            enrollment: None,
+            summary: None,
+            start_date: None,
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        let related = related_trial(&trial);
+        assert_eq!(
+            related[0],
+            "biomcp search article --drug \"Toca 511\" -q \"NCT02576665 A Study of Toca 511, a\" --limit 5"
+        );
+        assert_eq!(
+            related[1],
+            "biomcp search disease --query \"Colorectal Cancer\""
+        );
+
+        let rendered = format_related_block(related.clone());
+        assert!(rendered.contains(
+            "find publications or conference reports from this completed/terminated trial"
+        ));
+        assert_eq!(
+            related_command_description(&related[0]),
+            Some("find publications or conference reports from this completed/terminated trial")
+        );
+        assert_eq!(
+            related_command_description("biomcp search article --drug pembrolizumab --limit 5"),
+            None
+        );
+    }
+
+    #[test]
+    fn related_trial_keeps_recruiting_order_without_results_search() {
+        let trial = crate::entities::trial::Trial {
+            nct_id: "NCT01234567".to_string(),
+            source: None,
+            title: "Example trial".to_string(),
+            status: "Recruiting".to_string(),
+            phase: None,
+            study_type: None,
+            age_range: None,
+            conditions: vec!["melanoma".to_string()],
+            interventions: vec!["dabrafenib".to_string()],
+            sponsor: None,
+            enrollment: None,
+            summary: None,
+            start_date: None,
+            completion_date: None,
+            eligibility_text: None,
+            locations: None,
+            outcomes: None,
+            arms: None,
+            references: None,
+        };
+
+        let related = related_trial(&trial);
+        assert_eq!(related[0], "biomcp search disease --query melanoma");
+        assert!(!related.iter().any(|cmd| {
+            cmd.starts_with("biomcp search article --drug ") && cmd.contains(" --limit 5")
+        }));
     }
 
     #[test]
@@ -8163,7 +8546,7 @@ pub(crate) mod tests {
         )
         .expect("markdown should render");
         assert!(markdown.contains(
-            "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
+            "> Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
         ));
         assert!(markdown.contains("Semantic Scholar: enabled"));
         assert!(markdown.contains("Ranking: directness-first"));

@@ -148,9 +148,20 @@ echo "$out" | mustmatch like 'biomcp search article "CodeBreaK 300" to find the 
 `get trial` provides protocol identity and key metadata in a compact card. We assert on stable NCT heading and status field marker.
 
 ```bash
-out="$(biomcp get trial NCT02576665)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get trial NCT02576665)"
 echo "$out" | mustmatch like "# NCT02576665"
 echo "$out" | mustmatch like "Status: TERMINATED | Phase: PHASE1 | Study Type: INTERVENTIONAL"
+echo "$out" | mustmatch like "biomcp get trial NCT02576665 outcomes   - endpoint measures and time frames"
+echo "$out" | mustmatch like "biomcp get trial NCT02576665 references   - linked publications and PMID citations"
+echo "$out" | mustmatch like "biomcp get trial NCT02576665 arms   - study arms and assigned interventions"
+echo "$out" | mustmatch like 'biomcp search article --drug "Toca 511" -q "NCT02576665 A Study of Toca'
+echo "$out" | mustmatch like "find publications or conference reports from this completed/terminated trial"
+results_line="$(printf '%s\n' "$out" | grep -n 'biomcp search article --drug "Toca 511"' | head -n1 | cut -d: -f1)"
+disease_line="$(printf '%s\n' "$out" | grep -n 'biomcp search disease --query "Colorectal Cancer"' | head -n1 | cut -d: -f1)"
+test -n "$results_line"
+test -n "$disease_line"
+test "$results_line" -lt "$disease_line"
 ```
 
 ## Eligibility Section

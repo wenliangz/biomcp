@@ -9,6 +9,7 @@ PGx commands surface CPIC and PharmGKB-aligned interaction context for gene-drug
 | PGx detail | `get pgx CYP2D6` | Confirms expanded interaction card |
 | CPIC level filter | `search pgx ... --cpic-level A` | Confirms evidence-level filtering |
 | Recommendations | `get pgx CYP2D6 recommendations` | Confirms recommendation table output |
+| Population frequencies | `get pgx DPYD frequencies` | Confirms optional frequency fields render without template errors |
 
 ## Searching by Gene
 
@@ -58,4 +59,18 @@ Recommendation view should expose a compact, repeatable table for downstream rev
 out="$(biomcp get pgx CYP2D6 recommendations)"
 echo "$out" | mustmatch like "# CYP2D6 - recommendations"
 echo "$out" | mustmatch like "| Drug | Gene | CPIC Level | PGx Testing |"
+```
+
+## Population Frequencies
+
+Population-frequency tables should render placeholder cells when CPIC omits
+optional frequency metadata instead of failing in the template layer.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get pgx DPYD frequencies)"
+echo "$out" | mustmatch like "# DPYD - frequencies"
+echo "$out" | mustmatch like "## Population Frequencies (CPIC)"
+echo "$out" | mustmatch like "| Gene | Allele | Population | Frequency | Subjects |"
+echo "$out" | mustmatch not like "Template error"
 ```

@@ -53,7 +53,7 @@ No CPIC recommendations found for this query.
 | Gene | Allele | Population | Frequency | Subjects |
 |---|---|---|---|---|
 {% for row in frequencies -%}
-| {{ row.genesymbol }} | {{ row.allele }} | {{ row.population_group or "-" }} | {% if row.frequency is not none %}{{ row.frequency | af }}{% else %}-{% endif %} | {% if row.subject_count is not none %}{{ row.subject_count }}{% else %}-{% endif %} |
+| {{ row.genesymbol }} | {{ row.allele }} | {{ row.population_group or "-" }} | {% if row.frequency is defined and row.frequency is not none %}{{ row.frequency | af }}{% else %}-{% endif %} | {% if row.subject_count is defined and row.subject_count is not none %}{{ row.subject_count }}{% else %}-{% endif %} |
 {% endfor -%}
 {% else -%}
 No CPIC population frequencies found for this query.

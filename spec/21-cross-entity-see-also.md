@@ -15,6 +15,8 @@ empty-state must surface the structured path directly.
 | Oncology study fallback | `get disease melanoma genes` | Falls back to `study download --list` when no local study can be chosen |
 | Disease zero-result discover | `search disease definitelynotarealdisease` | Teaches `discover` when disease search is empty |
 | Drug zero-result discover | `search drug definitelynotarealdrugname --region us` | Teaches `discover` when drug search is empty |
+| Article curated pivots | `get article 22663011` | Promotes executable entity pivots ahead of citation chasing |
+| Completed trial results guidance | `get trial NCT02576665` | Promotes result-oriented follow-up before generic condition pivots |
 
 ## Drug to PGx
 
@@ -144,4 +146,46 @@ trial code or alias is more likely than a canonical drug name match.
 out="$(biomcp search drug definitelynotarealdrugname --region us --limit 3)"
 echo "$out" | mustmatch like "Try: biomcp discover definitelynotarealdrugname"
 echo "$out" | mustmatch like "resolve drug trial codes and aliases"
+```
+
+## Article Curated Pivots
+
+Article cards should keep the explicit entity-helper escape hatch first, then
+promote executable typed pivots before citation-chain expansion.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get article 22663011)"
+echo "$out" | mustmatch like "biomcp article entities 22663011"
+echo "$out" | mustmatch like "biomcp search gene -q BRAF"
+echo "$out" | mustmatch like "biomcp article citations 22663011 --limit 3"
+if echo "$out" | grep -F "biomcp get gene serine-threonine protein kinase" >/dev/null; then
+  echo "unexpected stale raw article gene command" >&2
+  exit 1
+fi
+entities_line="$(printf '%s\n' "$out" | grep -n 'biomcp article entities 22663011' | head -n1 | cut -d: -f1)"
+gene_line="$(printf '%s\n' "$out" | grep -n 'biomcp search gene -q BRAF' | head -n1 | cut -d: -f1)"
+citations_line="$(printf '%s\n' "$out" | grep -n 'biomcp article citations 22663011 --limit 3' | head -n1 | cut -d: -f1)"
+test -n "$entities_line"
+test -n "$gene_line"
+test -n "$citations_line"
+test "$entities_line" -lt "$gene_line"
+test "$gene_line" -lt "$citations_line"
+```
+
+## Completed Trial Results Guidance
+
+Completed or terminated trial cards should point to likely result publications
+before the generic disease/article/trial pivots for the condition.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get trial NCT02576665)"
+echo "$out" | mustmatch like 'biomcp search article --drug "Toca 511" -q "NCT02576665 A Study of Toca'
+echo "$out" | mustmatch like "find publications or conference reports from this completed/terminated trial"
+results_line="$(printf '%s\n' "$out" | grep -n 'biomcp search article --drug "Toca 511"' | head -n1 | cut -d: -f1)"
+disease_line="$(printf '%s\n' "$out" | grep -n 'biomcp search disease --query "Colorectal Cancer"' | head -n1 | cut -d: -f1)"
+test -n "$results_line"
+test -n "$disease_line"
+test "$results_line" -lt "$disease_line"
 ```
