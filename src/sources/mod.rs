@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::future::Future;
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -236,14 +237,25 @@ impl Middleware for SemanticScholarSharedPoolRateLimitMiddleware {
     }
 }
 
-fn http_cache_dir() -> Result<std::path::PathBuf, BioMcpError> {
-    Ok(crate::cache::resolve_cache_config()?
-        .cache_root
-        .join("http"))
+fn apply_migration_non_fatal<M, W>(cache_root: &Path, migrate: M, warn_fn: W)
+where
+    M: FnOnce(&Path) -> std::io::Result<crate::cache::MigrationOutcome>,
+    W: FnOnce(&std::io::Error),
+{
+    if let Err(err) = migrate(cache_root) {
+        warn_fn(&err);
+    }
 }
 
 fn build_http_client(kind: SharedHttpClientKind) -> Result<ClientWithMiddleware, BioMcpError> {
-    let cache_path = http_cache_dir()?;
+    let cache_root = crate::cache::resolve_cache_config()?.cache_root;
+    apply_migration_non_fatal(&cache_root, crate::cache::migrate_http_cache, |err| {
+        warn!(
+            cache_root = %cache_root.display(),
+            "HTTP cache directory migration failed; continuing with normal cache initialization: {err}"
+        );
+    });
+    let cache_path = cache_root.join("http");
     std::fs::create_dir_all(&cache_path)?;
 
     let mut default_headers = HeaderMap::new();
@@ -817,7 +829,10 @@ mod tests {
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
 
-        let path = http_cache_dir().expect("default cache root should resolve");
+        let path = crate::cache::resolve_cache_config()
+            .expect("default cache root should resolve")
+            .cache_root
+            .join("http");
 
         assert_eq!(path, cache_home.join("biomcp").join("http"));
     }
@@ -833,8 +848,55 @@ mod tests {
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", Some(&override_root.to_string_lossy()));
 
-        let path = http_cache_dir().expect("env override cache root should resolve");
+        let path = crate::cache::resolve_cache_config()
+            .expect("env override cache root should resolve")
+            .cache_root
+            .join("http");
 
         assert_eq!(path, override_root.join("http"));
+    }
+
+    #[test]
+    fn apply_migration_non_fatal_warns_and_continues_on_error() {
+        let mut warned: Vec<std::io::ErrorKind> = Vec::new();
+
+        apply_migration_non_fatal(
+            Path::new("/unused"),
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "test error",
+                ))
+            },
+            |err: &std::io::Error| warned.push(err.kind()),
+        );
+
+        assert_eq!(warned, vec![std::io::ErrorKind::PermissionDenied]);
+    }
+
+    #[test]
+    fn build_http_client_renames_legacy_http_cache_before_client_init() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("http-cache-migration");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let override_root = root.path().join("override-root");
+        let legacy_dir = override_root.join("http-cacache");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+        std::fs::write(legacy_dir.join("sentinel.txt"), b"cached payload").expect("write sentinel");
+
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", Some(&override_root.to_string_lossy()));
+
+        let result = build_http_client(SharedHttpClientKind::Default);
+
+        assert!(
+            result.is_ok(),
+            "client should initialize even with legacy cache migration"
+        );
+        assert!(override_root.join("http").is_dir());
+        assert!(override_root.join("http").join("sentinel.txt").is_file());
+        assert!(!override_root.join("http-cacache").exists());
     }
 }
