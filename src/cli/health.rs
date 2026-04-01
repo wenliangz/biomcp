@@ -958,8 +958,26 @@ fn health_http_client() -> Result<reqwest::Client, BioMcpError> {
 }
 
 async fn check_cache_dir() -> ProbeOutcome {
+    let dir = match crate::cache::resolve_cache_config() {
+        Ok(config) => config.cache_root,
+        Err(err) => {
+            return outcome(
+                HealthRow {
+                    api: "Cache dir".into(),
+                    status: "error".into(),
+                    latency: err.to_string(),
+                    affects: Some("local cache-backed lookups and downloads".into()),
+                    key_configured: None,
+                },
+                ProbeClass::Error,
+            );
+        }
+    };
+    probe_cache_dir(&dir).await
+}
+
+async fn probe_cache_dir(dir: &Path) -> ProbeOutcome {
     let start = Instant::now();
-    let dir = crate::utils::download::biomcp_cache_dir();
     let suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1055,8 +1073,8 @@ mod tests {
 
     use super::{
         EMA_LOCAL_DATA_AFFECTS, HealthReport, HealthRow, ProbeClass, ProbeKind, ProbeOutcome,
-        SourceDescriptor, affects_for_api, ema_local_data_outcome, health_sources, probe_source,
-        report_from_outcomes,
+        SourceDescriptor, affects_for_api, check_cache_dir, ema_local_data_outcome, health_sources,
+        probe_cache_dir, probe_source, report_from_outcomes,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -1140,6 +1158,20 @@ mod tests {
         for file in files {
             std::fs::write(root.join(file), b"{}").expect("write EMA fixture file");
         }
+    }
+
+    fn assert_cache_dir_affects(value: Option<&str>) {
+        assert_eq!(value, Some("local cache-backed lookups and downloads"));
+    }
+
+    fn assert_millisecond_latency(value: &str) {
+        let digits = value
+            .strip_suffix("ms")
+            .expect("latency should end with ms");
+        assert!(
+            !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()),
+            "unexpected latency: {value}"
+        );
     }
 
     fn semantic_scholar_source(url: &'static str) -> SourceDescriptor {
@@ -1715,7 +1747,7 @@ mod tests {
             outcome.row.status,
             "unavailable (set S2_API_KEY for reliable access)"
         );
-        assert!(outcome.row.latency.ends_with("ms"));
+        assert_millisecond_latency(&outcome.row.latency);
         assert!(!outcome.row.latency.contains("HTTP 429"));
         assert_eq!(outcome.row.affects, None);
         assert_eq!(outcome.row.key_configured, Some(false));
@@ -1808,6 +1840,84 @@ mod tests {
             Some("Semantic Scholar features")
         );
         assert_eq!(outcome.row.key_configured, Some(true));
+    }
+
+    #[test]
+    fn check_cache_dir_success_row_uses_resolved_path_and_ok_contract() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new();
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+
+        let outcome = block_on(check_cache_dir());
+
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(
+            outcome.row.api,
+            format!("Cache dir ({})", cache_home.join("biomcp").display())
+        );
+        assert_eq!(outcome.row.status, "ok");
+        assert_millisecond_latency(&outcome.row.latency);
+        assert_eq!(outcome.row.affects, None);
+        assert_eq!(outcome.row.key_configured, None);
+    }
+
+    #[test]
+    fn probe_cache_dir_failure_preserves_error_contract() {
+        let root = TempDirGuard::new();
+        let blocking_path = root.path().join("not-a-dir");
+        std::fs::write(&blocking_path, b"occupied").expect("blocking file should exist");
+
+        let outcome = block_on(probe_cache_dir(&blocking_path));
+
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(
+            outcome.row.api,
+            format!("Cache dir ({})", blocking_path.display())
+        );
+        assert_eq!(outcome.row.status, "error");
+        assert!(
+            outcome.row.latency.contains("AlreadyExists")
+                || outcome.row.latency.contains("NotADirectory")
+                || outcome.row.latency.contains("PermissionDenied"),
+            "unexpected latency: {}",
+            outcome.row.latency
+        );
+        assert_cache_dir_affects(outcome.row.affects.as_deref());
+        assert_eq!(outcome.row.key_configured, None);
+    }
+
+    #[test]
+    fn check_cache_dir_config_error_matches_pinned_contract() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new();
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let config_dir = config_home.join("biomcp");
+        std::fs::create_dir_all(&config_dir).expect("config dir should exist");
+        let config_path = config_dir.join("cache.toml");
+        std::fs::write(&config_path, "[cache]\nmax_size = 0\n").expect("cache.toml should exist");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+
+        let outcome = block_on(check_cache_dir());
+
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(outcome.row.api, "Cache dir");
+        assert_eq!(outcome.row.status, "error");
+        assert_eq!(
+            outcome.row.latency,
+            format!(
+                "Invalid argument: {}: [cache].max_size must be greater than 0",
+                config_path.display()
+            )
+        );
+        assert_cache_dir_affects(outcome.row.affects.as_deref());
+        assert_eq!(outcome.row.key_configured, None);
     }
 
     #[test]
