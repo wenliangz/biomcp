@@ -10,8 +10,23 @@ pub(crate) enum MigrationOutcome {
 }
 
 fn directory_exists(path: &Path, label: &str) -> Result<bool, io::Error> {
-    match fs::metadata(path) {
+    match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() => Ok(true),
+        Ok(metadata) if metadata.file_type().is_symlink() => match fs::metadata(path) {
+            Ok(target_metadata) if target_metadata.is_dir() => Ok(true),
+            Ok(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{label} {} exists but is not a directory", path.display()),
+            )),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{label} {} exists but points to a missing target",
+                    path.display()
+                ),
+            )),
+            Err(err) => Err(err),
+        },
         Ok(_) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{label} {} exists but is not a directory", path.display()),
@@ -40,6 +55,8 @@ pub(crate) fn migrate_http_cache(cache_root: &Path) -> Result<MigrationOutcome, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -69,6 +86,25 @@ mod tests {
     impl Drop for TempDirGuard {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn assert_invalid_input_contains(
+        result: Result<MigrationOutcome, io::Error>,
+        expected: &[&str],
+    ) {
+        match result {
+            Err(err) => {
+                assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+                let message = err.to_string();
+                for needle in expected {
+                    assert!(
+                        message.contains(needle),
+                        "expected error to contain {needle:?}, got: {message}"
+                    );
+                }
+            }
+            Ok(_) => panic!("expected invalid-input error"),
         }
     }
 
@@ -130,16 +166,10 @@ mod tests {
         let root = TempDirGuard::new("legacy-file");
         std::fs::write(root.path().join("http-cacache"), b"not a dir").expect("write legacy file");
 
-        let result = migrate_http_cache(root.path());
-
-        match result {
-            Err(err) => {
-                assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-                assert!(err.to_string().contains("legacy cache path"));
-                assert!(err.to_string().contains("not a directory"));
-            }
-            Ok(_) => panic!("expected error when legacy path is a file"),
-        }
+        assert_invalid_input_contains(
+            migrate_http_cache(root.path()),
+            &["legacy cache path", "not a directory"],
+        );
     }
 
     #[test]
@@ -148,15 +178,39 @@ mod tests {
         std::fs::create_dir_all(root.path().join("http-cacache")).expect("create legacy dir");
         std::fs::write(root.path().join("http"), b"not a dir").expect("write target file");
 
-        let result = migrate_http_cache(root.path());
+        assert_invalid_input_contains(
+            migrate_http_cache(root.path()),
+            &["runtime cache target", "not a directory"],
+        );
+    }
 
-        match result {
-            Err(err) => {
-                assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-                assert!(err.to_string().contains("runtime cache target"));
-                assert!(err.to_string().contains("not a directory"));
-            }
-            Ok(_) => panic!("expected error when runtime target is a file"),
-        }
+    #[cfg(unix)]
+    #[test]
+    fn errors_when_legacy_path_is_a_dangling_symlink() {
+        let root = TempDirGuard::new("legacy-dangling-symlink");
+        symlink(
+            root.path().join("missing-legacy"),
+            root.path().join("http-cacache"),
+        )
+        .expect("create dangling legacy symlink");
+
+        assert_invalid_input_contains(
+            migrate_http_cache(root.path()),
+            &["legacy cache path", "missing target"],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn errors_when_runtime_http_target_is_a_dangling_symlink() {
+        let root = TempDirGuard::new("target-dangling-symlink");
+        std::fs::create_dir_all(root.path().join("http-cacache")).expect("create legacy dir");
+        symlink(root.path().join("missing-target"), root.path().join("http"))
+            .expect("create dangling runtime symlink");
+
+        assert_invalid_input_contains(
+            migrate_http_cache(root.path()),
+            &["runtime cache target", "missing target"],
+        );
     }
 }
