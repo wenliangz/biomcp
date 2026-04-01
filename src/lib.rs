@@ -8,6 +8,8 @@ pub mod cli;
 pub mod error;
 pub mod mcp;
 
+#[cfg_attr(not(test), allow(dead_code))]
+mod cache;
 mod entities;
 mod render;
 mod sources;
