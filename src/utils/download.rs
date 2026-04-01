@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::error::BioMcpError;
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 pub fn biomcp_cache_dir() -> PathBuf {
     match dirs::cache_dir() {
         Some(dir) => dir.join("biomcp"),
@@ -13,7 +13,7 @@ pub fn biomcp_cache_dir() -> PathBuf {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 pub fn biomcp_downloads_dir() -> PathBuf {
     std::env::temp_dir().join("biomcp")
 }
@@ -22,7 +22,7 @@ pub fn cache_key(id: &str) -> String {
     format!("{:x}", md5::compute(id.as_bytes()))
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 pub fn cache_path(id: &str) -> PathBuf {
     biomcp_downloads_dir().join(format!("{}.txt", cache_key(id)))
 }
@@ -132,7 +132,7 @@ pub async fn write_atomic_bytes(path: &Path, content: &[u8]) -> Result<(), BioMc
 
 pub async fn save_atomic(id: &str, content: &str) -> Result<PathBuf, BioMcpError> {
     let path = download_path(id)?;
-    if tokio::fs::metadata(&path).await.is_ok() {
+    if matches!(tokio::fs::metadata(&path).await, Ok(metadata) if metadata.is_file()) {
         return Ok(path);
     }
 
@@ -321,5 +321,32 @@ mod tests {
         );
         let content = std::fs::read_to_string(&path).expect("saved file should exist");
         assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn save_atomic_errors_when_target_path_is_directory() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("save-atomic-directory-target");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let override_root = root.path().join("override-root");
+        let id = "pmid:directory-target";
+        let target = override_root
+            .join("downloads")
+            .join(format!("{}.txt", cache_key(id)));
+        std::fs::create_dir_all(&target).expect("directory target should exist");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", Some(&override_root.to_string_lossy()));
+
+        let err = block_on(save_atomic(id, "hello world"))
+            .expect_err("directory target should not short-circuit as a cached file");
+
+        assert!(
+            err.to_string().contains("Is a directory")
+                || err.to_string().contains("directory")
+                || err.to_string().contains("Access is denied"),
+            "unexpected error: {err}"
+        );
     }
 }

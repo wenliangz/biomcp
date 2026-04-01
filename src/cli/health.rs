@@ -1164,6 +1164,16 @@ mod tests {
         assert_eq!(value, Some("local cache-backed lookups and downloads"));
     }
 
+    fn assert_millisecond_latency(value: &str) {
+        let digits = value
+            .strip_suffix("ms")
+            .expect("latency should end with ms");
+        assert!(
+            !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()),
+            "unexpected latency: {value}"
+        );
+    }
+
     fn semantic_scholar_source(url: &'static str) -> SourceDescriptor {
         let source = health_sources()
             .iter()
@@ -1737,7 +1747,7 @@ mod tests {
             outcome.row.status,
             "unavailable (set S2_API_KEY for reliable access)"
         );
-        assert!(outcome.row.latency.ends_with("ms"));
+        assert_millisecond_latency(&outcome.row.latency);
         assert!(!outcome.row.latency.contains("HTTP 429"));
         assert_eq!(outcome.row.affects, None);
         assert_eq!(outcome.row.key_configured, Some(false));
@@ -1850,7 +1860,7 @@ mod tests {
             format!("Cache dir ({})", cache_home.join("biomcp").display())
         );
         assert_eq!(outcome.row.status, "ok");
-        assert!(outcome.row.latency.ends_with("ms"));
+        assert_millisecond_latency(&outcome.row.latency);
         assert_eq!(outcome.row.affects, None);
         assert_eq!(outcome.row.key_configured, None);
     }
