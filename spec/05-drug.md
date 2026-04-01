@@ -90,10 +90,15 @@ echo "$out" | mustmatch not like $'No drugs found\n\nShowing 0 of 0 results.'
 `get drug` expands mechanism, targets, indications, and key metadata. We assert on the normalized heading and a stable metadata/section marker.
 
 ```bash
-out="$(biomcp get drug pembrolizumab)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" get drug pembrolizumab)"
 echo "$out" | mustmatch like "# pembrolizumab"
 echo "$out" | mustmatch like "DrugBank ID: DB09037"
 echo "$out" | mustmatch like "## Targets"
+echo "$out" | mustmatch like "biomcp get drug pembrolizumab label   - approved-indication and FDA label detail beyond the base card"
+echo "$out" | mustmatch like "biomcp get drug pembrolizumab regulatory   - approval and supplement history; use only if the base card lacks approval context"
+echo "$out" | mustmatch like "biomcp get drug pembrolizumab safety   - regulatory safety detail"
+echo "$out" | mustmatch like "post-marketing signal"
 ```
 
 ## Sparse Drug Cards Suggest Literature Follow-Up

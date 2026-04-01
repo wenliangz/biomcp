@@ -137,8 +137,9 @@ echo "$out" | mustmatch like '"matched_sources": ["pubtator"'
 must say so explicitly instead of silently narrowing the search surface.
 
 ```bash
-out="$(biomcp search article -g BRAF --type review --limit 3)"
-echo "$out" | mustmatch like "Note: --type currently restricts article search to Europe PMC"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search article -g BRAF --type review --limit 3)"
+echo "$out" | mustmatch like "> Note: --type currently restricts article search to Europe PMC"
 echo "$out" | mustmatch like "| PMID | Title |"
 ```
 
@@ -211,9 +212,16 @@ test -s "$path"
 `article entities` exposes actionable next-command pivots by entity class. We check top-level heading and genes subsection marker.
 
 ```bash
-out="$(biomcp article entities 22663011)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" article entities 22663011)"
 echo "$out" | mustmatch like "# Entities in PMID 22663011"
 echo "$out" | mustmatch like "## Genes ("
+echo "$out" | mustmatch like '`biomcp search gene -q BRAF`'
+echo "$out" | mustmatch like '`biomcp search gene -q "serine-threonine protein kinase"`'
+if echo "$out" | grep -F "biomcp get gene serine-threonine protein kinase" >/dev/null; then
+  echo "unexpected stale raw gene command" >&2
+  exit 1
+fi
 ```
 
 ## Article Batch

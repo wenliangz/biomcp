@@ -76,26 +76,35 @@ section with its upstream source name(s) so callers can attribute data without
 parsing markdown.
 
 ```bash
-gene_json="$(biomcp get gene BRAF --json)"
+bin="${BIOMCP_BIN:-biomcp}"
+
+gene_json="$("$bin" get gene BRAF --json)"
 echo "$gene_json" | mustmatch like '"_meta": {'
 echo "$gene_json" | mustmatch like '"evidence_urls": ['
 echo "$gene_json" | mustmatch like '"next_commands": ['
 echo "$gene_json" | mustmatch like '"section_sources": ['
 
-variant_json="$(biomcp get variant "BRAF V600E" --json)"
+variant_json="$("$bin" get variant "BRAF V600E" --json)"
 echo "$variant_json" | mustmatch like '"label": "dbSNP"'
 echo "$variant_json" | mustmatch like '"label": "COSMIC"'
 echo "$variant_json" | mustmatch like '"next_commands": ['
 
-trial_json="$(biomcp get trial NCT02576665 --json)"
+article_json="$("$bin" get article 22663011 --json)"
+echo "$article_json" | mustmatch like '"next_commands": ['
+echo "$article_json" | jq -e '._meta.next_commands | index("biomcp article entities 22663011") != null' > /dev/null
+echo "$article_json" | jq -e '._meta.next_commands | index("biomcp search gene -q BRAF") != null' > /dev/null
+echo "$article_json" | jq -e 'all(._meta.next_commands[]; . != "biomcp get gene serine-threonine protein kinase")' > /dev/null
+
+trial_json="$("$bin" get trial NCT02576665 --json)"
 echo "$trial_json" | mustmatch like '"label": "ClinicalTrials.gov"'
 echo "$trial_json" | mustmatch like '"next_commands": ['
+echo "$trial_json" | jq -e '._meta.next_commands | any(. == "biomcp search article --drug \"Toca 511\" -q \"NCT02576665 A Study of Toca 511, a\" --limit 5")' > /dev/null
 
-pgx_json="$(biomcp get pgx CYP2D6 --json)"
+pgx_json="$("$bin" get pgx CYP2D6 --json)"
 echo "$pgx_json" | mustmatch like '"label": "CPIC"'
 echo "$pgx_json" | mustmatch like '"next_commands": ['
 
-ae_json="$(biomcp get adverse-event 10222779 --json)"
+ae_json="$("$bin" get adverse-event 10222779 --json)"
 echo "$ae_json" | mustmatch like '"label": "OpenFDA"'
 echo "$ae_json" | mustmatch like '"next_commands": ['
 ```
