@@ -202,7 +202,8 @@ fn retry_sleep_duration(attempt: u32, retry_after_floor: Option<Duration>) -> Du
 /// - Retry: 3 attempts with exponential backoff for transient errors
 /// - Retry log level: `DEBUG` — retry attempts are suppressed at the default `WARN` verbosity and
 ///   visible with `RUST_LOG=debug`
-/// - Cache: Disk-based HTTP cache in XDG cache directory
+/// - Cache: Disk-based HTTP cache under the resolved canonical cache root
+///   (`BIOMCP_CACHE_DIR`, `cache.toml`, or XDG default)
 /// - Cache TTL: `Cache-Control: max-stale=86400` makes “no caching headers” responses usable for 24h
 #[derive(Clone, Copy)]
 enum SharedHttpClientKind {
@@ -235,8 +236,14 @@ impl Middleware for SemanticScholarSharedPoolRateLimitMiddleware {
     }
 }
 
+fn http_cache_dir() -> Result<std::path::PathBuf, BioMcpError> {
+    Ok(crate::cache::resolve_cache_config()?
+        .cache_root
+        .join("http"))
+}
+
 fn build_http_client(kind: SharedHttpClientKind) -> Result<ClientWithMiddleware, BioMcpError> {
-    let cache_path = crate::utils::download::biomcp_cache_dir().join("http-cacache");
+    let cache_path = http_cache_dir()?;
     std::fs::create_dir_all(&cache_path)?;
 
     let mut default_headers = HeaderMap::new();
@@ -545,12 +552,77 @@ pub(crate) async fn read_limited_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::MutexGuard;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        crate::test_support::env_lock().blocking_lock()
+    }
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // Safety: tests serialize environment mutation with `env_lock()`.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.name, value),
+                    None => std::env::remove_var(self.name),
+                }
+            }
+        }
+    }
+
+    fn set_env_var(name: &'static str, value: Option<&str>) -> EnvVarGuard {
+        let previous = std::env::var(name).ok();
+        // Safety: tests serialize environment mutation with `env_lock()`.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        EnvVarGuard { name, previous }
+    }
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(label: &str) -> Self {
+            let suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "biomcp-sources-test-{label}-{}-{suffix}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn parse_cache_mode_returns_none_for_default_or_unset() {
@@ -733,5 +805,36 @@ mod tests {
 
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn http_cache_dir_default_root_uses_xdg_cache_home_biomcp_http() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("http-cache-default-root");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+
+        let path = http_cache_dir().expect("default cache root should resolve");
+
+        assert_eq!(path, cache_home.join("biomcp").join("http"));
+    }
+
+    #[test]
+    fn http_cache_dir_env_override_uses_biomcp_cache_dir_http() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("http-cache-env-override");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let override_root = root.path().join("override-root");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", Some(&override_root.to_string_lossy()));
+
+        let path = http_cache_dir().expect("env override cache root should resolve");
+
+        assert_eq!(path, override_root.join("http"));
     }
 }
