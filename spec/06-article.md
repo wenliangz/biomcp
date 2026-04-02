@@ -127,8 +127,8 @@ other non-EuropePMC matches when those sources lack retraction metadata.
 
 ```bash
 out="$(biomcp --json search article -q 'alternative microexon splicing metastasis' --limit 5)"
-echo "$out" | mustmatch like '"matched_sources": ['
-echo "$out" | mustmatch like '"matched_sources": ["pubtator"'
+echo "$out" | jq -r 'all(.results[]; (.matched_sources | type) == "array")' | mustmatch "true"
+echo "$out" | jq -r 'any(.results[]; (.matched_sources | index("pubtator")) != null)' | mustmatch "true"
 ```
 
 ## Type Filter Warns About Europe PMC Restriction
@@ -176,7 +176,6 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 out="$(TMPDIR="$tmpdir" biomcp get article 27083046 fulltext)"
 echo "$out" | mustmatch like "## Full Text"
-echo "$out" | mustmatch '/^Saved to: .+/m'
 path="$(printf '%s\n' "$out" | sed -n 's/^Saved to: //p' | head -n1)"
 test -n "$path"
 test -f "$path"
@@ -200,7 +199,6 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 out="$(TMPDIR="$tmpdir" biomcp get article 25268582 fulltext)"
 echo "$out" | mustmatch like "## Full Text"
-echo "$out" | mustmatch '/^Saved to: .+/m'
 path="$(printf '%s\n' "$out" | sed -n 's/^Saved to: //p' | head -n1)"
 test -n "$path"
 test -f "$path"

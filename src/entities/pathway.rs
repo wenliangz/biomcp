@@ -961,12 +961,9 @@ mod tests {
             .await;
 
         Mock::given(method("GET"))
-            .and(path("/findPathwaysByText"))
-            .and(query_param("query", "apoptosis"))
-            .and(query_param("organism", "Homo sapiens"))
-            .and(query_param("format", "json"))
+            .and(path("/findPathwaysByText.json"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"{"result":[{"id":"WP254","name":"Apoptosis","species":"Homo sapiens"}]}"#,
+                r#"{"pathwayInfo":[{"id":"WP254","name":"Apoptosis","species":"Homo sapiens"}]}"#,
                 "application/json",
             ))
             .expect(1)

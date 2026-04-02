@@ -18,7 +18,7 @@ Typical locations:
 
 The cache generally contains:
 
-- `http-cacache/` for HTTP responses,
+- `http/` for HTTP responses,
 - `downloads/` for retrieved text artifacts.
 
 ## Why do invalid dates fail immediately?

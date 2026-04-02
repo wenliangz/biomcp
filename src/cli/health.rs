@@ -377,7 +377,7 @@ const HEALTH_SOURCES: &[SourceDescriptor] = &[
         api: "WikiPathways",
         affects: Some("pathway search and WikiPathways detail/genes sections"),
         probe: ProbeKind::Get {
-            url: "https://webservice.wikipathways.org/findPathwaysByText?query=apoptosis&organism=Homo%20sapiens&format=json",
+            url: "https://www.wikipathways.org/json/findPathwaysByText.json",
         },
     },
     SourceDescriptor {

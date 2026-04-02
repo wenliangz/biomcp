@@ -6,9 +6,10 @@ use serde::de::DeserializeOwned;
 
 use crate::error::BioMcpError;
 
-const WIKIPATHWAYS_BASE: &str = "https://webservice.wikipathways.org";
+const WIKIPATHWAYS_BASE: &str = "https://www.wikipathways.org/json";
 const WIKIPATHWAYS_API: &str = "wikipathways";
 const WIKIPATHWAYS_BASE_ENV: &str = "BIOMCP_WIKIPATHWAYS_BASE";
+const WIKIPATHWAYS_MAX_BODY_BYTES: usize = 24 * 1024 * 1024;
 
 pub struct WikiPathwaysClient {
     client: reqwest_middleware::ClientWithMiddleware,
@@ -46,7 +47,12 @@ impl WikiPathwaysClient {
         let resp = crate::sources::apply_cache_mode(req).send().await?;
         let status = resp.status();
         let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE).cloned();
-        let bytes = crate::sources::read_limited_body(resp, WIKIPATHWAYS_API).await?;
+        let bytes = crate::sources::read_limited_body_with_limit(
+            resp,
+            WIKIPATHWAYS_API,
+            WIKIPATHWAYS_MAX_BODY_BYTES,
+        )
+        .await?;
         if !status.is_success() {
             let excerpt = crate::sources::body_excerpt(&bytes);
             return Err(BioMcpError::Api {
@@ -73,19 +79,16 @@ impl WikiPathwaysClient {
             ));
         }
 
-        let url = self.endpoint("findPathwaysByText");
-        let resp: WikiPathwaysSearchResponse = self
-            .get_json(self.client.get(&url).query(&[
-                ("query", query),
-                ("organism", "Homo sapiens"),
-                ("format", "json"),
-            ]))
-            .await?;
+        let url = self.endpoint("findPathwaysByText.json");
+        let resp: WikiPathwaysSearchResponse = self.get_json(self.client.get(&url)).await?;
 
-        let mut out = Vec::new();
+        let mut ranked = Vec::new();
         let mut seen = HashSet::new();
-        for row in resp.result.unwrap_or_default() {
+        for row in resp.entries() {
             let is_human = row.species_is_human();
+            let Some(score) = row.match_score(query) else {
+                continue;
+            };
             let Some(id) = row
                 .id
                 .map(|value| value.trim().to_string())
@@ -103,26 +106,38 @@ impl WikiPathwaysClient {
             if !seen.insert(id.clone()) {
                 continue;
             }
-            out.push(WikiPathwaysHit { id, name });
-            if out.len() >= limit.clamp(1, 25) {
-                break;
-            }
+            ranked.push((score, id, name));
         }
 
-        Ok(out)
+        ranked.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+
+        Ok(ranked
+            .into_iter()
+            .take(limit.clamp(1, 25))
+            .map(|(_, id, name)| WikiPathwaysHit { id, name })
+            .collect())
     }
 
     pub async fn get_pathway(&self, pw_id: &str) -> Result<WikiPathwaysRecord, BioMcpError> {
         let pw_id = validate_wikipathways_id(pw_id)?;
-        let url = self.endpoint("getPathwayInfo");
-        let resp: WikiPathwaysGetResponse = self
-            .get_json(
-                self.client
-                    .get(&url)
-                    .query(&[("pwId", pw_id.as_str()), ("format", "json")]),
-            )
-            .await?;
-        let row = resp.pathway_info;
+        let url = self.endpoint("getPathwayInfo.json");
+        let resp: WikiPathwaysGetResponse = self.get_json(self.client.get(&url)).await?;
+        let row = resp
+            .entries()
+            .into_iter()
+            .find(|row| row.id.as_deref().map(str::trim) == Some(pw_id.as_str()))
+            .ok_or_else(|| BioMcpError::NotFound {
+                entity: "pathway".to_string(),
+                id: pw_id.clone(),
+                suggestion:
+                    "Try searching by pathway name, for example: biomcp search pathway -q apoptosis"
+                        .to_string(),
+            })?;
         let id = row
             .id
             .map(|value| value.trim().to_string())
@@ -152,14 +167,8 @@ impl WikiPathwaysClient {
 
     pub async fn pathway_entrez_gene_ids(&self, pw_id: &str) -> Result<Vec<String>, BioMcpError> {
         let pw_id = validate_wikipathways_id(pw_id)?;
-        let url = self.endpoint("getXrefList");
-        let resp: WikiPathwaysXrefResponse = self
-            .get_json(self.client.get(&url).query(&[
-                ("pwId", pw_id.as_str()),
-                ("code", "L"),
-                ("format", "json"),
-            ]))
-            .await?;
+        let url = self.endpoint("findPathwaysByXref.json");
+        let resp: WikiPathwaysXrefResponse = self.get_json(self.client.get(&url)).await?;
 
         let mut out = Vec::new();
         let mut seen = HashSet::new();
@@ -172,6 +181,23 @@ impl WikiPathwaysClient {
                 continue;
             }
             out.push(xref.to_string());
+        }
+        if let Some(row) = resp
+            .pathway_info
+            .into_iter()
+            .find(|row| row.id.as_deref().map(str::trim) == Some(pw_id.as_str()))
+        {
+            for xref in row.ncbigene.unwrap_or_default().split([',', ';']) {
+                let xref = xref.trim();
+                let xref = xref.strip_prefix("ncbigene:").unwrap_or(xref).trim();
+                if xref.is_empty() || !xref.chars().all(|ch| ch.is_ascii_digit()) {
+                    continue;
+                }
+                if !seen.insert(xref.to_string()) {
+                    continue;
+                }
+                out.push(xref.to_string());
+            }
         }
         Ok(out)
     }
@@ -207,7 +233,20 @@ pub struct WikiPathwaysRecord {
 
 #[derive(Debug, Deserialize)]
 struct WikiPathwaysSearchResponse {
-    result: Option<Vec<WikiPathwaysSearchEntry>>,
+    #[serde(default)]
+    result: Vec<WikiPathwaysSearchEntry>,
+    #[serde(rename = "pathwayInfo", default)]
+    pathway_info: Vec<WikiPathwaysSearchEntry>,
+}
+
+impl WikiPathwaysSearchResponse {
+    fn entries(self) -> Vec<WikiPathwaysSearchEntry> {
+        if self.pathway_info.is_empty() {
+            self.result
+        } else {
+            self.pathway_info
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,6 +254,9 @@ struct WikiPathwaysSearchEntry {
     id: Option<String>,
     name: Option<String>,
     species: Option<String>,
+    description: Option<String>,
+    datanodes: Option<String>,
+    annotations: Option<String>,
 }
 
 impl WikiPathwaysSearchEntry {
@@ -224,12 +266,94 @@ impl WikiPathwaysSearchEntry {
             .map(str::trim)
             .is_some_and(|value| value.eq_ignore_ascii_case("Homo sapiens"))
     }
+
+    fn match_score(&self, query: &str) -> Option<u8> {
+        let query = query.trim().to_ascii_lowercase();
+        if query.is_empty() {
+            return None;
+        }
+
+        let name = self.name.as_deref().map(str::trim).unwrap_or_default();
+        let name_lower = name.to_ascii_lowercase();
+        if name_lower == query {
+            return Some(0);
+        }
+        if name_lower.starts_with(&query) {
+            return Some(1);
+        }
+        if name_lower.contains(&query) {
+            return Some(2);
+        }
+        if self
+            .annotations
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|value| value.contains(&query))
+        {
+            return Some(3);
+        }
+        if self
+            .datanodes
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|value| value.contains(&query))
+        {
+            return Some(4);
+        }
+        if self
+            .description
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|value| value.contains(&query))
+        {
+            return Some(5);
+        }
+
+        let searchable = format!(
+            "{}\n{}\n{}\n{}",
+            name_lower,
+            self.description
+                .as_deref()
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_default(),
+            self.datanodes
+                .as_deref()
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_default(),
+            self.annotations
+                .as_deref()
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_default()
+        );
+        let tokens = query.split_whitespace().collect::<Vec<_>>();
+        if tokens.iter().all(|token| searchable.contains(token)) {
+            return Some(6);
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Deserialize)]
-struct WikiPathwaysGetResponse {
-    #[serde(rename = "pathwayInfo")]
-    pathway_info: WikiPathwaysGetEntry,
+#[serde(untagged)]
+enum WikiPathwaysGetResponse {
+    Legacy {
+        #[serde(rename = "pathwayInfo")]
+        pathway_info: WikiPathwaysGetEntry,
+    },
+    Bulk {
+        #[serde(rename = "pathwayInfo")]
+        pathway_info: Vec<WikiPathwaysGetEntry>,
+    },
+}
+
+impl WikiPathwaysGetResponse {
+    fn entries(self) -> Vec<WikiPathwaysGetEntry> {
+        match self {
+            Self::Legacy { pathway_info } => vec![pathway_info],
+            Self::Bulk { pathway_info } => pathway_info,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,12 +366,20 @@ struct WikiPathwaysGetEntry {
 #[derive(Debug, Deserialize)]
 struct WikiPathwaysXrefResponse {
     xrefs: Option<Vec<String>>,
+    #[serde(rename = "pathwayInfo", default)]
+    pathway_info: Vec<WikiPathwaysXrefEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WikiPathwaysXrefEntry {
+    id: Option<String>,
+    ncbigene: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
@@ -264,27 +396,24 @@ mod tests {
         let client = WikiPathwaysClient::new_for_test(server.uri()).unwrap();
 
         let body = r#"{
-          "result": [
+          "pathwayInfo": [
             {"id": "WP111", "name": "Alpha", "species": "Homo sapiens"},
             {"id": "WP111", "name": "Alpha duplicate", "species": "Homo sapiens"},
             {"id": "WP222", "name": "Mouse only", "species": "Mus musculus"},
             {"id": "BAD", "name": "Bad", "species": "Homo sapiens"},
             {"id": "WP333", "name": "", "species": "Homo sapiens"},
-            {"id": "WP444", "name": "Beta", "species": "Homo sapiens"}
+            {"id": "WP444", "name": "Alpha beta", "species": "Homo sapiens"}
           ]
         }"#;
 
         Mock::given(method("GET"))
-            .and(path("/findPathwaysByText"))
-            .and(query_param("query", "apoptosis"))
-            .and(query_param("organism", "Homo sapiens"))
-            .and(query_param("format", "json"))
+            .and(path("/findPathwaysByText.json"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
             .expect(1)
             .mount(&server)
             .await;
 
-        let hits = client.search_pathways("apoptosis", 10).await.unwrap();
+        let hits = client.search_pathways("alpha", 10).await.unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, "WP111");
         assert_eq!(hits[1].id, "WP444");
@@ -296,11 +425,9 @@ mod tests {
         let client = WikiPathwaysClient::new_for_test(server.uri()).unwrap();
 
         Mock::given(method("GET"))
-            .and(path("/getPathwayInfo"))
-            .and(query_param("pwId", "WP254"))
-            .and(query_param("format", "json"))
+            .and(path("/getPathwayInfo.json"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"{"pathwayInfo":{"id":"WP254","name":"Apoptosis","species":"Homo sapiens","revision":"140926"}}"#,
+                r#"{"pathwayInfo":[{"id":"WP254","name":"Apoptosis","species":"Homo sapiens","revision":"140926"}]}"#,
                 "application/json",
             ))
             .expect(1)
@@ -319,12 +446,9 @@ mod tests {
         let client = WikiPathwaysClient::new_for_test(server.uri()).unwrap();
 
         Mock::given(method("GET"))
-            .and(path("/getXrefList"))
-            .and(query_param("pwId", "WP254"))
-            .and(query_param("code", "L"))
-            .and(query_param("format", "json"))
+            .and(path("/findPathwaysByXref.json"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"{"xrefs":["7157","1956","7157","BAD","","672"]}"#,
+                r#"{"pathwayInfo":[{"id":"WP254","ncbigene":"ncbigene:7157, ncbigene:1956, ncbigene:7157; ncbigene:BAD, , ncbigene:672"}]}"#,
                 "application/json",
             ))
             .expect(1)
@@ -341,7 +465,7 @@ mod tests {
         let client = WikiPathwaysClient::new_for_test(server.uri()).unwrap();
 
         Mock::given(method("GET"))
-            .and(path("/findPathwaysByText"))
+            .and(path("/findPathwaysByText.json"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_raw("<html><body>error page</body></html>", "text/html"),
