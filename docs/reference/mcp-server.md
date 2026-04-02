@@ -53,7 +53,9 @@ subset. That sanitized description keeps the catalog-only
 `study download <study_id>` or the combined CLI syntax
 `study download [--list] [<study_id>]`. CLI-only packaging or mutating
 commands such as `skill install`, `ema sync`, `update`, and `uninstall`
-must not appear in the MCP tool description.
+must not appear in the MCP tool description. Cache-family commands are
+CLI-only because they reveal workstation-local paths, so they also stay out of
+the MCP tool description.
 
 ```python
 from pathlib import Path
@@ -110,7 +112,8 @@ assert 'annotations(title = "BioMCP", read_only_hint = true)' in shell
 
 The MCP `biomcp` tool accepts read-only CLI commands, including `discover`
 and the exact `study download --list` catalog lookup. Mutating commands
-remain blocked. In particular, `study download <study_id>` is rejected
+remain blocked. Cache-family commands are also rejected because they reveal
+workstation-local paths. In particular, `study download <study_id>` is rejected
 because installation performs network and filesystem writes into the local
 study directory; operators should run study installs directly via the CLI,
 outside MCP.

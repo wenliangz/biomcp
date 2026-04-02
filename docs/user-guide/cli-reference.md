@@ -7,6 +7,8 @@ BioMCP provides one command family with entity-oriented subcommands.
 - `--json`: return structured JSON output
 - `--no-cache`: bypass HTTP cache for the current command
 
+`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception.
+
 ## Core command patterns
 
 ```text
@@ -32,6 +34,7 @@ biomcp discover <query>
 biomcp enrich <GENE1,GENE2,...> [--limit N]
 biomcp batch <entity> <id1,id2,...> [--sections ...] [--source ...]
 biomcp chart [type]
+biomcp cache path
 biomcp ema sync
 biomcp health [--apis-only]
 biomcp list [entity]
@@ -64,6 +67,9 @@ biomcp skill article-follow-up
 `biomcp health --apis-only` is the upstream inventory smoke test. Full
 `biomcp health` also reports local readiness rows such as EMA local data and
 cache dir status.
+
+`biomcp cache path` is a local-CLI-only operator command. It prints the managed
+HTTP cache path as plain text and ignores the global `--json` flag.
 
 ## Search command families
 

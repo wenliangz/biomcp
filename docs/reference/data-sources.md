@@ -55,6 +55,9 @@ All HTTP-based sources share a common client with:
 - Retries: exponential backoff, up to 3 retries for transient failures
 - Disk cache: `<cache_root>/http` under the resolved cache root (`~/.cache/biomcp/http` on Linux)
 
+Run `biomcp cache path` to print the managed HTTP cache directory on the current
+machine without creating or migrating cache directories.
+
 For freshness-sensitive workflows, use `--no-cache`.
 
 ## Authentication requirements

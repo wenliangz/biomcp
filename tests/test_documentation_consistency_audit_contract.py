@@ -392,16 +392,19 @@ def test_cache_path_docs_match_resolved_cache_root_contract() -> None:
         assert "/tmp/biomcp" not in text
 
     assert "rm -rf ~/.cache/biomcp/http" in troubleshooting
-    assert "biomcp health" in troubleshooting
+    assert "biomcp cache path" in troubleshooting
     assert "default Linux/XDG example" in troubleshooting_ws
     assert "resolved cache root" in troubleshooting_ws
+    assert "print the managed HTTP cache path" in troubleshooting_ws
     assert "delete only its `http/` subdirectory manually" in troubleshooting_ws
 
     assert "`<cache_root>/http`" in data_sources
     assert "`~/.cache/biomcp/http` on Linux" in data_sources
+    assert "`biomcp cache path`" in data_sources
 
     assert "`http/` for HTTP responses" in faq
     assert "`downloads/` for retrieved text artifacts" in faq
+    assert "`biomcp cache path`" in faq
 
     assert "Saved to: <cache_root>/downloads/" in blog
     assert "follows the resolved cache root on your machine" in blog_ws

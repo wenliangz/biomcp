@@ -25,6 +25,7 @@ biomcp list [entity]          → show entities, commands, and filters
 biomcp skill                  → show the embedded BioMCP agent guide
 biomcp skill install <dir>    → install the BioMCP guide into an agent directory
 biomcp skill list             → list embedded worked examples
+biomcp cache path             → print the managed HTTP cache path (plain text; ignores `--json`)
 biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`
 ```
 
@@ -208,12 +209,18 @@ These properties should be preserved across releases:
 2. **`biomcp list <entity>`** shows entity-specific filters and examples —
    examples must be runnable
 3. **JSON output** (`--json` flag) is available on all query commands and
-   produces valid JSON — scripts and agents depend on this
+   produces valid JSON — scripts and agents depend on this. `biomcp cache path`
+   is the documented operator-command exception: it stays plain text even under
+   `--json`
 4. **`biomcp health`** reports per-source connectivity, cache writability, and
    excluded key-gated sources in one inspection view; partial upstream failures
    stay visible in output even though the command currently exits 0
 5. **Error messages** include suggested next steps — suggestions must name
    real commands
+
+JSON is the default script contract for query commands, with a documented plain-text exception for `biomcp cache path`. The cache family remains CLI-only
+because revealing workstation-local filesystem paths over MCP would cross the
+runtime security boundary.
 
 ## See Also and Next Commands
 

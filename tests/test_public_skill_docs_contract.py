@@ -64,7 +64,9 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
 
     assert "biomcp skill [list|install|<name>]" not in cli_reference
     assert "biomcp skill install [dir]" in cli_reference
+    assert "biomcp cache path" in cli_reference
     assert "biomcp skill list                 # list embedded worked examples" in cli_reference
+    assert "`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception." in cli_reference
     assert "biomcp serve-sse                  # removed compatibility command; use serve-http" not in cli_reference
     assert (
         "`biomcp serve-sse` remains available only as a hidden compatibility "
@@ -83,6 +85,7 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "`/health`" in mcp_server
     assert "`/readyz`" in mcp_server
     assert "`/`" in mcp_server
+    assert "CLI-only because they reveal workstation-local paths" in mcp_server
 
     assert "one markdown resource per embedded BioMCP worked example" in claude_desktop
     assert "biomcp://help" in claude_desktop
