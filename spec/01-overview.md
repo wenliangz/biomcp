@@ -57,7 +57,7 @@ echo "$out" | mustmatch like "search all --gene BRAF --disease melanoma"
 echo "$out" | mustmatch like "article citations <id>"
 echo "$out" | mustmatch like "batch <entity> <id1,id2,...>"
 echo "$out" | mustmatch like "enrich <GENE1,GENE2,...>"
-echo "$out" | mustmatch like "cache path"
+echo "$out" | mustmatch like '- `cache path` - print the managed HTTP cache directory `<resolved cache_root>/http`; output stays plain text and ignores `--json`'
 echo "$out" | mustmatch like "- `discover <query>`"
 echo "$out" | mustmatch like "- `ema sync`"
 echo "$out" | mustmatch like $'## Entities\n\n- gene\n- variant\n- article\n- trial'

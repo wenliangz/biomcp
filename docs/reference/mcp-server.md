@@ -131,6 +131,9 @@ assert "discover/skill" in shell or "discover/skill)." in shell
 assert 'assert "study download --list" in description' in tests
 assert 'test_mutating_study_download_is_rejected_in_mcp_mode' in tests
 assert '"BioMCP allows read-only commands only" in result.content[0].text' in tests
+assert 'test_cache_path_is_rejected_in_mcp_mode' in tests
+assert '"CLI-only over MCP" in result.content[0].text' in tests
+assert '"workstation-local filesystem paths" in result.content[0].text' in tests
 ```
 
 ## Resource Catalog

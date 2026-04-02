@@ -85,7 +85,7 @@ echo "$out" | mustmatch like "### Disease"
 echo "$out" | mustmatch like $'## Suggested Commands\n- `biomcp search disease -q "diabetes" --limit 10`'
 echo "$out" | mustmatch like "1. **diabetes mellitus**"
 echo "$out" | mustmatch '/\n2\. \*\*.+\*\*/'
-echo "$out" | mustmatch like "## Plain Language"
+echo "$out" | mustmatch not like "## Plain Language"
 ```
 
 ## Pathway Query

@@ -96,5 +96,6 @@ out="$( (printf '%s\n%s\n%s\n' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"biomcp","arguments":{"command":"biomcp cache path"}}}'; \
   sleep 1) | "$bin" serve 2>/dev/null)"
 echo "$out" | mustmatch like '"isError":true'
-echo "$out" | mustmatch like "BioMCP allows read-only commands only"
+echo "$out" | mustmatch like "CLI-only over MCP"
+echo "$out" | mustmatch like "workstation-local filesystem paths"
 ```

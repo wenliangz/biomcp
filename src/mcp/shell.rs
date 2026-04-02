@@ -32,6 +32,8 @@ struct ShellCommand {
 }
 
 const RESOURCE_HELP_URI: &str = "biomcp://help";
+const GENERIC_MCP_REJECTION_MESSAGE: &str = "Error: BioMCP allows read-only commands only. Allowed families are search/get/helpers/list/version/health/batch/enrich/discover/skill plus MCP-safe study commands (`study list`, `study download --list`, `study top-mutated`, `study query`, `study filter`, `study cohort`, `study survival`, `study compare`, `study co-occurrence`).";
+const CACHE_FAMILY_MCP_REJECTION_MESSAGE: &str = "Error: biomcp cache commands are CLI-only over MCP because they reveal workstation-local filesystem paths.";
 
 impl BioMcpServer {
     pub fn new() -> Self {
@@ -85,6 +87,17 @@ fn is_allowed_mcp_command(args: &[String]) -> bool {
     }
 }
 
+fn mcp_rejection_message(args: &[String]) -> &'static str {
+    if args
+        .get(1)
+        .is_some_and(|cmd| cmd.trim().eq_ignore_ascii_case("cache"))
+    {
+        CACHE_FAMILY_MCP_REJECTION_MESSAGE
+    } else {
+        GENERIC_MCP_REJECTION_MESSAGE
+    }
+}
+
 #[tool_router]
 impl BioMcpServer {
     #[doc = include_str!(concat!(env!("OUT_DIR"), "/mcp_shell_description.txt"))]
@@ -114,10 +127,7 @@ impl BioMcpServer {
         }
 
         if !is_allowed_mcp_command(&args) {
-            return Ok(Self::tool_error(
-                "Error: BioMCP allows read-only commands only. Allowed families are search/get/helpers/list/version/health/batch/enrich/discover/skill plus MCP-safe study commands (`study list`, `study download --list`, `study top-mutated`, `study query`, `study filter`, `study cohort`, `study survival`, `study compare`, `study co-occurrence`)."
-                    .to_string(),
-            ));
+            return Ok(Self::tool_error(mcp_rejection_message(&args)));
         }
 
         match crate::cli::execute_mcp(args).await {
@@ -332,7 +342,10 @@ pub async fn run_http(host: &str, port: u16) -> anyhow::Result<()> {
 mod tests {
     use axum::Json;
 
-    use super::{index_handler, is_allowed_mcp_command};
+    use super::{
+        CACHE_FAMILY_MCP_REJECTION_MESSAGE, GENERIC_MCP_REJECTION_MESSAGE, index_handler,
+        is_allowed_mcp_command, mcp_rejection_message,
+    };
 
     #[test]
     fn mcp_allowlist_blocks_mutating_commands() {
@@ -480,6 +493,21 @@ mod tests {
             "study".into(),
             "download".into()
         ]));
+    }
+
+    #[test]
+    fn cache_family_rejection_message_mentions_local_path_disclosure() {
+        let args = vec!["biomcp".into(), "cache".into(), "path".into()];
+        assert_eq!(
+            mcp_rejection_message(&args),
+            CACHE_FAMILY_MCP_REJECTION_MESSAGE
+        );
+    }
+
+    #[test]
+    fn generic_mcp_rejection_message_stays_read_only_for_mutating_commands() {
+        let args = vec!["biomcp".into(), "update".into()];
+        assert_eq!(mcp_rejection_message(&args), GENERIC_MCP_REJECTION_MESSAGE);
     }
 
     #[tokio::test]

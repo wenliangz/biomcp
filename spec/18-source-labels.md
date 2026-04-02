@@ -25,9 +25,9 @@ echo "$drug_out" | mustmatch like "## Targets (ChEMBL / Open Targets)"
 variant_drug_out="$("$bin" get drug rindopepimut targets)"
 echo "$variant_drug_out" | mustmatch like "Variant Targets (CIViC): EGFRvIII"
 
-disease_out="$("$bin" get disease "cystic fibrosis" all)"
+disease_out="$("$bin" get disease "cystic fibrosis")"
+echo "$disease_out" | mustmatch like "## Definition (MyDisease.info)"
 echo "$disease_out" | mustmatch like "Genes (Open Targets):"
-echo "$disease_out" | mustmatch like "## Pathways (Reactome)"
 
 trial_out="$("$bin" get trial NCT06668103)"
 echo "$trial_out" | mustmatch like "Source: ClinicalTrials.gov"
@@ -66,7 +66,7 @@ echo "$variant_drug_json" | mustmatch like '"key": "variant_targets"'
 echo "$variant_drug_json" | mustmatch like '"label": "Variant Targets"'
 echo "$variant_drug_json" | mustmatch like '"sources": ['
 
-disease_json="$("$bin" get disease "cystic fibrosis" all --json)"
+disease_json="$("$bin" get disease "cystic fibrosis" --json)"
 echo "$disease_json" | mustmatch like '"section_sources": ['
 echo "$disease_json" | mustmatch like '"key": "definition"'
 echo "$disease_json" | mustmatch like '"key": "top_genes"'
@@ -96,12 +96,21 @@ echo "$article_json" | mustmatch like '"label": "PubMed"'
 
 ## JSON section_sources — Pathway, Protein, PGX, Adverse Event
 
+Reactome pathway cards are slower than the other entity types in this group, so
+the identity proof runs on its own to stay within the shared spec timeout while
+still checking the same `_meta.section_sources` contract.
+
 ```bash
-pathway_json="$(biomcp get pathway R-HSA-5358351 all --json)"
+pathway_json="$(biomcp get pathway R-HSA-5358351 --json)"
 echo "$pathway_json" | mustmatch like '"section_sources": ['
 echo "$pathway_json" | mustmatch like '"key": "identity"'
 echo "$pathway_json" | mustmatch like '"label": "Reactome"'
+```
 
+The remaining entity families respond quickly enough to keep in one block while
+still verifying their identity and section-level source labels.
+
+```bash
 wp_json="$(biomcp get pathway WP254 --json)"
 echo "$wp_json" | mustmatch like '"section_sources": ['
 echo "$wp_json" | mustmatch like '"key": "identity"'

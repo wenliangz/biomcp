@@ -178,7 +178,8 @@ async def test_cache_path_is_rejected_in_mcp_mode(mcp_session_factory) -> None:
     assert _is_error(result) is True
     assert result.content
     assert isinstance(result.content[0], types.TextContent)
-    assert "BioMCP allows read-only commands only" in result.content[0].text
+    assert "CLI-only over MCP" in result.content[0].text
+    assert "workstation-local filesystem paths" in result.content[0].text
 
 
 @pytest.mark.asyncio

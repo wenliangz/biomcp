@@ -31,7 +31,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Output as JSON instead of Markdown
+    /// Output as JSON instead of Markdown (except biomcp cache path, which stays plain text)
     #[arg(short, long, global = true)]
     pub json: bool,
 
@@ -7521,6 +7521,19 @@ mod tests {
                 .any(|line| line.trim_start().starts_with("cache")),
             "top-level help should list the cache family: {help}"
         );
+    }
+
+    #[test]
+    fn top_level_help_mentions_cache_path_json_exception() {
+        let mut command = super::build_cli();
+        let mut help = Vec::new();
+        command
+            .write_long_help(&mut help)
+            .expect("top-level help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("except biomcp cache path"));
+        assert!(help.contains("stays plain text"));
     }
 
     #[test]
