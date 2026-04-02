@@ -10,6 +10,7 @@ use tracing::{debug, warn};
 use crate::cli::debug_plan::{DebugPlan, DebugPlanLeg};
 use crate::entities::drug::DrugRegion;
 
+pub mod cache;
 pub mod chart;
 pub mod debug_plan;
 pub mod discover;
@@ -30,7 +31,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Output as JSON instead of Markdown
+    /// Output as JSON instead of Markdown (except biomcp cache path, which stays plain text)
     #[arg(short, long, global = true)]
     pub json: bool,
 
@@ -409,6 +410,11 @@ pub enum Commands {
         /// Check external APIs only
         #[arg(long)]
         apis_only: bool,
+    },
+    /// Print the managed HTTP cache path (CLI-only; plain text; ignores `--json`)
+    Cache {
+        #[command(subcommand)]
+        cmd: cache::CacheCommand,
     },
     /// EMA (European Medicines Agency) local data management
     #[command(after_help = "\
@@ -6626,6 +6632,9 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                     Ok(report.to_markdown())
                 }
             }
+            Commands::Cache { cmd } => match cmd {
+                cache::CacheCommand::Path => Ok(crate::cli::cache::render_path()?),
+            },
             Commands::Ema { cmd } => match cmd {
                 EmaCommand::Sync => {
                     crate::sources::ema::EmaClient::sync(crate::sources::ema::EmaSyncMode::Force)
@@ -6928,10 +6937,12 @@ pub async fn execute_mcp(mut args: Vec<String>) -> anyhow::Result<CliOutput> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         ArticleCommand, ChartArgs, ChartType, Cli, Commands, DrugCommand, DrugRegionArg,
@@ -6980,6 +6991,35 @@ mod tests {
             }
         }
         EnvVarGuard { name, previous }
+    }
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(label: &str) -> Self {
+            let suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "biomcp-cli-test-{label}-{}-{suffix}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 
     async fn mount_gene_lookup_miss(server: &MockServer, symbol: &str) {
@@ -7463,6 +7503,49 @@ mod tests {
     }
 
     #[test]
+    fn cache_path_command_parses() {
+        Cli::try_parse_from(["biomcp", "cache", "path"]).expect("cache path should parse");
+    }
+
+    #[test]
+    fn top_level_help_lists_cache_command() {
+        let mut command = super::build_cli();
+        let mut help = Vec::new();
+        command
+            .write_long_help(&mut help)
+            .expect("top-level help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(
+            help.lines()
+                .any(|line| line.trim_start().starts_with("cache")),
+            "top-level help should list the cache family: {help}"
+        );
+    }
+
+    #[test]
+    fn top_level_help_mentions_cache_path_json_exception() {
+        let mut command = super::build_cli();
+        let mut help = Vec::new();
+        command
+            .write_long_help(&mut help)
+            .expect("top-level help should render");
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("except biomcp cache path"));
+        assert!(help.contains("stays plain text"));
+    }
+
+    #[test]
+    fn cache_path_help_mentions_plain_text_and_ignored_json() {
+        let help = render_cache_path_long_help();
+
+        assert!(help.contains("plain text"));
+        assert!(help.contains("--json"));
+        assert!(help.contains("ignored"));
+    }
+
+    #[test]
     fn search_article_help_includes_when_to_use_guidance() {
         let help = render_article_search_long_help();
 
@@ -7522,6 +7605,20 @@ mod tests {
         discover
             .write_long_help(&mut help)
             .expect("discover help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_cache_path_long_help() -> String {
+        let mut command = Cli::command();
+        let cache = command
+            .find_subcommand_mut("cache")
+            .expect("cache subcommand should exist");
+        let path = cache
+            .find_subcommand_mut("path")
+            .expect("cache path subcommand should exist");
+        let mut help = Vec::new();
+        path.write_long_help(&mut help)
+            .expect("cache path help should render");
         String::from_utf8(help).expect("help should be utf-8")
     }
 
@@ -10763,6 +10860,35 @@ mod tests {
             serde_json::from_str(&output.text).expect("valid mcp alias json");
         assert_eq!(value["_meta"]["alias_resolution"]["kind"], "canonical");
         assert_eq!(value["_meta"]["alias_resolution"]["canonical"], "EGFR");
+    }
+
+    #[tokio::test]
+    async fn json_cache_path_still_returns_plain_text() {
+        let _guard = lock_env().await;
+        let root = TempDirGuard::new("cache-path-json");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+
+        let output = execute(vec![
+            "biomcp".to_string(),
+            "--json".to_string(),
+            "cache".to_string(),
+            "path".to_string(),
+        ])
+        .await
+        .expect("cache path should execute");
+
+        assert_eq!(
+            output.trim(),
+            cache_home.join("biomcp").join("http").display().to_string()
+        );
+        assert!(!output.trim_start().starts_with('{'));
     }
 }
 

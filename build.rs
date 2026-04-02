@@ -31,9 +31,11 @@ fn command_output(command: &str, args: &[&str]) -> Option<String> {
 }
 
 fn is_blocked_mcp_description_line(line: &str) -> bool {
-    BLOCKED_MCP_DESCRIPTION_TERMS
-        .iter()
-        .any(|term| line.contains(term))
+    // Cache-family commands stay CLI-only because they reveal workstation-local paths.
+    line.trim_start().starts_with("- `cache ")
+        || BLOCKED_MCP_DESCRIPTION_TERMS
+            .iter()
+            .any(|term| line.contains(term))
 }
 
 fn mcp_safe_description_line(line: &str) -> Option<String> {

@@ -9,7 +9,8 @@ See [API keys](../getting-started/api-keys.md).
 
 ## Where are cached files stored?
 
-BioMCP uses platform cache directories.
+Run `biomcp cache path` to print the managed HTTP cache directory on your
+machine. BioMCP uses platform cache directories underneath that resolved root.
 
 Typical locations:
 
