@@ -34,6 +34,8 @@ echo "$out" | mustmatch '/Status: [0-9]+ ok, [0-9]+ error, [0-9]+ excluded/'
 json_out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY biomcp --json health --apis-only)"
 echo "$json_out" | jq -e 'all(.rows[]; (.status | type) == "string")' > /dev/null
 echo "$json_out" | jq -e 'all(.rows[]; ((.status | contains("(key:")) | not))' > /dev/null
+echo "$json_out" | jq -e 'all(.rows[]; (.api | startswith("EMA local data (") | not))' > /dev/null
+echo "$json_out" | jq -e 'all(.rows[]; (.api | startswith("Cache dir (") | not))' > /dev/null
 echo "$json_out" | jq -e 'any(.rows[]; .api == "OncoKB" and .status == "excluded (set ONCOKB_TOKEN)" and .key_configured == false)' > /dev/null
 echo "$json_out" | jq -e 'any(.rows[]; .api == "MyGene" and ((has("key_configured")) | not))' > /dev/null
 ```

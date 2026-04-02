@@ -54,16 +54,35 @@ pub(crate) struct CacheCleanupPlan {
 }
 
 pub(crate) fn snapshot_cache(cache_path: &Path) -> Result<CacheSnapshot, CachePlannerError> {
-    if !cache_path.exists() {
-        return Ok(CacheSnapshot {
-            cache_path: cache_path.to_path_buf(),
-            entries: Vec::new(),
-            blobs: Vec::new(),
-        });
+    match fs::symlink_metadata(cache_path) {
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                return Err(CachePlannerError::Io {
+                    path: cache_path.to_path_buf(),
+                    source: io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("{} is not a directory", cache_path.display()),
+                    ),
+                });
+            }
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            return Ok(CacheSnapshot {
+                cache_path: cache_path.to_path_buf(),
+                entries: Vec::new(),
+                blobs: Vec::new(),
+            });
+        }
+        Err(source) => {
+            return Err(CachePlannerError::Io {
+                path: cache_path.to_path_buf(),
+                source,
+            });
+        }
     }
 
     let index_path = cache_path.join("index-v5");
-    let mut entries = if index_path.exists() {
+    let mut entries = if path_exists(&index_path)? {
         let mut listed = Vec::new();
         for result in cacache::list_sync(cache_path) {
             let metadata = result.map_err(|source| CachePlannerError::Index {
@@ -85,7 +104,7 @@ pub(crate) fn snapshot_cache(cache_path: &Path) -> Result<CacheSnapshot, CachePl
 
     let refcounts = entry_refcounts(&entries);
     let content_root = cache_path.join("content-v2");
-    let mut blobs = if content_root.exists() {
+    let mut blobs = if path_exists(&content_root)? {
         walk_content_tree(cache_path, &content_root, &refcounts)?
     } else {
         Vec::new()
@@ -96,6 +115,13 @@ pub(crate) fn snapshot_cache(cache_path: &Path) -> Result<CacheSnapshot, CachePl
         cache_path: cache_path.to_path_buf(),
         entries,
         blobs,
+    })
+}
+
+fn path_exists(path: &Path) -> Result<bool, CachePlannerError> {
+    path.try_exists().map_err(|source| CachePlannerError::Io {
+        path: path.to_path_buf(),
+        source,
     })
 }
 
@@ -164,6 +190,14 @@ pub(crate) fn plan_size_lru(
         }
 
         let integrity = entry.integrity.clone();
+        // Size planning is driven by on-disk blob bytes only. Entries whose blobs are missing
+        // (or zero bytes) cannot help the budget and should not displace live data.
+        let Some(blob) = blob_by_integrity.get(&integrity) else {
+            continue;
+        };
+        if blob.size_bytes == 0 {
+            continue;
+        }
         let previous_refcount = remaining_refcounts
             .get(&integrity)
             .copied()
@@ -172,9 +206,7 @@ pub(crate) fn plan_size_lru(
             let next_refcount = previous_refcount - 1;
             if next_refcount == 0 {
                 remaining_refcounts.remove(&integrity);
-                if let Some(blob) = blob_by_integrity.get(&integrity) {
-                    referenced_blob_bytes = referenced_blob_bytes.saturating_sub(blob.size_bytes);
-                }
+                referenced_blob_bytes = referenced_blob_bytes.saturating_sub(blob.size_bytes);
             } else {
                 remaining_refcounts.insert(integrity.clone(), next_refcount);
             }
@@ -445,6 +477,21 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_cache_errors_when_cache_root_is_not_a_directory() {
+        let root = TempDirGuard::new("root-file");
+        let cache_root = root.path().join("http");
+        fs::write(&cache_root, b"not a directory").expect("write cache root file");
+
+        let err = snapshot_cache(&cache_root).expect_err("file cache root should fail");
+        match err {
+            CachePlannerError::Io { path, .. } => {
+                assert_eq!(path, cache_root);
+            }
+            other => panic!("expected io error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn snapshot_cache_reports_seeded_entries_and_blobs_deterministically() {
         let root = TempDirGuard::new("seeded");
         let cache_root = root.path().join("http");
@@ -470,9 +517,28 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(snapshot.blobs.len(), 2);
-        assert_eq!(snapshot.blobs[0].refcount, 1);
-        assert_eq!(snapshot.blobs[1].refcount, 1);
+        let mut expected_blobs = vec![
+            CacheBlob {
+                integrity: first.clone(),
+                path: blob_path_for_integrity(&cache_root, &first)
+                    .strip_prefix(&cache_root)
+                    .expect("relative blob path")
+                    .to_path_buf(),
+                size_bytes: 3,
+                refcount: 1,
+            },
+            CacheBlob {
+                integrity: second.clone(),
+                path: blob_path_for_integrity(&cache_root, &second)
+                    .strip_prefix(&cache_root)
+                    .expect("relative blob path")
+                    .to_path_buf(),
+                size_bytes: 3,
+                refcount: 1,
+            },
+        ];
+        expected_blobs.sort_by(super::blob_sort_key);
+        assert_eq!(snapshot.blobs, expected_blobs);
     }
 
     #[test]
@@ -501,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_cache_errors_when_content_root_is_not_a_directory() {
+    fn planner_walk_errors_when_content_root_is_not_a_directory() {
         let root = TempDirGuard::new("content-file");
         let cache_root = root.path().join("http");
         fs::create_dir_all(&cache_root).expect("create cache root");
@@ -516,9 +582,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn planner_walk_skips_malformed_blob_leaves() {
+        let root = TempDirGuard::new("malformed-leaf");
+        let cache_root = root.path().join("http");
+        let live = write_entry(&cache_root, "live", b"live-bytes", Some(100));
+        let malformed = cache_root
+            .join("content-v2")
+            .join("sha256")
+            .join("zz")
+            .join("yy")
+            .join("not-hex");
+        fs::create_dir_all(malformed.parent().expect("malformed parent"))
+            .expect("create malformed path");
+        fs::write(&malformed, b"malformed").expect("write malformed leaf");
+
+        let snapshot = snapshot_cache(&cache_root).expect("snapshot should succeed");
+        assert_eq!(snapshot.blobs.len(), 1);
+        assert_eq!(snapshot.blobs[0].integrity, live);
+    }
+
     #[cfg(unix)]
     #[test]
-    fn snapshot_cache_skips_symlinked_content_entries() {
+    fn planner_walk_skips_symlinked_content_entries() {
         use std::os::unix::fs::symlink;
 
         let root = TempDirGuard::new("symlink");
@@ -551,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_age_cleanup_only_removes_shared_blob_after_last_reference() {
+    fn shared_integrity_age_cleanup_only_removes_blob_after_last_reference() {
         let root = TempDirGuard::new("age-shared");
         let cache_root = root.path().join("http");
         let integrity = write_entry(&cache_root, "older", b"shared-bytes", Some(100));
@@ -560,17 +646,34 @@ mod tests {
 
         let snapshot = snapshot_cache(&cache_root).expect("snapshot should succeed");
         let keep_one_plan = plan_age_cleanup(&snapshot, 600, std::time::Duration::from_millis(450));
-        assert_eq!(keep_one_plan.entry_removals.len(), 1);
+        assert_eq!(
+            keep_one_plan
+                .entry_removals
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["older"]
+        );
         assert!(keep_one_plan.blob_removals.is_empty());
+        assert_eq!(keep_one_plan.reclaimed_blob_bytes, 0);
 
         let remove_both_plan =
             plan_age_cleanup(&snapshot, 1_000, std::time::Duration::from_millis(100));
-        assert_eq!(remove_both_plan.entry_removals.len(), 2);
+        let shared_blob_size = snapshot.blobs[0].size_bytes;
+        assert_eq!(
+            remove_both_plan
+                .entry_removals
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["newer", "older"]
+        );
         assert_eq!(remove_both_plan.blob_removals.len(), 1);
+        assert_eq!(remove_both_plan.reclaimed_blob_bytes, shared_blob_size);
     }
 
     #[test]
-    fn plan_size_lru_uses_projected_refcounts_and_oldest_first_tiebreak() {
+    fn shared_integrity_size_lru_uses_projected_refcounts_and_oldest_first_tiebreak() {
         let root = TempDirGuard::new("size-shared");
         let cache_root = root.path().join("http");
         let shared = write_entry(&cache_root, "a-first", b"shared-bytes", Some(100));
@@ -596,16 +699,37 @@ mod tests {
         );
         assert_eq!(plan.blob_removals.len(), 1);
         assert_eq!(plan.blob_removals[0].integrity, shared);
+        assert_eq!(plan.reclaimed_blob_bytes, plan.blob_removals[0].size_bytes);
     }
 
     #[test]
-    fn plan_size_lru_ignores_orphan_bytes_and_missing_referenced_blobs() {
+    fn size_lru_missing_blob_entries_do_not_displace_live_entries() {
+        let root = TempDirGuard::new("size-missing");
+        let cache_root = root.path().join("http");
+        let missing = write_entry(&cache_root, "a-missing", b"stale-bytes", Some(100));
+        let live = write_entry(&cache_root, "b-live", b"live-bytes", Some(200));
+        cacache::remove_hash_sync(&cache_root, &missing).expect("remove missing blob");
+
+        let snapshot = snapshot_cache(&cache_root).expect("snapshot should succeed");
+        let plan = plan_size_lru(&snapshot, 0);
+
+        assert_eq!(
+            plan.entry_removals
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b-live"]
+        );
+        assert_eq!(plan.blob_removals.len(), 1);
+        assert_eq!(plan.blob_removals[0].integrity, live);
+    }
+
+    #[test]
+    fn size_lru_ignores_orphan_bytes() {
         let root = TempDirGuard::new("size-drift");
         let cache_root = root.path().join("http");
         let kept = write_entry(&cache_root, "kept", b"live-bytes", Some(100));
-        let missing = write_entry(&cache_root, "missing", b"stale-bytes", Some(200));
         let _orphan = add_orphan_blob(&cache_root, b"large-orphan-blob");
-        cacache::remove_hash_sync(&cache_root, &missing).expect("remove missing blob");
 
         let snapshot = snapshot_cache(&cache_root).expect("snapshot should succeed");
         let kept_blob_size = snapshot
@@ -619,7 +743,7 @@ mod tests {
 
         assert!(
             plan.entry_removals.is_empty(),
-            "orphan bytes and missing referenced blobs should not force eviction"
+            "orphan bytes should not force eviction"
         );
         assert!(plan.blob_removals.is_empty());
         assert_eq!(plan.reclaimed_blob_bytes, 0);

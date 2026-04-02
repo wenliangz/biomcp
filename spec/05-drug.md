@@ -24,7 +24,7 @@ bash fixtures/setup-ema-spec-fixture.sh "$PWD"
 out="$(biomcp health)"
 echo "$out" | mustmatch like "EMA local data ($BIOMCP_EMA_DIR)"
 echo "$out" | mustmatch like "| EMA local data ($BIOMCP_EMA_DIR) | configured |"
-echo "$out" | mustmatch like "Cache dir ("
+echo "$out" | mustmatch '/\| Cache dir \(.+\) \| ok \| [0-9]+ms \| - \|/'
 ```
 
 ## Searching by Name
