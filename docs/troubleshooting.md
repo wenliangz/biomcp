@@ -35,7 +35,7 @@ biomcp --no-cache get variant rs113488022
 If `--no-cache` works while cached mode fails repeatedly, clear the HTTP cache and retry.
 The command below is the default Linux/XDG example; if you override the cache root
 with `BIOMCP_CACHE_DIR` or `cache.toml`, run `biomcp health` first to inspect the
-resolved cache directory before deleting files manually:
+resolved cache root, then delete only its `http/` subdirectory manually:
 
 ```bash
 rm -rf ~/.cache/biomcp/http
