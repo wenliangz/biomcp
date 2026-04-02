@@ -377,3 +377,26 @@ def test_temporal_and_term_drift_are_removed_from_touched_docs() -> None:
 
     assert "fulltext may have different availability" not in data_sources
     assert "metadata, annotations, and full text may have different availability" in data_sources
+
+
+def test_cache_path_docs_match_resolved_cache_root_contract() -> None:
+    troubleshooting = _read("docs/troubleshooting.md")
+    data_sources = _read("docs/reference/data-sources.md")
+    faq = _read("docs/reference/faq.md")
+    blog = _read("docs/blog/biomcp-pubmed-articles.md")
+
+    for text in (troubleshooting, data_sources, faq, blog):
+        assert "http-cacache/" not in text
+        assert "/tmp/biomcp/" not in text
+
+    assert "rm -rf ~/.cache/biomcp/http" in troubleshooting
+    assert "biomcp health" in troubleshooting
+    assert "default Linux/XDG example" in troubleshooting
+
+    assert "`<cache_root>/http`" in data_sources
+    assert "`~/.cache/biomcp/http` on Linux" in data_sources
+
+    assert "`http/` for HTTP responses" in faq
+    assert "`downloads/` for retrieved text artifacts" in faq
+
+    assert "Saved to: <cache_root>/downloads/" in blog

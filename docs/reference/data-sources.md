@@ -53,7 +53,7 @@ All HTTP-based sources share a common client with:
 - Connect timeout: 10 seconds
 - Request timeout: 30 seconds
 - Retries: exponential backoff, up to 3 retries for transient failures
-- Disk cache: `~/.cache/biomcp/http-cacache` (platform-adjusted cache root)
+- Disk cache: `<cache_root>/http` under the resolved cache root (`~/.cache/biomcp/http` on Linux)
 
 For freshness-sensitive workflows, use `--no-cache`.
 

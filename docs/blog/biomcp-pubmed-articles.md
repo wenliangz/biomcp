@@ -142,10 +142,13 @@ $ biomcp get article PMC9984800 fulltext
 # Precision oncology for BRAF-mutant cancers… - fulltext
 ## Full Text (PMC OA)
 
-Saved to: /tmp/biomcp/b379bd903115c5acbb663120e8bed420.txt
+Saved to: <cache_root>/downloads/b379bd903115c5acbb663120e8bed420.txt
 ```
 
-Full text is retrieved from PubMed Central's Open Access subset. Not all papers are available — when they're not, BioMCP tells you and suggests alternatives (TLDR, annotations).
+Full text is retrieved from PubMed Central's Open Access subset. The printed
+`Saved to:` path follows the resolved cache root on your machine. Not all papers
+are available — when they're not, BioMCP tells you and suggests alternatives
+(TLDR, annotations).
 
 ## 9. Batch Compare
 
