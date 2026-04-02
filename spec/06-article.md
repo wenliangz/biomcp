@@ -350,7 +350,7 @@ Citation traversal should expose a graph table with contexts, intents, and the
 influential flag visible to the user.
 
 ```bash
-out="$(env -u S2_API_KEY biomcp article citations 22663011 --limit 3)"
+out="$(biomcp article citations 22663011 --limit 3)"
 echo "$out" | mustmatch like "# Citations for"
 echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |"
 ```
@@ -360,7 +360,7 @@ echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |
 Reference traversal should expose the same visible graph columns.
 
 ```bash
-out="$(env -u S2_API_KEY biomcp article references 22663011 --limit 3)"
+out="$(biomcp article references 22663011 --limit 3)"
 echo "$out" | mustmatch like "# References for"
 echo "$out" | mustmatch like "| PMID | Title | Intents | Influential | Context |"
 ```
@@ -371,7 +371,7 @@ Single-seed recommendations should render related papers with stable table
 columns.
 
 ```bash
-out="$(env -u S2_API_KEY biomcp article recommendations 22663011 --limit 3)"
+out="$(biomcp article recommendations 22663011 --limit 3)"
 echo "$out" | mustmatch like "# Recommendations for"
 echo "$out" | mustmatch like "| PMID | Title | Journal | Year |"
 ```
@@ -382,7 +382,7 @@ Multi-paper recommendation requests should accept repeated positive seeds plus a
 negative set and still render the recommendation table.
 
 ```bash
-out="$(env -u S2_API_KEY biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 3)"
+out="$(biomcp article recommendations 22663011 24200969 --negative 39073865 --limit 3)"
 echo "$out" | mustmatch like "# Recommendations for"
 echo "$out" | mustmatch like "| PMID | Title | Journal | Year |"
 echo "$out" | mustmatch like "Negative seeds:"

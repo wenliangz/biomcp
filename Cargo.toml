@@ -32,6 +32,7 @@ futures = "0.3"
 
 # HTTP
 axum = { version = "0.8.1", default-features = false, features = ["tokio", "http1", "json"] }
+cacache = { version = "13.1.0", default-features = false, features = ["mmap"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "multipart"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.7"
@@ -52,9 +53,12 @@ base64 = "0.22"
 md5 = "0.7"
 
 # Parsing
+bytesize = "1"
+humantime = "2"
 regex = "1"
 csv = "1"
 roxmltree = "0.20"
+ssri = "9"
 toml = "0.8"
 
 # MCP

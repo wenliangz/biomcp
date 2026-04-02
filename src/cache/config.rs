@@ -8,12 +8,29 @@ use crate::error::BioMcpError;
 const DEFAULT_MAX_SIZE: u64 = 10_000_000_000;
 const DEFAULT_MAX_AGE_SECS: u64 = 86_400;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigOrigin {
+    Env,
+    File,
+    Default,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CacheConfig {
+pub(crate) struct CacheConfigOrigins {
+    pub(crate) cache_root: ConfigOrigin,
+    pub(crate) max_size: ConfigOrigin,
+    pub(crate) max_age: ConfigOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedCacheConfig {
     pub(crate) cache_root: PathBuf,
     pub(crate) max_size: u64,
     pub(crate) max_age: Duration,
+    pub(crate) origins: CacheConfigOrigins,
 }
+
+pub(crate) type CacheConfig = ResolvedCacheConfig;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -90,36 +107,41 @@ fn resolve_cache_config_with_source(
             },
     } = parse_cache_toml(toml_content, config_path)?;
 
-    let cache_root = if let Some(dir) = normalize_env_value(env_dir) {
-        PathBuf::from(dir)
+    let (cache_root, cache_root_origin) = if let Some(dir) = normalize_env_value(env_dir) {
+        (PathBuf::from(dir), ConfigOrigin::Env)
     } else if let Some(dir) = parse_toml_dir(toml_dir.as_deref(), config_path)? {
-        dir
+        (dir, ConfigOrigin::File)
     } else {
-        default_cache_root
+        (default_cache_root, ConfigOrigin::Default)
     };
 
-    let max_size = if let Some(size) = parse_env_max_size(env_max_size)? {
-        size
+    let (max_size, max_size_origin) = if let Some(size) = parse_env_max_size(env_max_size)? {
+        (size, ConfigOrigin::Env)
     } else if let Some(size) =
         parse_toml_positive_u64(toml_max_size, "[cache].max_size", config_path)?
     {
-        size
+        (size, ConfigOrigin::File)
     } else {
-        DEFAULT_MAX_SIZE
+        (DEFAULT_MAX_SIZE, ConfigOrigin::Default)
     };
 
-    let max_age_secs = if let Some(age_secs) =
+    let (max_age_secs, max_age_origin) = if let Some(age_secs) =
         parse_toml_positive_u64(toml_max_age_secs, "[cache].max_age_secs", config_path)?
     {
-        age_secs
+        (age_secs, ConfigOrigin::File)
     } else {
-        DEFAULT_MAX_AGE_SECS
+        (DEFAULT_MAX_AGE_SECS, ConfigOrigin::Default)
     };
 
-    Ok(CacheConfig {
+    Ok(ResolvedCacheConfig {
         cache_root,
         max_size,
         max_age: Duration::from_secs(max_age_secs),
+        origins: CacheConfigOrigins {
+            cache_root: cache_root_origin,
+            max_size: max_size_origin,
+            max_age: max_age_origin,
+        },
     })
 }
 
@@ -221,8 +243,8 @@ fn config_source_label(config_path: Option<&std::path::Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheConfig, DEFAULT_MAX_AGE_SECS, DEFAULT_MAX_SIZE, default_cache_root,
-        resolve_cache_config, resolve_cache_config_from_parts,
+        CacheConfig, CacheConfigOrigins, ConfigOrigin, DEFAULT_MAX_AGE_SECS, DEFAULT_MAX_SIZE,
+        default_cache_root, resolve_cache_config, resolve_cache_config_from_parts,
     };
     use crate::error::BioMcpError;
     use std::path::{Path, PathBuf};
@@ -294,6 +316,11 @@ mod tests {
             cache_root: root.into(),
             max_size: DEFAULT_MAX_SIZE,
             max_age: Duration::from_secs(DEFAULT_MAX_AGE_SECS),
+            origins: CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Default,
+                max_age: ConfigOrigin::Default,
+            },
         }
     }
 
@@ -327,6 +354,7 @@ mod tests {
         )
         .expect("ok");
         assert_eq!(config.cache_root, PathBuf::from("/env-cache"));
+        assert_eq!(config.origins.cache_root, ConfigOrigin::Env);
     }
 
     #[test]
@@ -339,6 +367,7 @@ mod tests {
         )
         .expect("ok");
         assert_eq!(config.max_size, 5_000);
+        assert_eq!(config.origins.max_size, ConfigOrigin::Env);
     }
 
     #[test]
@@ -351,6 +380,7 @@ mod tests {
         )
         .expect("ok");
         assert_eq!(config.cache_root, PathBuf::from("relative-cache"));
+        assert_eq!(config.origins.cache_root, ConfigOrigin::File);
     }
 
     #[test]
@@ -363,6 +393,7 @@ mod tests {
         )
         .expect("ok");
         assert_eq!(config.max_size, 1_234);
+        assert_eq!(config.origins.max_size, ConfigOrigin::File);
     }
 
     #[test]
@@ -375,6 +406,45 @@ mod tests {
         )
         .expect("ok");
         assert_eq!(config.max_age, Duration::from_secs(172_800));
+        assert_eq!(config.origins.max_age, ConfigOrigin::File);
+    }
+
+    #[test]
+    fn origins_track_mixed_precedence_without_max_age_env_override() {
+        let config = resolve_cache_config_from_parts(
+            Some(" /env-cache "),
+            None,
+            Some("[cache]\nmax_size = 1234\nmax_age_secs = 7200\n"),
+            PathBuf::from("/tmp/default-cache"),
+        )
+        .expect("ok");
+        assert_eq!(
+            config.origins,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Env,
+                max_size: ConfigOrigin::File,
+                max_age: ConfigOrigin::File,
+            }
+        );
+    }
+
+    #[test]
+    fn default_origins_are_reported_when_values_fall_through() {
+        let config = resolve_cache_config_from_parts(
+            Some("   "),
+            Some("   "),
+            Some("# empty cache section\n"),
+            PathBuf::from("/tmp/default-cache"),
+        )
+        .expect("ok");
+        assert_eq!(
+            config.origins,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Default,
+                max_age: ConfigOrigin::Default,
+            }
+        );
     }
 
     #[test]
@@ -522,6 +592,14 @@ mod tests {
         assert_eq!(config.cache_root, root.path().join("resolved-cache"));
         assert_eq!(config.max_size, 1_234);
         assert_eq!(config.max_age, Duration::from_secs(7_200));
+        assert_eq!(
+            config.origins,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::File,
+                max_size: ConfigOrigin::File,
+                max_age: ConfigOrigin::File,
+            }
+        );
     }
 
     #[test]
@@ -551,6 +629,14 @@ mod tests {
         assert_eq!(config.cache_root, env_dir);
         assert_eq!(config.max_size, 5_000);
         assert_eq!(config.max_age, Duration::from_secs(7_200));
+        assert_eq!(
+            config.origins,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Env,
+                max_size: ConfigOrigin::Env,
+                max_age: ConfigOrigin::File,
+            }
+        );
     }
 
     #[test]

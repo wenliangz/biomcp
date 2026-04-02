@@ -16,6 +16,10 @@ OPENFDA_SPEC_NODEIDS = {
 S2_SPEC_NODEIDS = {
     "spec/06-article.md::Article Search JSON With Semantic Scholar Key",
     "spec/06-article.md::Semantic Scholar TLDR Section",
+    "spec/06-article.md::Semantic Scholar Citations",
+    "spec/06-article.md::Semantic Scholar References",
+    "spec/06-article.md::Semantic Scholar Recommendations (Single Seed)",
+    "spec/06-article.md::Semantic Scholar Recommendations (Multi Seed)",
 }
 
 DISGENET_SPEC_NODEIDS = {
