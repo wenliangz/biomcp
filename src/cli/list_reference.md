@@ -116,6 +116,7 @@ Results depend on source document wording and may vary across sources.
 
 ## Ops
 
+- `cache path` - print the managed HTTP cache directory `<resolved cache_root>/http`; output stays plain text and ignores `--json`
 - `ema sync`
 - `update [--check]`
 - `uninstall`

@@ -10,7 +10,8 @@ users see when choosing between those runtime modes.
 operators at the canonical HTTP path.
 
 ```bash
-out="$(biomcp serve-http --help)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" serve-http --help)"
 echo "$out" | mustmatch like "Streamable HTTP"
 echo "$out" | mustmatch like "Run the MCP Streamable HTTP server at /mcp"
 echo "$out" | mustmatch like "Host address to bind"
@@ -21,12 +22,15 @@ echo "$out" | mustmatch not like "--no-cache"
 
 ## Top-Level Discovery
 
-`biomcp --help` should list the current Streamable HTTP transport and omit the
-legacy SSE migration shim from first-run discovery.
+`biomcp --help` should list the current Streamable HTTP transport, include the
+local-only `cache` family for operators, and omit the legacy SSE migration shim
+from first-run discovery.
 
 ```bash
-out="$(biomcp --help)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" --help)"
 echo "$out" | mustmatch like "serve-http"
+echo "$out" | mustmatch like "cache       Print the managed HTTP cache path"
 echo "$out" | mustmatch not like "serve-sse"
 ```
 
@@ -36,7 +40,8 @@ echo "$out" | mustmatch not like "serve-sse"
 `serve-http`.
 
 ```bash
-out="$(biomcp serve-sse --help)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" serve-sse --help)"
 echo "$out" | mustmatch like "removed legacy SSE compatibility command"
 echo "$out" | mustmatch like "serve-http"
 echo "$out" | mustmatch like 'connect remote clients to `/mcp` instead.'
@@ -50,11 +55,12 @@ The stdio MCP handshake should advertise the BioMCP execution tool as
 `biomcp`, not the old `shell` name.
 
 ```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
 out="$( (printf '%s\n%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"spec","version":"0.1"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'; \
-  sleep 1) | biomcp serve 2>/dev/null)"
+  sleep 1) | "$bin" serve 2>/dev/null)"
 echo "$out" | mustmatch like '"name":"biomcp"'
 echo "$out" | mustmatch not like '"name":"shell"'
 ```
@@ -67,11 +73,28 @@ remains part of the safe MCP contract, but this spec does not execute it
 because it depends on live remote network access.
 
 ```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
 out="$( (printf '%s\n%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"spec","version":"0.1"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"biomcp","arguments":{"command":"biomcp study download msk_impact_2017"}}}'; \
-  sleep 1) | biomcp serve 2>/dev/null)"
+  sleep 1) | "$bin" serve 2>/dev/null)"
+echo "$out" | mustmatch like '"isError":true'
+echo "$out" | mustmatch like "BioMCP allows read-only commands only"
+```
+
+## Cache Family Stays CLI-only
+
+The MCP runtime must reject `biomcp cache path` even though it is read-only,
+because the command reveals workstation-local filesystem paths.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$( (printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"spec","version":"0.1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"biomcp","arguments":{"command":"biomcp cache path"}}}'; \
+  sleep 1) | "$bin" serve 2>/dev/null)"
 echo "$out" | mustmatch like '"isError":true'
 echo "$out" | mustmatch like "BioMCP allows read-only commands only"
 ```

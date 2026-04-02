@@ -15,7 +15,8 @@ BioMCP is a single-binary CLI for querying biomedical sources with one command g
 Version output is the fastest smoke test because it exercises local binary startup without touching network sources. The assertion checks both product name and a semantic version pattern.
 
 ```bash
-out="$(biomcp version)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" version)"
 echo "$out" | mustmatch '/^biomcp [0-9]+\.[0-9]+\.[0-9]+/'
 ```
 
@@ -24,14 +25,15 @@ echo "$out" | mustmatch '/^biomcp [0-9]+\.[0-9]+\.[0-9]+/'
 The API-only health command reports one row per live upstream provider plus explicit excluded rows for key-gated sources. Full `biomcp health` adds local readiness rows such as EMA local data and cache dir. We assert on the API-only table header and the explicit status summary here because those are stable formatting markers for the upstream inventory contract.
 
 ```bash
-out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY biomcp health --apis-only)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY "$bin" health --apis-only)"
 echo "$out" | mustmatch like "| API | Status | Latency |"
 echo "$out" | mustmatch not like "EMA local data ("
 echo "$out" | mustmatch not like "Cache dir ("
 echo "$out" | mustmatch not like "(key:"
 echo "$out" | mustmatch '/Status: [0-9]+ ok, [0-9]+ error, [0-9]+ excluded/'
 
-json_out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY biomcp --json health --apis-only)"
+json_out="$(env -u NCI_API_KEY -u ONCOKB_TOKEN -u DISGENET_API_KEY -u ALPHAGENOME_API_KEY -u S2_API_KEY -u UMLS_API_KEY "$bin" --json health --apis-only)"
 echo "$json_out" | jq -e 'all(.rows[]; (.status | type) == "string")' > /dev/null
 echo "$json_out" | jq -e 'all(.rows[]; ((.status | contains("(key:")) | not))' > /dev/null
 echo "$json_out" | jq -e 'all(.rows[]; (.api | startswith("EMA local data (") | not))' > /dev/null
@@ -45,7 +47,8 @@ echo "$json_out" | jq -e 'any(.rows[]; .api == "MyGene" and ((has("key_configure
 The command index is the human entry point for discovery. It should now open with a routing table that teaches which command to start with before the grammar reference.
 
 ```bash
-out="$(biomcp list)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" list)"
 echo "$out" | mustmatch like "# BioMCP Command Reference"
 echo "$out" | mustmatch like "## When to Use What"
 echo "$out" | mustmatch like "search drug --indication \"<disease>\""
@@ -54,6 +57,7 @@ echo "$out" | mustmatch like "search all --gene BRAF --disease melanoma"
 echo "$out" | mustmatch like "article citations <id>"
 echo "$out" | mustmatch like "batch <entity> <id1,id2,...>"
 echo "$out" | mustmatch like "enrich <GENE1,GENE2,...>"
+echo "$out" | mustmatch like "cache path"
 echo "$out" | mustmatch like "- `discover <query>`"
 echo "$out" | mustmatch like "- `ema sync`"
 echo "$out" | mustmatch like $'## Entities\n\n- gene\n- variant\n- article\n- trial'
@@ -64,7 +68,8 @@ echo "$out" | mustmatch like $'## Entities\n\n- gene\n- variant\n- article\n- tr
 Entity-specific help should expose both filter syntax and cross-entity helpers. These cues are important for users who need to move from orientation to targeted execution quickly.
 
 ```bash
-out="$(biomcp list gene)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" list gene)"
 echo "$out" | mustmatch like "## Search filters"
 echo "$out" | mustmatch like "## Helpers"
 echo "$out" | mustmatch like "## When to use this surface"
@@ -76,7 +81,8 @@ echo "$out" | mustmatch like 'Use `get gene <symbol>` for the default card'
 `biomcp list article` should explain when to start with keyword search, when to pin the search to a known gene, when review articles are better than more pagination, and how to follow a paper into citations or recommendations.
 
 ```bash
-out="$(biomcp list article)"
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+out="$("$bin" list article)"
 echo "$out" | mustmatch like "## When to use this surface"
 echo "$out" | mustmatch like "Use keyword search to scan a topic before you know the entities."
 echo "$out" | mustmatch like "Prefer `--type review`"

@@ -373,6 +373,11 @@ mod tests {
             "download".into(),
             "--list".into()
         ]));
+        assert!(!is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "cache".into(),
+            "path".into()
+        ]));
         assert!(is_allowed_mcp_command(&[
             "biomcp".into(),
             "study".into(),

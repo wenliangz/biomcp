@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 BLOCKED_FAMILIES = {
+    "cache",
     "chart",
     "ema",
     "mcp",
