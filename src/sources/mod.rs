@@ -55,6 +55,7 @@ pub(crate) mod openfda;
 pub(crate) mod opentargets;
 pub(crate) mod pharmgkb;
 pub(crate) mod pmc_oa;
+pub(crate) mod pubmed;
 pub(crate) mod pubtator;
 pub(crate) mod quickgo;
 pub(crate) mod rate_limit;

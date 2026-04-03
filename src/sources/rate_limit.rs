@@ -42,6 +42,12 @@ impl RateLimiter {
                 Duration::from_millis(334),
             ),
             policy(
+                "pubmed-eutils",
+                "BIOMCP_PUBMED_BASE",
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+                pubmed_eutils_min_interval(has_ncbi_api_key),
+            ),
+            policy(
                 "ncbi-idconv",
                 "BIOMCP_NCBI_IDCONV_BASE",
                 "https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles",
@@ -143,6 +149,14 @@ impl RateLimiter {
 }
 
 fn pubtator_min_interval(has_ncbi_api_key: bool) -> Duration {
+    if has_ncbi_api_key {
+        Duration::from_millis(100)
+    } else {
+        Duration::from_millis(334)
+    }
+}
+
+fn pubmed_eutils_min_interval(has_ncbi_api_key: bool) -> Duration {
     if has_ncbi_api_key {
         Duration::from_millis(100)
     } else {
@@ -336,6 +350,15 @@ mod tests {
     }
 
     #[test]
+    fn pubmed_eutils_interval_uses_key_aware_values() {
+        assert_eq!(
+            pubmed_eutils_min_interval(false),
+            Duration::from_millis(334)
+        );
+        assert_eq!(pubmed_eutils_min_interval(true), Duration::from_millis(100));
+    }
+
+    #[test]
     fn semantic_scholar_policy_uses_two_second_interval_without_api_key() {
         let _lock = env_lock();
         let _env = set_env_var("S2_API_KEY", None);
@@ -379,5 +402,16 @@ mod tests {
             .resolve_key_for_str("https://rest.kegg.jp/find/pathway/MAPK")
             .expect("kegg URL should parse");
         assert_eq!(key, "policy:kegg");
+    }
+
+    #[test]
+    fn pubmed_eutils_urls_resolve_to_pubmed_policy() {
+        let limiter = RateLimiter::from_env();
+        let key = limiter
+            .resolve_key_for_str(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=BRAF",
+            )
+            .expect("pubmed E-utilities URL should parse");
+        assert_eq!(key, "policy:pubmed-eutils");
     }
 }

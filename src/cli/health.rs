@@ -165,6 +165,13 @@ const HEALTH_SOURCES: &[SourceDescriptor] = &[
         },
     },
     SourceDescriptor {
+        api: "PubMed",
+        affects: Some("PubMed-backed article search foundation"),
+        probe: ProbeKind::Get {
+            url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=1&term=BRAF",
+        },
+    },
+    SourceDescriptor {
         api: "Europe PMC",
         affects: Some("article search coverage"),
         probe: ProbeKind::Get {
@@ -1316,6 +1323,7 @@ mod tests {
                 "MyVariant",
                 "MyChem",
                 "PubTator3",
+                "PubMed",
                 "Europe PMC",
                 "PMC OA",
                 "NCBI ID Converter",

@@ -12,6 +12,7 @@ use crate::sources::europepmc::{
 };
 use crate::sources::ncbi_idconv::NcbiIdConverterClient;
 use crate::sources::pmc_oa::PmcOaClient;
+use crate::sources::pubmed::PubMedESearchParams;
 use crate::sources::pubtator::PubTatorClient;
 use crate::sources::semantic_scholar::{
     SemanticScholarCitationEdge, SemanticScholarClient, SemanticScholarPaper,
@@ -1273,6 +1274,104 @@ fn build_search_query(filters: &ArticleSearchFilters) -> Result<String, BioMcpEr
     }
 
     Ok(terms.join(" AND "))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_pubmed_esearch_params(
+    filters: &ArticleSearchFilters,
+    limit: usize,
+    offset: usize,
+) -> Result<PubMedESearchParams, BioMcpError> {
+    validate_required_search_filters(filters)?;
+    let (date_from, date_to) = normalized_date_bounds(filters)?;
+    validate_search_filter_values(filters)?;
+
+    if limit == 0 || limit > MAX_SEARCH_LIMIT {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
+        )));
+    }
+
+    let fetch_count = limit.saturating_add(offset);
+    if fetch_count > MAX_FEDERATED_FETCH_RESULTS {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--offset + --limit must be <= {MAX_FEDERATED_FETCH_RESULTS} for federated article search"
+        )));
+    }
+
+    if filters.open_access {
+        return Err(BioMcpError::InvalidArgument(
+            "PubMed ESearch does not support --open-access filtering".into(),
+        ));
+    }
+    if filters.no_preprints {
+        return Err(BioMcpError::InvalidArgument(
+            "PubMed ESearch does not support --no-preprints filtering".into(),
+        ));
+    }
+
+    let mut clauses: Vec<String> = Vec::new();
+    for value in [
+        filters.gene.as_deref(),
+        filters.disease.as_deref(),
+        filters.drug.as_deref(),
+        filters.keyword.as_deref(),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            clauses.push(value.to_string());
+        }
+    }
+
+    if let Some(author) = filters
+        .author
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        clauses.push(format!("\"{author}\"[author]"));
+    }
+
+    if let Some(journal) = filters
+        .journal
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        clauses.push(format!("\"{journal}\"[journal]"));
+    }
+
+    if let Some(article_type) = filters
+        .article_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let normalized = normalize_article_type(article_type)?;
+        let clause = match normalized {
+            "review" => "review[pt]",
+            "research-article" => "journal article[pt]",
+            "case-reports" => "case reports[pt]",
+            "meta-analysis" => "meta-analysis[pt]",
+            _ => {
+                return Err(BioMcpError::InvalidArgument(
+                    "--type must be one of: review, research, research-article, case-reports, meta-analysis".into(),
+                ))
+            }
+        };
+        clauses.push(clause.to_string());
+    }
+
+    if filters.exclude_retracted {
+        clauses.push("NOT retracted publication[pt]".into());
+    }
+
+    Ok(PubMedESearchParams {
+        term: clauses.join(" AND "),
+        retstart: offset,
+        retmax: limit,
+        date_from,
+        date_to,
+    })
 }
 
 async fn build_pubtator_query(
@@ -2886,6 +2985,71 @@ mod tests {
             .expect_err("planner should reject strict-only filter on pubtator");
         assert!(err.to_string().contains("--type"));
         assert!(err.to_string().contains("Europe PMC"));
+    }
+
+    #[test]
+    fn build_pubmed_esearch_params_reuses_article_type_aliases() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.keyword = Some("melanoma".into());
+        filters.author = Some("Alice Smith".into());
+        filters.journal = Some("Nature".into());
+        filters.article_type = Some("research".into());
+        filters.date_from = Some("2020".into());
+        filters.date_to = Some("2024-12".into());
+        filters.exclude_retracted = true;
+
+        let params =
+            build_pubmed_esearch_params(&filters, 5, 10).expect("pubmed params should build");
+
+        assert_eq!(
+            params.term,
+            "BRAF AND melanoma AND \"Alice Smith\"[author] AND \"Nature\"[journal] AND journal article[pt] AND NOT retracted publication[pt]"
+        );
+        assert_eq!(params.retstart, 10);
+        assert_eq!(params.retmax, 5);
+        assert_eq!(params.date_from.as_deref(), Some("2020-01-01"));
+        assert_eq!(params.date_to.as_deref(), Some("2024-12-01"));
+    }
+
+    #[test]
+    fn build_pubmed_esearch_params_rejects_open_access() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.open_access = true;
+
+        let err = build_pubmed_esearch_params(&filters, 5, 0)
+            .expect_err("open-access should be rejected for PubMed builder");
+
+        assert!(err.to_string().contains("--open-access"));
+        assert!(err.to_string().contains("PubMed"));
+    }
+
+    #[test]
+    fn build_pubmed_esearch_params_rejects_no_preprints() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.no_preprints = true;
+
+        let err = build_pubmed_esearch_params(&filters, 5, 0)
+            .expect_err("no-preprints should be rejected for PubMed builder");
+
+        assert!(err.to_string().contains("--no-preprints"));
+        assert!(err.to_string().contains("PubMed"));
+    }
+
+    #[test]
+    fn build_pubmed_esearch_params_rejects_federated_window_overflow() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+
+        let err = build_pubmed_esearch_params(&filters, 1, MAX_FEDERATED_FETCH_RESULTS)
+            .expect_err("offset + limit overflow should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("--offset + --limit must be <= 1250 for federated article search")
+        );
     }
 
     #[test]
