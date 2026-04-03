@@ -12,7 +12,7 @@ use crate::sources::europepmc::{
 };
 use crate::sources::ncbi_idconv::NcbiIdConverterClient;
 use crate::sources::pmc_oa::PmcOaClient;
-use crate::sources::pubmed::PubMedESearchParams;
+use crate::sources::pubmed::{PubMedClient, PubMedESearchParams};
 use crate::sources::pubtator::PubTatorClient;
 use crate::sources::semantic_scholar::{
     SemanticScholarCitationEdge, SemanticScholarClient, SemanticScholarPaper,
@@ -238,6 +238,7 @@ pub enum ArticleSource {
     PubTator,
     EuropePmc,
     SemanticScholar,
+    PubMed,
 }
 
 impl ArticleSource {
@@ -246,6 +247,7 @@ impl ArticleSource {
             Self::PubTator => "PubTator3",
             Self::EuropePmc => "Europe PMC",
             Self::SemanticScholar => "Semantic Scholar",
+            Self::PubMed => "PubMed",
         }
     }
 }
@@ -353,6 +355,7 @@ const MAX_SEARCH_LIMIT: usize = 50;
 pub const ARTICLE_BATCH_MAX_IDS: usize = 20;
 const EUROPE_PMC_PAGE_SIZE: usize = 25;
 const PUBTATOR_PAGE_SIZE: usize = 25;
+const PUBMED_PAGE_SIZE: usize = 100;
 const MAX_PAGE_FETCHES: usize = 50;
 const WARN_PAGE_THRESHOLD: usize = 20;
 const FEDERATED_PAGE_SIZE_CAP: usize = if EUROPE_PMC_PAGE_SIZE < PUBTATOR_PAGE_SIZE {
@@ -878,6 +881,7 @@ fn article_source_priority(source: ArticleSource) -> u8 {
         ArticleSource::PubTator => 0,
         ArticleSource::EuropePmc => 1,
         ArticleSource::SemanticScholar => 2,
+        ArticleSource::PubMed => 3,
     }
 }
 
@@ -1277,38 +1281,9 @@ fn build_search_query(filters: &ArticleSearchFilters) -> Result<String, BioMcpEr
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn build_pubmed_esearch_params(
-    filters: &ArticleSearchFilters,
-    limit: usize,
-    offset: usize,
-) -> Result<PubMedESearchParams, BioMcpError> {
+fn build_pubmed_search_term(filters: &ArticleSearchFilters) -> Result<String, BioMcpError> {
     validate_required_search_filters(filters)?;
-    let (date_from, date_to) = normalized_date_bounds(filters)?;
     validate_search_filter_values(filters)?;
-
-    if limit == 0 || limit > MAX_SEARCH_LIMIT {
-        return Err(BioMcpError::InvalidArgument(format!(
-            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
-        )));
-    }
-
-    let fetch_count = limit.saturating_add(offset);
-    if fetch_count > MAX_FEDERATED_FETCH_RESULTS {
-        return Err(BioMcpError::InvalidArgument(format!(
-            "--offset + --limit must be <= {MAX_FEDERATED_FETCH_RESULTS} for federated article search"
-        )));
-    }
-
-    if filters.open_access {
-        return Err(BioMcpError::InvalidArgument(
-            "PubMed ESearch does not support --open-access filtering".into(),
-        ));
-    }
-    if filters.no_preprints {
-        return Err(BioMcpError::InvalidArgument(
-            "PubMed ESearch does not support --no-preprints filtering".into(),
-        ));
-    }
 
     let mut clauses: Vec<String> = Vec::new();
     for value in [
@@ -1365,13 +1340,147 @@ fn build_pubmed_esearch_params(
         clauses.push("NOT retracted publication[pt]".into());
     }
 
+    Ok(clauses.join(" AND "))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_pubmed_esearch_params(
+    filters: &ArticleSearchFilters,
+    limit: usize,
+    offset: usize,
+) -> Result<PubMedESearchParams, BioMcpError> {
+    let term = build_pubmed_search_term(filters)?;
+    let (date_from, date_to) = normalized_date_bounds(filters)?;
+
+    if limit == 0 || limit > MAX_SEARCH_LIMIT {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
+        )));
+    }
+
+    let fetch_count = limit.saturating_add(offset);
+    if fetch_count > MAX_FEDERATED_FETCH_RESULTS {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--offset + --limit must be <= {MAX_FEDERATED_FETCH_RESULTS} for federated article search"
+        )));
+    }
+
+    if filters.open_access {
+        return Err(BioMcpError::InvalidArgument(
+            "PubMed ESearch does not support --open-access filtering".into(),
+        ));
+    }
+    if filters.no_preprints {
+        return Err(BioMcpError::InvalidArgument(
+            "PubMed ESearch does not support --no-preprints filtering".into(),
+        ));
+    }
+
     Ok(PubMedESearchParams {
-        term: clauses.join(" AND "),
+        term,
         retstart: offset,
         retmax: limit,
         date_from,
         date_to,
     })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+async fn search_pubmed_page(
+    filters: &ArticleSearchFilters,
+    limit: usize,
+    offset: usize,
+) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
+    if limit == 0 || limit > MAX_SEARCH_LIMIT {
+        return Err(BioMcpError::InvalidArgument(format!(
+            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
+        )));
+    }
+    if filters.open_access {
+        return Err(BioMcpError::InvalidArgument(
+            "PubMed ESearch does not support --open-access filtering".into(),
+        ));
+    }
+    if filters.no_preprints {
+        return Err(BioMcpError::InvalidArgument(
+            "PubMed ESearch does not support --no-preprints filtering".into(),
+        ));
+    }
+
+    let term = build_pubmed_search_term(filters)?;
+    let (normalized_date_from, normalized_date_to) = normalized_date_bounds(filters)?;
+    let client = PubMedClient::new()?;
+
+    let mut out: Vec<ArticleSearchResult> = Vec::with_capacity(limit.min(10));
+    let mut seen_pmids: HashSet<String> = HashSet::with_capacity(limit.min(10));
+    let mut total: Option<usize> = None;
+    let mut batch_start = 0usize;
+    let mut visible_skipped = 0usize;
+    let mut fetched_pages = 0usize;
+    while out.len() < limit && fetched_pages < MAX_PAGE_FETCHES {
+        fetched_pages = fetched_pages.saturating_add(1);
+        if fetched_pages == WARN_PAGE_THRESHOLD + 1 {
+            tracing::warn!(
+                "article search is deep (>{WARN_PAGE_THRESHOLD} page fetches); continuing up to {MAX_PAGE_FETCHES} — consider narrowing your query"
+            );
+        }
+
+        let response = client
+            .esearch(&PubMedESearchParams {
+                term: term.clone(),
+                retstart: batch_start,
+                retmax: PUBMED_PAGE_SIZE,
+                date_from: normalized_date_from.clone(),
+                date_to: normalized_date_to.clone(),
+            })
+            .await?;
+        if total.is_none() {
+            total = Some(response.count as usize);
+            if total.is_some_and(|value| offset >= value) {
+                return Ok(SearchPage::offset(Vec::new(), total));
+            }
+        }
+        if response.idlist.is_empty() {
+            break;
+        }
+
+        let batch_len = response.idlist.len();
+        let entries = client.esummary(&response.idlist).await?;
+        for entry in entries {
+            let row = transform::article::from_pubmed_esummary_entry(&entry).ok_or_else(|| {
+                BioMcpError::Api {
+                    api: "pubmed-eutils".to_string(),
+                    message: format!(
+                        "ESummary entry for PMID {} has blank title after cleaning",
+                        entry.uid
+                    ),
+                }
+            })?;
+            if !matches_result_filters(
+                &row,
+                filters,
+                normalized_date_from.as_deref(),
+                normalized_date_to.as_deref(),
+            ) {
+                continue;
+            }
+            if !seen_pmids.insert(row.pmid.clone()) {
+                continue;
+            }
+            if visible_skipped < offset {
+                visible_skipped = visible_skipped.saturating_add(1);
+                continue;
+            }
+            out.push(row);
+            if out.len() >= limit {
+                break;
+            }
+        }
+
+        batch_start = batch_start.saturating_add(batch_len);
+    }
+
+    Ok(SearchPage::offset(out, total))
 }
 
 async fn build_pubtator_query(
@@ -3013,6 +3122,16 @@ mod tests {
     }
 
     #[test]
+    fn article_source_pubmed_display_name() {
+        assert_eq!(ArticleSource::PubMed.display_name(), "PubMed");
+    }
+
+    #[test]
+    fn article_source_pubmed_priority() {
+        assert_eq!(article_source_priority(ArticleSource::PubMed), 3);
+    }
+
+    #[test]
     fn build_pubmed_esearch_params_rejects_open_access() {
         let mut filters = empty_filters();
         filters.gene = Some("BRAF".into());
@@ -3050,6 +3169,303 @@ mod tests {
             err.to_string()
                 .contains("--offset + --limit must be <= 1250 for federated article search")
         );
+    }
+
+    #[tokio::test]
+    async fn search_pubmed_page_rejects_open_access() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.open_access = true;
+
+        let err = search_pubmed_page(&filters, 5, 0)
+            .await
+            .expect_err("open-access should be rejected for PubMed page helper");
+
+        assert!(err.to_string().contains("--open-access"));
+        assert!(err.to_string().contains("PubMed"));
+    }
+
+    #[tokio::test]
+    async fn search_pubmed_page_rejects_no_preprints() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.no_preprints = true;
+
+        let err = search_pubmed_page(&filters, 5, 0)
+            .await
+            .expect_err("no-preprints should be rejected for PubMed page helper");
+
+        assert!(err.to_string().contains("--no-preprints"));
+        assert!(err.to_string().contains("PubMed"));
+    }
+
+    #[tokio::test]
+    async fn search_pubmed_page_refills_across_batches_after_filtering() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _pubmed_base = set_env_var("BIOMCP_PUBMED_BASE", Some(&server.uri()));
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.journal = Some("Nature".into());
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "0"))
+            .and(query_param("retmax", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "4",
+                    "idlist": ["1", "2"]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "1,2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1", "2"],
+                    "1": {
+                        "uid": "1",
+                        "title": "Filtered title",
+                        "sortpubdate": "2024/01/01 00:00",
+                        "fulljournalname": "Other Journal",
+                        "source": "Other J"
+                    },
+                    "2": {
+                        "uid": "2",
+                        "title": "First visible title",
+                        "sortpubdate": "2024/01/02 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "2"))
+            .and(query_param("retmax", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "4",
+                    "idlist": ["3", "4"]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "3,4"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["3", "4"],
+                    "3": {
+                        "uid": "3",
+                        "title": "Second visible title",
+                        "sortpubdate": "2024/01/03 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    },
+                    "4": {
+                        "uid": "4",
+                        "title": "Third visible title",
+                        "sortpubdate": "2024/01/04 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let page = search_pubmed_page(&filters, 2, 0)
+            .await
+            .expect("pubmed page should fill visible results");
+
+        assert_eq!(page.total, Some(4));
+        assert_eq!(page.results.len(), 2);
+        assert_eq!(page.results[0].pmid, "2");
+        assert_eq!(page.results[1].pmid, "3");
+    }
+
+    #[tokio::test]
+    async fn search_pubmed_page_applies_offset_after_filtering() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _pubmed_base = set_env_var("BIOMCP_PUBMED_BASE", Some(&server.uri()));
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.journal = Some("Nature".into());
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "0"))
+            .and(query_param("retmax", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "4",
+                    "idlist": ["1", "2"]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "1,2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1", "2"],
+                    "1": {
+                        "uid": "1",
+                        "title": "Filtered title",
+                        "sortpubdate": "2024/01/01 00:00",
+                        "fulljournalname": "Other Journal",
+                        "source": "Other J"
+                    },
+                    "2": {
+                        "uid": "2",
+                        "title": "First visible title",
+                        "sortpubdate": "2024/01/02 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "2"))
+            .and(query_param("retmax", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "4",
+                    "idlist": ["3", "4"]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "3,4"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["3", "4"],
+                    "3": {
+                        "uid": "3",
+                        "title": "Second visible title",
+                        "sortpubdate": "2024/01/03 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    },
+                    "4": {
+                        "uid": "4",
+                        "title": "Third visible title",
+                        "sortpubdate": "2024/01/04 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let page = search_pubmed_page(&filters, 2, 1)
+            .await
+            .expect("offset should apply after filtering");
+
+        assert_eq!(page.total, Some(4));
+        assert_eq!(page.results.len(), 2);
+        assert_eq!(page.results[0].pmid, "3");
+        assert_eq!(page.results[1].pmid, "4");
+    }
+
+    #[tokio::test]
+    async fn search_pubmed_page_hard_fails_on_blank_title() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _pubmed_base = set_env_var("BIOMCP_PUBMED_BASE", Some(&server.uri()));
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "0"))
+            .and(query_param("retmax", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "1",
+                    "idlist": ["1"]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1"],
+                    "1": {
+                        "uid": "1",
+                        "title": "   ",
+                        "sortpubdate": "2024/01/01 00:00",
+                        "fulljournalname": "Nature",
+                        "source": "Nature"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = search_pubmed_page(&filters, 1, 0)
+            .await
+            .expect_err("blank title should be a contract error");
+
+        let msg = err.to_string();
+        assert!(msg.contains("pubmed-eutils"));
+        assert!(msg.contains("1"));
+        assert!(msg.contains("title"));
     }
 
     #[test]
