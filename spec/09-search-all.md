@@ -70,16 +70,19 @@ echo "$out" | mustmatch like '"ranking": {'
 explicitly requested.
 
 ```bash
-out="$(biomcp search all -g BRAF --debug-plan --limit 3)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search all -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like '"surface": "search_all"'
 echo "$out" | mustmatch like '"anchor": "gene"'
 echo "$out" | mustmatch like '"anchor=gene"'
+echo "$out" | mustmatch like '"PubMed"'
 
-json_out="$(biomcp --json search all -g BRAF --debug-plan --limit 3)"
+json_out="$("$bin" --json search all -g BRAF --debug-plan --limit 3)"
 echo "$json_out" | mustmatch like '"debug_plan": {'
 echo "$json_out" | mustmatch like '"surface": "search_all"'
 echo "$json_out" | mustmatch like '"anchor": "gene"'
+echo "$json_out" | mustmatch like '"PubMed"'
 echo "$json_out" | jq -e '.debug_plan.legs | type == "array"' > /dev/null
 ```
 

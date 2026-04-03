@@ -7,13 +7,20 @@ description: "Search PubMed in BioMCP with PubTator3 annotations, article summar
 
 PubMed is the starting point for most biomedical literature work because it gives researchers a shared identifier system, durable abstracts, and the fastest path from a gene, disease, or drug question to the papers that matter. If you want an MCP-friendly literature workflow that still speaks the language of PMIDs, this is the page to start with.
 
-In BioMCP, "PubMed" is an umbrella label. Search and summary retrieval combine PubTator3 with Europe PMC, while full-text resolution uses PMC OA plus the NCBI ID Converter. Semantic Scholar TLDR, citation, reference, and recommendation helpers belong on the [Semantic Scholar](semantic-scholar.md) page because they come from a different provider surface.
+In BioMCP, PubMed is both a direct article-search source and part of the
+default compatible article federation. `search article --source pubmed` uses
+BioMCP's PubMed ESearch/ESummary loop directly, while the default `--source
+all` route combines PubTator3, Europe PMC, and PubMed when the selected
+filters are PubMed-compatible. Full-text resolution still uses PMC OA plus the
+NCBI ID Converter. Semantic Scholar TLDR, citation, reference, and
+recommendation helpers belong on the [Semantic Scholar](semantic-scholar.md)
+page because they come from a different provider surface.
 
 ## What BioMCP exposes
 
 | Command | What BioMCP gets from this source | Integration note |
 |---|---|---|
-| `search article` | PMID-ranked literature search results with typed filters | Federated across PubTator3 and Europe PMC under the PubMed umbrella |
+| `search article` | PMID-ranked literature search results with typed filters | Direct `--source pubmed` route plus default compatible federation with PubTator3 and Europe PMC |
 | `get article <id>` | Article summary card with identifiers, journal, and abstract context | Uses Europe PMC metadata with BioMCP normalization |
 | `get article <id> annotations` | PubTator entity annotations for a paper | PubTator3-only section |
 | `get article <id> fulltext` | Open-access full-text handoff with saved Markdown path | Uses PMC OA plus NCBI ID Converter |
@@ -26,6 +33,12 @@ biomcp search article -g BRAF --limit 3
 ```
 
 Returns an article table with PMID and title columns for a fast literature scan.
+
+```bash
+biomcp search article -g BRAF --source pubmed --limit 3
+```
+
+Queries PubMed directly while preserving the standard article table contract.
 
 ```bash
 biomcp get article 22663011

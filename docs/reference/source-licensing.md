@@ -728,7 +728,7 @@ The canonical machine-readable inventory for this page lives in [`sources.json`]
 
 ## Source notes
 
-- `PubMed` is an umbrella label in BioMCP output. In practice, article search and annotation use `PubTator3`, `Europe PMC`, `PMC OA`, and `NCBI ID Converter`. This page maps those aliases back to the actual provider rows instead of creating duplicate inventory entries.
+- `PubMed` is a direct article-search source in BioMCP and also an identifier namespace that appears alongside `PubTator3`, `Europe PMC`, `PMC OA`, and `NCBI ID Converter`. This page maps those related provider labels back to the actual inventory rows instead of duplicating coverage notes.
 - `OpenFDA FAERS`, `OpenFDA label`, `OpenFDA shortage`, and `Drugs@FDA` are user-facing provenance labels that resolve back to the `OpenFDA` direct row plus the `Drugs@FDA` indirect row.
 - `AlphaFold DB` and `PDB` are indirect-only because BioMCP currently surfaces those structure IDs via `UniProt` cross-references rather than maintaining standalone source clients.
 - `COSMIC` is indirect-only provenance through `MyVariant.info`. Direct COSMIC integration is not part of BioMCP's supported source surface because the provider's licensing model creates unacceptable redistribution and deployment risk for an MIT-licensed open tool.

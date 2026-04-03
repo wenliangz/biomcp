@@ -571,7 +571,11 @@ fn leg_sources(kind: SectionKind, input: &PreparedInput) -> Vec<String> {
         SectionKind::Trial => vec!["ClinicalTrials.gov".to_string()],
         SectionKind::Article => {
             let filters = article_filters(input);
-            let mut sources = vec!["PubTator3".to_string(), "Europe PMC".to_string()];
+            let mut sources = vec![
+                "PubTator3".to_string(),
+                "Europe PMC".to_string(),
+                "PubMed".to_string(),
+            ];
             if crate::entities::article::semantic_scholar_search_enabled(
                 &filters,
                 crate::entities::article::ArticleSourceFilter::All,
@@ -612,7 +616,7 @@ fn article_filters(input: &PreparedInput) -> crate::entities::article::ArticleSe
 
 fn article_matched_sources(section: &SearchAllSection) -> Vec<String> {
     let mut matched = Vec::new();
-    for source in ["pubtator", "europepmc", "semanticscholar"] {
+    for source in ["pubtator", "europepmc", "pubmed", "semanticscholar"] {
         let present = section.results.iter().any(|row| {
             row.get("matched_sources")
                 .and_then(Value::as_array)
@@ -634,6 +638,7 @@ fn article_source_display_name(source: &str) -> Option<&'static str> {
     match source {
         "pubtator" => Some("PubTator3"),
         "europepmc" => Some("Europe PMC"),
+        "pubmed" => Some("PubMed"),
         "semanticscholar" => Some("Semantic Scholar"),
         _ => None,
     }
@@ -2184,13 +2189,18 @@ mod tests {
                 note: None,
                 results: vec![json!({
                     "pmid": "22663011",
-                    "matched_sources": ["pubtator", "semanticscholar"]
+                    "matched_sources": ["pubtator", "pubmed", "semanticscholar"]
                 })],
                 links: Vec::new(),
             },
         ];
 
         let plan = build_result_plan(&prepared, &sections);
+        let article_leg = plan
+            .legs
+            .iter()
+            .find(|leg| leg.leg == "article")
+            .expect("article leg");
 
         assert_eq!(plan.surface, "search_all");
         assert_eq!(plan.anchor, Some("gene"));
@@ -2202,8 +2212,21 @@ mod tests {
                 .contains(&"fallback=gene_only_variant_backfill".to_string())
         );
         assert_eq!(
-            plan.legs[1].matched_sources,
-            vec!["PubTator3".to_string(), "Semantic Scholar".to_string()]
+            article_leg.sources,
+            vec![
+                "PubTator3".to_string(),
+                "Europe PMC".to_string(),
+                "PubMed".to_string(),
+                "Semantic Scholar".to_string()
+            ]
+        );
+        assert_eq!(
+            article_leg.matched_sources,
+            vec![
+                "PubTator3".to_string(),
+                "PubMed".to_string(),
+                "Semantic Scholar".to_string()
+            ]
         );
     }
 
