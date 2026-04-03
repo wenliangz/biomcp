@@ -129,6 +129,7 @@ out="$("$bin" search article -g BRAF --source pubmed --limit 3)"
 echo "$out" | mustmatch like "source=pubmed"
 echo "$out" | mustmatch like "| PMID | Title |"
 echo "$out" | mustmatch not like "No articles found"
+printf '%s\n' "$out" | grep -F -- '--source <all|pubtator|europepmc|pubmed>' >/dev/null
 ```
 
 ## Federated Search Preserves Non-EuropePMC Matches Under Default Retraction Filter
