@@ -81,18 +81,25 @@ impl CacheStatsReport {
             Some(range) => format!("{} .. {}", range.oldest_ms, range.newest_ms),
             None => "none".to_string(),
         };
-        format!(
-            "| Path | {} |\n| Blob bytes | {} |\n| Blob files | {} |\n| Orphan blobs | {} |\n| Age range | {} |\n| Max size | {} bytes ({}) |\n| Max age | {} s ({}) |\n",
-            self.path,
-            self.blob_bytes,
-            self.blob_count,
-            self.orphan_count,
-            age_display,
-            self.max_size_bytes,
-            self.max_size_origin.as_str(),
-            self.max_age_secs,
-            self.max_age_origin.as_str(),
-        )
+        [
+            format!("| Path | {} |", self.path),
+            format!("| Blob bytes | {} |", self.blob_bytes),
+            format!("| Blob files | {} |", self.blob_count),
+            format!("| Orphan blobs | {} |", self.orphan_count),
+            format!("| Age range | {age_display} |"),
+            format!(
+                "| Max size | {} bytes ({}) |",
+                self.max_size_bytes,
+                self.max_size_origin.as_str()
+            ),
+            format!(
+                "| Max age | {} s ({}) |",
+                self.max_age_secs,
+                self.max_age_origin.as_str()
+            ),
+            String::new(), // trailing newline
+        ]
+        .join("\n")
     }
 }
 
