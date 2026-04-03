@@ -30,7 +30,7 @@ from first-run discovery.
 bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
 out="$("$bin" --help)"
 echo "$out" | mustmatch like "serve-http"
-echo "$out" | mustmatch like "cache       Print the managed HTTP cache path"
+echo "$out" | mustmatch like "cache       Inspect the managed HTTP cache"
 echo "$out" | mustmatch not like "serve-sse"
 ```
 
