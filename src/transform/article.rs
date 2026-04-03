@@ -447,8 +447,7 @@ pub fn from_pubtator_search_result(hit: &PubTatorSearchResult) -> Option<Article
 fn parse_sortpubdate(value: &str) -> Option<String> {
     let prefix = value.trim().get(0..10)?;
     let bytes = prefix.as_bytes();
-    if bytes.len() != 10
-        || bytes[4] != b'/'
+    if bytes[4] != b'/'
         || bytes[7] != b'/'
         || !bytes[0..4].iter().all(|byte| byte.is_ascii_digit())
         || !bytes[5..7].iter().all(|byte| byte.is_ascii_digit())
