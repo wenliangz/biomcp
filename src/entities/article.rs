@@ -1301,12 +1301,12 @@ fn build_pubmed_esearch_params(
 
     if filters.open_access {
         return Err(BioMcpError::InvalidArgument(
-            "PubMed builder does not support --open-access in ticket 124".into(),
+            "PubMed ESearch does not support --open-access filtering".into(),
         ));
     }
     if filters.no_preprints {
         return Err(BioMcpError::InvalidArgument(
-            "PubMed builder does not support --no-preprints in ticket 124".into(),
+            "PubMed ESearch does not support --no-preprints filtering".into(),
         ));
     }
 
