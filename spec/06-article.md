@@ -332,7 +332,7 @@ out="$(env -u S2_API_KEY "$bin" search article -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like '"surface": "search_article"'
 echo "$out" | mustmatch like '"planner=federated"'
-echo "$out" | mustmatch like '"PubMed"'
+printf '%s\n' "$out" | grep -F '"PubMed"' >/dev/null
 echo "$out" | mustmatch like "Semantic Scholar"
 
 json_out="$(env -u S2_API_KEY "$bin" --json search article -g BRAF --debug-plan --limit 3)"
@@ -344,7 +344,7 @@ echo "$json_out" | mustmatch like '"Semantic Scholar"'
 
 typed_out="$("$bin" search article -g BRAF --type review --debug-plan --limit 3)"
 echo "$typed_out" | mustmatch like '"planner=type_capable"'
-echo "$typed_out" | mustmatch like '"PubMed"'
+printf '%s\n' "$typed_out" | grep -F '"PubMed"' >/dev/null
 echo "$typed_out" | mustmatch like '"Note: --type restricts article search to Europe PMC and PubMed'
 
 typed_json="$("$bin" --json search article -g BRAF --type review --debug-plan --limit 3)"

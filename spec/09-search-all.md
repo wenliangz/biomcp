@@ -76,13 +76,13 @@ echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like '"surface": "search_all"'
 echo "$out" | mustmatch like '"anchor": "gene"'
 echo "$out" | mustmatch like '"anchor=gene"'
-echo "$out" | mustmatch like '"PubMed"'
+printf '%s\n' "$out" | grep -F '"PubMed"' >/dev/null
 
 json_out="$("$bin" --json search all -g BRAF --debug-plan --limit 3)"
 echo "$json_out" | mustmatch like '"debug_plan": {'
 echo "$json_out" | mustmatch like '"surface": "search_all"'
 echo "$json_out" | mustmatch like '"anchor": "gene"'
-echo "$json_out" | mustmatch like '"PubMed"'
+echo "$json_out" | jq -e '.debug_plan.legs[] | select(.leg == "article") | .sources | index("PubMed") != null' > /dev/null
 echo "$json_out" | jq -e '.debug_plan.legs | type == "array"' > /dev/null
 ```
 
