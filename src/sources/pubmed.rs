@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 use reqwest_middleware::ClientWithMiddleware;
 use serde::Deserialize;
@@ -33,6 +34,16 @@ pub(crate) struct PubMedESearchResponse {
     pub idlist: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ESummaryEntry {
+    pub uid: String,
+    pub title: String,
+    pub sortpubdate: Option<String>,
+    pub pubdate: Option<String>,
+    pub fulljournalname: Option<String>,
+    pub source: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ESearchEnvelope {
     esearchresult: ESearchInner,
@@ -43,6 +54,21 @@ struct ESearchInner {
     count: String,
     #[serde(default)]
     idlist: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ESummaryEnvelope {
+    result: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ESummaryEntryRaw {
+    uid: Option<String>,
+    title: Option<String>,
+    sortpubdate: Option<String>,
+    pubdate: Option<String>,
+    fulljournalname: Option<String>,
+    source: Option<String>,
 }
 
 fn format_pubmed_date(value: &str) -> String {
@@ -185,6 +211,125 @@ impl PubMedClient {
             count,
             idlist: response.esearchresult.idlist,
         })
+    }
+
+    pub async fn esummary(&self, ids: &[String]) -> Result<Vec<ESummaryEntry>, BioMcpError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let requested_ids = ids.iter().map(|id| id.trim()).collect::<Vec<_>>();
+        if let Some(blank) = requested_ids.iter().find(|id| id.is_empty()) {
+            return Err(BioMcpError::InvalidArgument(format!(
+                "PubMed ESummary ids must be nonblank (got {:?})",
+                blank
+            )));
+        }
+
+        let requested_set = requested_ids.iter().copied().collect::<HashSet<_>>();
+        let url = self.endpoint("esummary.fcgi");
+        let id_param = requested_ids.join(",");
+        let req = self.client.get(&url).query(&[
+            ("db", "pubmed"),
+            ("retmode", "json"),
+            ("id", id_param.as_str()),
+        ]);
+        let req = crate::sources::append_ncbi_api_key(req, self.api_key.as_deref());
+        let response: ESummaryEnvelope = self.get_json(req).await?;
+
+        let uids = response
+            .result
+            .get("uids")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| BioMcpError::Api {
+                api: PUBMED_EUTILS_API.to_string(),
+                message: "ESummary response missing uids array".into(),
+            })?;
+
+        let mut upstream_ids = Vec::with_capacity(uids.len());
+        let mut upstream_seen = HashSet::with_capacity(uids.len());
+        for value in uids {
+            let uid = value
+                .as_str()
+                .map(str::trim)
+                .filter(|uid| !uid.is_empty())
+                .ok_or_else(|| BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: "ESummary uids must be a string array of nonblank PMIDs".into(),
+                })?;
+            if !upstream_seen.insert(uid) {
+                return Err(BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: format!("ESummary response contains duplicate uid {uid}"),
+                });
+            }
+            upstream_ids.push(uid);
+        }
+
+        for requested_id in &requested_ids {
+            if !upstream_seen.contains(requested_id) {
+                return Err(BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: format!(
+                        "ESummary response missing requested PMID {requested_id} in uids"
+                    ),
+                });
+            }
+        }
+        for upstream_id in &upstream_ids {
+            if !requested_set.contains(upstream_id) {
+                return Err(BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: format!("ESummary response contains unexpected PMID {upstream_id}"),
+                });
+            }
+        }
+
+        let mut entries = Vec::with_capacity(requested_ids.len());
+        for requested_id in requested_ids {
+            let raw_value = response
+                .result
+                .get(requested_id)
+                .ok_or_else(|| BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: format!(
+                        "ESummary response missing entry for requested PMID {requested_id}"
+                    ),
+                })?;
+            let raw = serde_json::from_value::<ESummaryEntryRaw>(raw_value.clone()).map_err(
+                |source| BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: format!(
+                        "ESummary entry for PMID {requested_id} failed to parse: {source}"
+                    ),
+                },
+            )?;
+            if raw
+                .uid
+                .as_deref()
+                .map(str::trim)
+                .filter(|uid| !uid.is_empty())
+                .is_some_and(|uid| uid != requested_id)
+            {
+                return Err(BioMcpError::Api {
+                    api: PUBMED_EUTILS_API.to_string(),
+                    message: format!(
+                        "ESummary entry for PMID {requested_id} had conflicting inner uid {:?}",
+                        raw.uid
+                    ),
+                });
+            }
+            entries.push(ESummaryEntry {
+                uid: requested_id.to_string(),
+                title: raw.title.unwrap_or_default(),
+                sortpubdate: raw.sortpubdate,
+                pubdate: raw.pubdate,
+                fulljournalname: raw.fulljournalname,
+                source: raw.source,
+            });
+        }
+
+        Ok(entries)
     }
 }
 
@@ -422,5 +567,264 @@ mod tests {
 
         assert!(matches!(err, BioMcpError::InvalidArgument(_)));
         assert!(err.to_string().contains("term"));
+    }
+
+    #[tokio::test]
+    async fn esummary_handles_empty_ids() {
+        let client = PubMedClient::new_for_test("http://127.0.0.1".into(), None).expect("client");
+        let response = client
+            .esummary(&[])
+            .await
+            .expect("empty ids should short-circuit");
+
+        assert!(response.is_empty());
+    }
+
+    #[tokio::test]
+    async fn esummary_returns_hydrated_entries_in_requested_order() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "2,1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1", "2"],
+                    "1": {
+                        "uid": "1",
+                        "title": "First title",
+                        "sortpubdate": "2024/01/15 00:00",
+                        "pubdate": "2024 Jan 15",
+                        "fulljournalname": "Journal One",
+                        "source": "J1"
+                    },
+                    "2": {
+                        "uid": "2",
+                        "title": "Second title",
+                        "sortpubdate": "2023/12/01 00:00",
+                        "pubdate": "2023 Dec 01",
+                        "fulljournalname": "Journal Two",
+                        "source": "J2"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let response = client
+            .esummary(&["2".to_string(), "1".to_string()])
+            .await
+            .expect("esummary should hydrate");
+
+        assert_eq!(response.len(), 2);
+        assert_eq!(response[0].uid, "2");
+        assert_eq!(response[0].title, "Second title");
+        assert_eq!(response[0].fulljournalname.as_deref(), Some("Journal Two"));
+        assert_eq!(response[1].uid, "1");
+        assert_eq!(response[1].title, "First title");
+        assert_eq!(response[1].source.as_deref(), Some("J1"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_missing_uids() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "1": {
+                        "uid": "1",
+                        "title": "Only title"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string()])
+            .await
+            .expect_err("missing uids should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("pubmed-eutils"));
+        assert!(msg.contains("uids"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_duplicate_uids() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1", "1"],
+                    "1": {
+                        "uid": "1",
+                        "title": "Only title"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string()])
+            .await
+            .expect_err("duplicate uids should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("duplicate"));
+        assert!(msg.contains("1"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_missing_requested_uid() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1"],
+                    "1": {
+                        "uid": "1",
+                        "title": "Only title"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string(), "2".to_string()])
+            .await
+            .expect_err("missing requested uid should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("2"));
+        assert!(msg.contains("missing"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_unexpected_uid() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1", "9"],
+                    "1": {
+                        "uid": "1",
+                        "title": "Only title"
+                    },
+                    "9": {
+                        "uid": "9",
+                        "title": "Unexpected title"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string()])
+            .await
+            .expect_err("unexpected uid should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("unexpected"));
+        assert!(msg.contains("9"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_missing_entry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1"]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string()])
+            .await
+            .expect_err("missing entry should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("entry"));
+        assert!(msg.contains("1"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_malformed_entry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1"],
+                    "1": []
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string()])
+            .await
+            .expect_err("malformed entry should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("parse"));
+        assert!(msg.contains("1"));
+    }
+
+    #[tokio::test]
+    async fn esummary_hard_fails_on_conflicting_inner_uid() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["1"],
+                    "1": {
+                        "uid": "2",
+                        "title": "Conflicting title"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = PubMedClient::new_for_test(server.uri(), None).expect("client");
+        let err = client
+            .esummary(&["1".to_string()])
+            .await
+            .expect_err("conflicting inner uid should fail");
+
+        let msg = err.to_string();
+        assert!(msg.contains("uid"));
+        assert!(msg.contains("1"));
+        assert!(msg.contains("2"));
     }
 }

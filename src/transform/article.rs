@@ -8,6 +8,7 @@ use crate::entities::article::{
     AnnotationCount, Article, ArticleAnnotations, ArticleSearchResult, ArticleSource,
 };
 use crate::sources::europepmc::EuropePmcResult;
+use crate::sources::pubmed::ESummaryEntry;
 use crate::sources::pubtator::{PubTatorDocument, PubTatorSearchResult};
 
 fn truncate_utf8(s: &str, max_bytes: usize, suffix: &str) -> String {
@@ -437,6 +438,115 @@ pub fn from_pubtator_search_result(hit: &PubTatorSearchResult) -> Option<Article
         ranking: None,
         matched_sources: vec![ArticleSource::PubTator],
         normalized_title: normalize_article_search_text(hit.title.as_deref().unwrap_or_default()),
+        normalized_abstract: String::new(),
+        publication_type: None,
+        insertion_index: 0,
+    })
+}
+
+fn parse_sortpubdate(value: &str) -> Option<String> {
+    let prefix = value.trim().get(0..10)?;
+    let bytes = prefix.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'/'
+        || bytes[7] != b'/'
+        || !bytes[0..4].iter().all(|byte| byte.is_ascii_digit())
+        || !bytes[5..7].iter().all(|byte| byte.is_ascii_digit())
+        || !bytes[8..10].iter().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(prefix.replace('/', "-"))
+}
+
+fn pubmed_month_number(value: &str) -> Option<&'static str> {
+    match value
+        .trim_matches(|ch: char| !ch.is_ascii_alphabetic())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "jan" | "january" => Some("01"),
+        "feb" | "february" => Some("02"),
+        "mar" | "march" => Some("03"),
+        "apr" | "april" => Some("04"),
+        "may" => Some("05"),
+        "jun" | "june" => Some("06"),
+        "jul" | "july" => Some("07"),
+        "aug" | "august" => Some("08"),
+        "sep" | "sept" | "september" => Some("09"),
+        "oct" | "october" => Some("10"),
+        "nov" | "november" => Some("11"),
+        "dec" | "december" => Some("12"),
+        _ => None,
+    }
+}
+
+fn parse_pubdate(value: &str) -> Option<String> {
+    let mut parts = value.split_whitespace();
+    let year = parts.next()?.trim();
+    if year.len() != 4 || !year.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    let Some(month) = parts.next().and_then(pubmed_month_number) else {
+        return Some(year.to_string());
+    };
+    let Some(day_token) = parts.next() else {
+        return Some(format!("{year}-{month}"));
+    };
+    let day = day_token
+        .trim_matches(|ch: char| !ch.is_ascii_digit())
+        .parse::<u8>()
+        .ok()
+        .filter(|day| (1..=31).contains(day));
+    match day {
+        Some(day) => Some(format!("{year}-{month}-{day:02}")),
+        None => Some(format!("{year}-{month}")),
+    }
+}
+
+pub fn from_pubmed_esummary_entry(entry: &ESummaryEntry) -> Option<ArticleSearchResult> {
+    let title = clean_title(&entry.title);
+    if title.is_empty() {
+        return None;
+    }
+
+    let journal = entry
+        .fulljournalname
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            entry
+                .source
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string())
+        });
+    let date = entry
+        .sortpubdate
+        .as_deref()
+        .and_then(parse_sortpubdate)
+        .or_else(|| entry.pubdate.as_deref().and_then(parse_pubdate));
+
+    Some(ArticleSearchResult {
+        pmid: entry.uid.clone(),
+        pmcid: None,
+        doi: None,
+        title: title.clone(),
+        journal,
+        date,
+        citation_count: None,
+        influential_citation_count: None,
+        source: ArticleSource::PubMed,
+        matched_sources: vec![ArticleSource::PubMed],
+        score: None,
+        is_retracted: None,
+        abstract_snippet: None,
+        ranking: None,
+        normalized_title: normalize_article_search_text(&title),
         normalized_abstract: String::new(),
         publication_type: None,
         insertion_index: 0,
@@ -1023,6 +1133,7 @@ fn strip_xml_tags_fallback(xml: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::pubmed::ESummaryEntry;
 
     #[test]
     fn truncate_title_truncates_on_utf8_boundary() {
@@ -1251,6 +1362,82 @@ mod tests {
         assert_eq!(row.score, Some(255.9));
         assert_eq!(row.citation_count, None);
         assert_eq!(row.is_retracted, None);
+    }
+
+    #[test]
+    fn parse_sortpubdate_extracts_ymd() {
+        assert_eq!(
+            parse_sortpubdate("2023/01/15 00:00"),
+            Some("2023-01-15".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_pubdate_extracts_full_date() {
+        assert_eq!(parse_pubdate("2023 Jan 15"), Some("2023-01-15".to_string()));
+    }
+
+    #[test]
+    fn parse_pubdate_extracts_year_month() {
+        assert_eq!(parse_pubdate("2023 Jan"), Some("2023-01".to_string()));
+    }
+
+    #[test]
+    fn parse_pubdate_extracts_year() {
+        assert_eq!(parse_pubdate("2023 Spring"), Some("2023".to_string()));
+    }
+
+    #[test]
+    fn from_pubmed_esummary_entry_hydrates_all_fields() {
+        let row = from_pubmed_esummary_entry(&ESummaryEntry {
+            uid: "12345".into(),
+            title: "BRAF &lt;i&gt;targeted&lt;/i&gt; therapy".into(),
+            sortpubdate: Some("2023/01/15 00:00".into()),
+            pubdate: Some("2023 Jan 15".into()),
+            fulljournalname: Some("Nature Medicine".into()),
+            source: Some("Nat Med".into()),
+        })
+        .expect("pubmed row should map");
+
+        assert_eq!(row.pmid, "12345");
+        assert_eq!(row.title, "BRAF targeted therapy");
+        assert_eq!(row.date.as_deref(), Some("2023-01-15"));
+        assert_eq!(row.journal.as_deref(), Some("Nature Medicine"));
+        assert_eq!(row.source, ArticleSource::PubMed);
+        assert_eq!(row.matched_sources, vec![ArticleSource::PubMed]);
+        assert_eq!(row.normalized_title, "braf targeted therapy");
+        assert_eq!(row.normalized_abstract, "");
+        assert_eq!(row.publication_type, None);
+    }
+
+    #[test]
+    fn from_pubmed_esummary_entry_falls_back_to_source_journal() {
+        let row = from_pubmed_esummary_entry(&ESummaryEntry {
+            uid: "12345".into(),
+            title: "PubMed fallback title".into(),
+            sortpubdate: None,
+            pubdate: Some("2023 Jan".into()),
+            fulljournalname: Some("   ".into()),
+            source: Some("Nat Med".into()),
+        })
+        .expect("pubmed row should map");
+
+        assert_eq!(row.date.as_deref(), Some("2023-01"));
+        assert_eq!(row.journal.as_deref(), Some("Nat Med"));
+    }
+
+    #[test]
+    fn from_pubmed_esummary_entry_returns_none_for_blank_title() {
+        let row = from_pubmed_esummary_entry(&ESummaryEntry {
+            uid: "12345".into(),
+            title: "   ".into(),
+            sortpubdate: Some("2023/01/15 00:00".into()),
+            pubdate: Some("2023 Jan 15".into()),
+            fulljournalname: Some("Nature Medicine".into()),
+            source: Some("Nat Med".into()),
+        });
+
+        assert!(row.is_none());
     }
 
     #[test]
