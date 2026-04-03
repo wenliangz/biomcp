@@ -681,9 +681,7 @@ fn pubmed_source_filter_error(filters: &ArticleSearchFilters) -> BioMcpError {
         (false, true) => BioMcpError::InvalidArgument(
             "--source pubmed does not support --no-preprints. Use --source europepmc or remove --no-preprints.".into(),
         ),
-        (false, false) => BioMcpError::InvalidArgument(
-            "--source pubmed requires PubMed-compatible filters.".into(),
-        ),
+        (false, false) => unreachable!("pubmed_source_filter_error called with compatible filters"),
     }
 }
 
@@ -4069,6 +4067,100 @@ mod tests {
         assert_eq!(summary.routing, vec!["planner=pubtator_only".to_string()]);
         assert_eq!(summary.sources, vec!["PubTator3".to_string()]);
         assert!(summary.matched_sources.is_empty());
+    }
+
+    #[test]
+    fn summarize_debug_plan_no_preprints_omits_pubmed() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.no_preprints = true;
+
+        let summary =
+            summarize_debug_plan(&filters, ArticleSourceFilter::All, &[]).expect("summary");
+
+        assert_eq!(summary.routing, vec!["planner=federated".to_string()]);
+        assert!(summary.sources.contains(&"PubTator3".to_string()));
+        assert!(summary.sources.contains(&"Europe PMC".to_string()));
+        assert!(
+            !summary.sources.contains(&"PubMed".to_string()),
+            "PubMed should be excluded when no_preprints is set"
+        );
+    }
+
+    #[test]
+    fn pubmed_unique_row_survives_first_page_in_mixed_federation() {
+        // Design: "construct a mixed candidate set with one PubMed-only row that
+        // has stronger title-anchor coverage than some competing rows, run it
+        // through the common finalizer, and assert that the PubMed-only row
+        // survives in the first returned page."
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+
+        // PubMed-only row with strong title-anchor coverage (gene in title)
+        let pubmed_row = ArticleSearchResult {
+            pmid: "99999".into(),
+            pmcid: None,
+            doi: None,
+            title: "BRAF V600E mutations in melanoma".into(),
+            journal: Some("Nature".into()),
+            date: Some("2025-01-01".into()),
+            citation_count: Some(5),
+            influential_citation_count: None,
+            source: ArticleSource::PubMed,
+            matched_sources: vec![ArticleSource::PubMed],
+            score: None,
+            is_retracted: Some(false),
+            abstract_snippet: None,
+            ranking: None,
+            normalized_title: "braf v600e mutations in melanoma".into(),
+            normalized_abstract: String::new(),
+            publication_type: None,
+            insertion_index: 0,
+        };
+
+        // Competing rows from other backends with weaker title-anchor coverage
+        let weak_rows: Vec<ArticleSearchResult> = (1..=5)
+            .map(|i| ArticleSearchResult {
+                pmid: format!("{i}"),
+                pmcid: None,
+                doi: None,
+                title: format!("Unrelated oncology study {i}"),
+                journal: Some("Journal".into()),
+                date: Some("2025-01-01".into()),
+                citation_count: Some(100),
+                influential_citation_count: None,
+                source: ArticleSource::EuropePmc,
+                matched_sources: vec![ArticleSource::EuropePmc],
+                score: None,
+                is_retracted: Some(false),
+                abstract_snippet: None,
+                ranking: None,
+                normalized_title: format!("unrelated oncology study {i}"),
+                normalized_abstract: String::new(),
+                publication_type: None,
+                insertion_index: 0,
+            })
+            .collect();
+
+        let mut candidates = weak_rows;
+        candidates.push(pubmed_row);
+
+        let page = finalize_article_candidates(candidates, 5, 0, None, &filters);
+
+        assert!(
+            page.results.iter().any(|r| r.pmid == "99999"),
+            "PubMed-unique row should survive in the first visible page"
+        );
+        // It should rank high because "BRAF" is in the title
+        let pubmed_pos = page
+            .results
+            .iter()
+            .position(|r| r.pmid == "99999")
+            .expect("PubMed row must be present");
+        assert_eq!(
+            pubmed_pos, 0,
+            "PubMed row with title-anchor match should rank first among rows without anchor coverage"
+        );
     }
 
     #[test]
