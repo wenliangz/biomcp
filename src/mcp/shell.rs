@@ -391,6 +391,11 @@ mod tests {
             "cache".into(),
             "path".into()
         ]));
+        assert!(!is_allowed_mcp_command(&[
+            "biomcp".into(),
+            "cache".into(),
+            "stats".into()
+        ]));
         assert!(is_allowed_mcp_command(&[
             "biomcp".into(),
             "study".into(),
@@ -500,6 +505,12 @@ mod tests {
         let args = vec!["biomcp".into(), "cache".into(), "path".into()];
         assert_eq!(
             mcp_rejection_message(&args),
+            CACHE_FAMILY_MCP_REJECTION_MESSAGE
+        );
+
+        let stats_args = vec!["biomcp".into(), "cache".into(), "stats".into()];
+        assert_eq!(
+            mcp_rejection_message(&stats_args),
             CACHE_FAMILY_MCP_REJECTION_MESSAGE
         );
     }

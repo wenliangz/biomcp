@@ -12,6 +12,14 @@ This command is read-only and prints `<resolved cache_root>/http`.
 The global `--json` flag is ignored for this command and output stays plain text.
 This command family is CLI-only because it reveals workstation-local filesystem paths.")]
     Path,
+    /// Show HTTP cache statistics
+    #[command(long_about = "\
+Show HTTP cache statistics.
+
+Print an on-demand snapshot of blob counts, bytes, age range, and configured cache limits.
+Use the global `--json` flag for machine-readable output.
+This command is CLI-only because cache commands reveal workstation-local filesystem paths.")]
+    Stats,
 }
 
 /// Render the managed HTTP cache path without creating or migrating cache directories.
@@ -24,14 +32,12 @@ pub fn render_path() -> Result<String, BioMcpError> {
     Ok(config.cache_root.join("http").display().to_string())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct CacheStatsAgeRange {
     pub(crate) oldest_ms: u64,
     pub(crate) newest_ms: u64,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum CacheStatsOrigin {
@@ -60,7 +66,6 @@ impl From<crate::cache::ConfigOrigin> for CacheStatsOrigin {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct CacheStatsReport {
     pub(crate) path: String,
@@ -75,7 +80,6 @@ pub(crate) struct CacheStatsReport {
 }
 
 impl CacheStatsReport {
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn to_markdown(&self) -> String {
         let age_display = match &self.age_range {
             Some(range) => format!("{} .. {}", range.oldest_ms, range.newest_ms),
@@ -144,7 +148,6 @@ pub(crate) fn build_cache_stats_report(
     })
 }
 
-#[allow(dead_code)]
 pub(crate) fn collect_cache_stats_report() -> Result<CacheStatsReport, BioMcpError> {
     collect_cache_stats_report_with(
         crate::cache::resolve_cache_config,
