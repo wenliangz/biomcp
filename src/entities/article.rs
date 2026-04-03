@@ -259,6 +259,7 @@ pub enum ArticleSourceFilter {
     All,
     PubTator,
     EuropePmc,
+    PubMed,
 }
 
 impl ArticleSourceFilter {
@@ -267,8 +268,9 @@ impl ArticleSourceFilter {
             "" | "all" => Ok(Self::All),
             "pubtator" => Ok(Self::PubTator),
             "europepmc" | "europe-pmc" => Ok(Self::EuropePmc),
+            "pubmed" => Ok(Self::PubMed),
             other => Err(BioMcpError::InvalidArgument(format!(
-                "Unknown --source '{other}'. Expected one of: all, pubtator, europepmc."
+                "Unknown --source '{other}'. Expected one of: all, pubtator, europepmc, pubmed."
             ))),
         }
     }
@@ -278,6 +280,7 @@ impl ArticleSourceFilter {
             Self::All => "all",
             Self::PubTator => "pubtator",
             Self::EuropePmc => "europepmc",
+            Self::PubMed => "pubmed",
         }
     }
 }
@@ -375,6 +378,8 @@ indexed by PubMed or Europe PMC and cannot be resolved.";
 enum BackendPlan {
     EuropeOnly,
     PubTatorOnly,
+    PubMedOnly,
+    TypeCapable,
     Both,
 }
 
@@ -633,13 +638,53 @@ fn normalized_date_bounds(
     Ok((normalized_date_from, normalized_date_to))
 }
 
+fn has_article_type_filter(filters: &ArticleSearchFilters) -> bool {
+    filters
+        .article_type
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn pubmed_filter_compatible(filters: &ArticleSearchFilters) -> bool {
+    !filters.open_access && !filters.no_preprints
+}
+
 fn has_strict_europepmc_filters(filters: &ArticleSearchFilters) -> bool {
-    filters.open_access
-        || filters
-            .article_type
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|value| !value.is_empty())
+    filters.open_access || has_article_type_filter(filters)
+}
+
+fn pubtator_strict_filter_error(filters: &ArticleSearchFilters) -> BioMcpError {
+    if has_article_type_filter(filters) && pubmed_filter_compatible(filters) {
+        return BioMcpError::InvalidArgument(
+            "--source pubtator does not support --type. Use --source europepmc, --source pubmed, or remove --type.".into(),
+        );
+    }
+    if filters.open_access {
+        return BioMcpError::InvalidArgument(
+            "--source pubtator does not support --open-access. Use --source europepmc or relax --open-access.".into(),
+        );
+    }
+    BioMcpError::InvalidArgument(
+        "--source pubtator does not support --type with --no-preprints. Use --source europepmc or relax --no-preprints.".into(),
+    )
+}
+
+fn pubmed_source_filter_error(filters: &ArticleSearchFilters) -> BioMcpError {
+    match (filters.open_access, filters.no_preprints) {
+        (true, true) => BioMcpError::InvalidArgument(
+            "--source pubmed does not support --open-access or --no-preprints. Use --source europepmc or relax the selected filters.".into(),
+        ),
+        (true, false) => BioMcpError::InvalidArgument(
+            "--source pubmed does not support --open-access. Use --source europepmc or remove --open-access.".into(),
+        ),
+        (false, true) => BioMcpError::InvalidArgument(
+            "--source pubmed does not support --no-preprints. Use --source europepmc or remove --no-preprints.".into(),
+        ),
+        (false, false) => BioMcpError::InvalidArgument(
+            "--source pubmed requires PubMed-compatible filters.".into(),
+        ),
+    }
 }
 
 fn plan_backends(
@@ -650,15 +695,25 @@ fn plan_backends(
         ArticleSourceFilter::EuropePmc => Ok(BackendPlan::EuropeOnly),
         ArticleSourceFilter::PubTator => {
             if has_strict_europepmc_filters(filters) {
-                return Err(BioMcpError::InvalidArgument(
-                    "--source pubtator does not support strict filters --open-access or --type. --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering. Use --source europepmc or remove --type.".into(),
-                ));
+                return Err(pubtator_strict_filter_error(filters));
             }
             Ok(BackendPlan::PubTatorOnly)
         }
+        ArticleSourceFilter::PubMed => {
+            if !pubmed_filter_compatible(filters) {
+                return Err(pubmed_source_filter_error(filters));
+            }
+            Ok(BackendPlan::PubMedOnly)
+        }
         ArticleSourceFilter::All => {
-            if has_strict_europepmc_filters(filters) {
+            if filters.open_access {
                 Ok(BackendPlan::EuropeOnly)
+            } else if has_article_type_filter(filters) {
+                if pubmed_filter_compatible(filters) {
+                    Ok(BackendPlan::TypeCapable)
+                } else {
+                    Ok(BackendPlan::EuropeOnly)
+                }
             } else {
                 Ok(BackendPlan::Both)
             }
@@ -677,19 +732,19 @@ pub(crate) fn article_type_limitation_note(
     filters: &ArticleSearchFilters,
     source: ArticleSourceFilter,
 ) -> Option<String> {
-    let has_type = filters
-        .article_type
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|value| !value.is_empty());
-    if !has_type {
+    if source != ArticleSourceFilter::All || !has_article_type_filter(filters) {
         return None;
     }
-    match source {
-        ArticleSourceFilter::All | ArticleSourceFilter::EuropePmc => Some(
-            "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.".into(),
-        ),
-        ArticleSourceFilter::PubTator => None,
+    if pubmed_filter_compatible(filters) {
+        Some(
+            "Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering."
+                .into(),
+        )
+    } else {
+        Some(
+            "Note: --type restricts this article search to Europe PMC. PubTator3 and Semantic Scholar do not support publication-type filtering, and PubMed does not support the other selected filters."
+                .into(),
+        )
     }
 }
 
@@ -708,19 +763,30 @@ pub(crate) fn summarize_debug_plan(
     let plan = plan_backends(filters, source)?;
     let planner = match (plan, source) {
         (BackendPlan::EuropeOnly, ArticleSourceFilter::All)
-            if has_strict_europepmc_filters(filters) =>
+            if filters.open_access
+                || (has_article_type_filter(filters) && !pubmed_filter_compatible(filters)) =>
         {
             "planner=europe_only_strict_filters"
         }
         (BackendPlan::EuropeOnly, _) => "planner=europe_only",
         (BackendPlan::PubTatorOnly, _) => "planner=pubtator_only",
+        (BackendPlan::PubMedOnly, _) => "planner=pubmed_only",
+        (BackendPlan::TypeCapable, _) => "planner=type_capable",
         (BackendPlan::Both, _) => "planner=federated",
     };
 
     let mut sources = match plan {
         BackendPlan::EuropeOnly => vec!["Europe PMC".to_string()],
         BackendPlan::PubTatorOnly => vec!["PubTator3".to_string()],
-        BackendPlan::Both => vec!["PubTator3".to_string(), "Europe PMC".to_string()],
+        BackendPlan::PubMedOnly => vec!["PubMed".to_string()],
+        BackendPlan::TypeCapable => vec!["Europe PMC".to_string(), "PubMed".to_string()],
+        BackendPlan::Both => {
+            let mut sources = vec!["PubTator3".to_string(), "Europe PMC".to_string()];
+            if pubmed_filter_compatible(filters) {
+                sources.push("PubMed".to_string());
+            }
+            sources
+        }
     };
     if semantic_scholar_search_enabled(filters, source) {
         sources.push("Semantic Scholar".to_string());
@@ -729,6 +795,7 @@ pub(crate) fn summarize_debug_plan(
     let matched_sources = [
         ArticleSource::PubTator,
         ArticleSource::EuropePmc,
+        ArticleSource::PubMed,
         ArticleSource::SemanticScholar,
     ]
     .into_iter()
@@ -880,8 +947,8 @@ fn article_source_priority(source: ArticleSource) -> u8 {
     match source {
         ArticleSource::PubTator => 0,
         ArticleSource::EuropePmc => 1,
-        ArticleSource::SemanticScholar => 2,
-        ArticleSource::PubMed => 3,
+        ArticleSource::PubMed => 2,
+        ArticleSource::SemanticScholar => 3,
     }
 }
 
@@ -1280,7 +1347,6 @@ fn build_search_query(filters: &ArticleSearchFilters) -> Result<String, BioMcpEr
     Ok(terms.join(" AND "))
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn build_pubmed_search_term(filters: &ArticleSearchFilters) -> Result<String, BioMcpError> {
     validate_required_search_filters(filters)?;
     validate_search_filter_values(filters)?;
@@ -1352,9 +1418,9 @@ fn build_pubmed_esearch_params(
     let term = build_pubmed_search_term(filters)?;
     let (date_from, date_to) = normalized_date_bounds(filters)?;
 
-    if limit == 0 || limit > MAX_SEARCH_LIMIT {
+    if limit == 0 || limit > MAX_FEDERATED_FETCH_RESULTS {
         return Err(BioMcpError::InvalidArgument(format!(
-            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
+            "--limit must be between 1 and {MAX_FEDERATED_FETCH_RESULTS}"
         )));
     }
 
@@ -1385,15 +1451,14 @@ fn build_pubmed_esearch_params(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 async fn search_pubmed_page(
     filters: &ArticleSearchFilters,
     limit: usize,
     offset: usize,
 ) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
-    if limit == 0 || limit > MAX_SEARCH_LIMIT {
+    if limit == 0 || limit > MAX_FEDERATED_FETCH_RESULTS {
         return Err(BioMcpError::InvalidArgument(format!(
-            "--limit must be between 1 and {MAX_SEARCH_LIMIT}"
+            "--limit must be between 1 and {MAX_FEDERATED_FETCH_RESULTS}"
         )));
     }
     if filters.open_access {
@@ -2362,15 +2427,24 @@ async fn search_federated_page(
             "--offset + --limit must be <= {MAX_FEDERATED_FETCH_RESULTS} for federated article search"
         )));
     }
-    let (pubtator_leg, europe_leg, semantic_scholar_leg) = tokio::join!(
+    let include_pubmed = pubmed_filter_compatible(filters);
+    let (pubtator_leg, europe_leg, pubmed_leg, semantic_scholar_leg) = tokio::join!(
         search_pubtator_page(filters, fetch_count, 0),
         search_europepmc_page(filters, fetch_count, 0),
+        async {
+            if include_pubmed {
+                Some(search_pubmed_page(filters, fetch_count, 0).await)
+            } else {
+                None
+            }
+        },
         search_semantic_scholar_candidates(filters, fetch_count)
     );
 
     merge_federated_pages(
         pubtator_leg,
         europe_leg,
+        pubmed_leg,
         semantic_scholar_leg,
         limit,
         offset,
@@ -2381,6 +2455,7 @@ async fn search_federated_page(
 fn merge_federated_pages(
     pubtator_leg: Result<SearchPage<ArticleSearchResult>, BioMcpError>,
     europe_leg: Result<SearchPage<ArticleSearchResult>, BioMcpError>,
+    pubmed_leg: Option<Result<SearchPage<ArticleSearchResult>, BioMcpError>>,
     semantic_scholar_leg: Result<Vec<ArticleSearchResult>, BioMcpError>,
     limit: usize,
     offset: usize,
@@ -2396,11 +2471,20 @@ fn merge_federated_pages(
             Vec::new()
         }
     };
+    let pubmed_rows = match pubmed_leg {
+        Some(Ok(page)) => page.results,
+        Some(Err(err)) => {
+            warn!(?err, "PubMed search leg failed; continuing without it");
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
 
     match (pubtator_leg, europe_leg) {
         (Ok(pubtator_page), Ok(europe_page)) => {
             let mut merged = pubtator_page.results;
             merged.extend(europe_page.results);
+            merged.extend(pubmed_rows);
             merged.extend(semantic_scholar_rows);
             Ok(finalize_article_candidates(
                 merged, limit, offset, None, filters,
@@ -2412,6 +2496,7 @@ fn merge_federated_pages(
                 "Europe PMC search leg failed; returning PubTator-only results"
             );
             let mut rows = pubtator_page.results;
+            rows.extend(pubmed_rows);
             rows.extend(semantic_scholar_rows);
             Ok(finalize_article_candidates(
                 rows, limit, offset, None, filters,
@@ -2423,6 +2508,7 @@ fn merge_federated_pages(
                 "PubTator search leg failed; returning Europe PMC-only results"
             );
             let mut rows = europe_page.results;
+            rows.extend(pubmed_rows);
             rows.extend(semantic_scholar_rows);
             Ok(finalize_article_candidates(
                 rows, limit, offset, None, filters,
@@ -2431,6 +2517,58 @@ fn merge_federated_pages(
         (Err(pubtator_err), Err(europe_err)) => {
             warn!(?europe_err, "Europe PMC leg also failed");
             Err(pubtator_err)
+        }
+    }
+}
+
+async fn search_type_capable_page(
+    filters: &ArticleSearchFilters,
+    fetch_count: usize,
+    limit: usize,
+    offset: usize,
+) -> Result<SearchPage<ArticleSearchResult>, BioMcpError> {
+    let (europe_leg, pubmed_leg) = tokio::join!(
+        search_europepmc_page(filters, fetch_count, 0),
+        search_pubmed_page(filters, fetch_count, 0),
+    );
+
+    match (europe_leg, pubmed_leg) {
+        (Ok(europe_page), Ok(pubmed_page)) => {
+            let mut rows = europe_page.results;
+            rows.extend(pubmed_page.results);
+            Ok(finalize_article_candidates(
+                rows, limit, offset, None, filters,
+            ))
+        }
+        (Ok(europe_page), Err(err)) => {
+            warn!(
+                ?err,
+                "PubMed type-capable leg failed; returning Europe PMC-only results"
+            );
+            Ok(finalize_article_candidates(
+                europe_page.results,
+                limit,
+                offset,
+                europe_page.total,
+                filters,
+            ))
+        }
+        (Err(err), Ok(pubmed_page)) => {
+            warn!(
+                ?err,
+                "Europe PMC type-capable leg failed; returning PubMed-only results"
+            );
+            Ok(finalize_article_candidates(
+                pubmed_page.results,
+                limit,
+                offset,
+                pubmed_page.total,
+                filters,
+            ))
+        }
+        (Err(europe_err), Err(pubmed_err)) => {
+            warn!(?pubmed_err, "PubMed type-capable leg also failed");
+            Err(europe_err)
         }
     }
 }
@@ -2469,6 +2607,19 @@ async fn search_relevance_page(
                 filters,
             ))
         }
+        BackendPlan::PubMedOnly => {
+            let page = search_pubmed_page(filters, fetch_count, 0).await?;
+            Ok(finalize_article_candidates(
+                page.results,
+                limit,
+                offset,
+                page.total,
+                filters,
+            ))
+        }
+        BackendPlan::TypeCapable => {
+            search_type_capable_page(filters, fetch_count, limit, offset).await
+        }
         BackendPlan::Both => search_federated_page(filters, limit, offset).await,
     }
 }
@@ -2494,6 +2645,9 @@ pub async fn search_page(
     match plan {
         BackendPlan::EuropeOnly => search_europepmc_page(filters, limit, offset).await,
         BackendPlan::PubTatorOnly => search_pubtator_page(filters, limit, offset).await,
+        BackendPlan::PubMedOnly | BackendPlan::TypeCapable => {
+            search_relevance_page(filters, limit, offset, plan).await
+        }
         BackendPlan::Both => search_federated_page(filters, limit, offset).await,
     }
 }
@@ -3071,7 +3225,10 @@ mod tests {
             ArticleSourceFilter::from_flag("europepmc").expect("europepmc should parse"),
             ArticleSourceFilter::EuropePmc
         );
-        assert!(ArticleSourceFilter::from_flag("pubmed").is_err());
+        assert_eq!(
+            ArticleSourceFilter::from_flag("pubmed").expect("pubmed should parse"),
+            ArticleSourceFilter::PubMed
+        );
     }
 
     #[test]
@@ -3085,15 +3242,79 @@ mod tests {
     }
 
     #[test]
-    fn planner_rejects_pubtator_with_unsupported_strict_filters() {
+    fn planner_routes_pubmed_to_pubmed_only() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+
+        let plan =
+            plan_backends(&filters, ArticleSourceFilter::PubMed).expect("planner should work");
+        assert!(matches!(plan, BackendPlan::PubMedOnly));
+    }
+
+    #[test]
+    fn planner_routes_all_with_type_to_type_capable() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.article_type = Some("review".into());
+
+        let plan = plan_backends(&filters, ArticleSourceFilter::All).expect("planner should work");
+        assert!(matches!(plan, BackendPlan::TypeCapable));
+    }
+
+    #[test]
+    fn planner_routes_all_with_type_and_no_preprints_to_europe_only() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.article_type = Some("review".into());
+        filters.no_preprints = true;
+
+        let plan = plan_backends(&filters, ArticleSourceFilter::All).expect("planner should work");
+        assert!(matches!(plan, BackendPlan::EuropeOnly));
+    }
+
+    #[test]
+    fn planner_rejects_pubtator_type_with_pubmed_compatible_filters_and_suggests_supported_routes()
+    {
         let mut filters = empty_filters();
         filters.gene = Some("BRAF".into());
         filters.article_type = Some("review".into());
 
         let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
             .expect_err("planner should reject strict-only filter on pubtator");
-        assert!(err.to_string().contains("--type"));
-        assert!(err.to_string().contains("Europe PMC"));
+        let msg = err.to_string();
+        assert!(msg.contains("--type"));
+        assert!(msg.contains("--source europepmc"));
+        assert!(msg.contains("--source pubmed"));
+        assert!(msg.contains("remove --type"));
+    }
+
+    #[test]
+    fn planner_rejects_pubtator_open_access_without_suggesting_pubmed() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.open_access = true;
+
+        let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
+            .expect_err("planner should reject open-access on pubtator");
+        let msg = err.to_string();
+        assert!(msg.contains("--open-access"));
+        assert!(msg.contains("--source europepmc"));
+        assert!(!msg.contains("--source pubmed"));
+    }
+
+    #[test]
+    fn planner_rejects_pubtator_type_and_no_preprints_without_suggesting_pubmed() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.article_type = Some("review".into());
+        filters.no_preprints = true;
+
+        let err = plan_backends(&filters, ArticleSourceFilter::PubTator)
+            .expect_err("planner should reject incompatible type/no-preprints mix");
+        let msg = err.to_string();
+        assert!(msg.contains("--source europepmc"));
+        assert!(msg.contains("--no-preprints"));
+        assert!(!msg.contains("--source pubmed"));
     }
 
     #[test]
@@ -3122,13 +3343,25 @@ mod tests {
     }
 
     #[test]
+    fn build_pubmed_esearch_params_allows_federated_windows_above_user_limit() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+
+        let params =
+            build_pubmed_esearch_params(&filters, 75, 0).expect("pubmed params should build");
+
+        assert_eq!(params.retmax, 75);
+        assert_eq!(params.retstart, 0);
+    }
+
+    #[test]
     fn article_source_pubmed_display_name() {
         assert_eq!(ArticleSource::PubMed.display_name(), "PubMed");
     }
 
     #[test]
     fn article_source_pubmed_priority() {
-        assert_eq!(article_source_priority(ArticleSource::PubMed), 3);
+        assert_eq!(article_source_priority(ArticleSource::PubMed), 2);
     }
 
     #[test]
@@ -3469,24 +3702,101 @@ mod tests {
     }
 
     #[test]
-    fn article_type_limitation_note_is_emitted_for_all_and_europepmc() {
+    fn pubmed_only_routes_use_common_finalizer_for_sorting() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async {
+            let _guard = lock_env().await;
+            let server = MockServer::start().await;
+            let _pubmed_base = set_env_var("BIOMCP_PUBMED_BASE", Some(&server.uri()));
+            let mut filters = empty_filters();
+            filters.gene = Some("BRAF".into());
+            filters.sort = ArticleSort::Date;
+
+            Mock::given(method("GET"))
+                .and(path("/esearch.fcgi"))
+                .and(query_param("db", "pubmed"))
+                .and(query_param("retmode", "json"))
+                .and(query_param("retstart", "0"))
+                .and(query_param("retmax", "100"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "esearchresult": {
+                        "count": "2",
+                        "idlist": ["1", "2"]
+                    }
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            Mock::given(method("GET"))
+                .and(path("/esummary.fcgi"))
+                .and(query_param("db", "pubmed"))
+                .and(query_param("retmode", "json"))
+                .and(query_param("id", "1,2"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "result": {
+                        "uids": ["1", "2"],
+                        "1": {
+                            "uid": "1",
+                            "title": "Older title",
+                            "sortpubdate": "2024/01/01 00:00",
+                            "fulljournalname": "Nature",
+                            "source": "Nature"
+                        },
+                        "2": {
+                            "uid": "2",
+                            "title": "Newer title",
+                            "sortpubdate": "2025/02/01 00:00",
+                            "fulljournalname": "Nature",
+                            "source": "Nature"
+                        }
+                    }
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let page = search_page(&filters, 2, 0, ArticleSourceFilter::PubMed)
+                .await
+                .expect("pubmed search should succeed");
+            let pmids: Vec<&str> = page.results.iter().map(|row| row.pmid.as_str()).collect();
+            assert_eq!(pmids, vec!["2", "1"]);
+        });
+    }
+
+    #[test]
+    fn article_type_limitation_note_tracks_compatible_source_sets() {
         let mut filters = empty_filters();
         filters.gene = Some("BRAF".into());
         filters.article_type = Some("review".into());
 
-        assert!(
-            article_type_limitation_note(&filters, ArticleSourceFilter::All)
-                .as_deref()
-                .is_some_and(|value| value.contains("Europe PMC"))
+        assert_eq!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::All),
+            Some(
+                "Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering."
+                    .into()
+            )
         );
-        assert!(
-            article_type_limitation_note(&filters, ArticleSourceFilter::EuropePmc)
-                .as_deref()
-                .is_some_and(|value| value.contains("Europe PMC"))
+        assert_eq!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::EuropePmc),
+            None
         );
         assert_eq!(
             article_type_limitation_note(&filters, ArticleSourceFilter::PubTator),
             None
+        );
+        assert_eq!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::PubMed),
+            None
+        );
+
+        filters.no_preprints = true;
+        assert_eq!(
+            article_type_limitation_note(&filters, ArticleSourceFilter::All),
+            Some(
+                "Note: --type restricts this article search to Europe PMC. PubTator3 and Semantic Scholar do not support publication-type filtering, and PubMed does not support the other selected filters."
+                    .into()
+            )
         );
     }
 
@@ -3698,8 +4008,12 @@ mod tests {
             date: None,
             citation_count: None,
             influential_citation_count: None,
-            source: ArticleSource::PubTator,
-            matched_sources: vec![ArticleSource::PubTator, ArticleSource::SemanticScholar],
+            source: ArticleSource::PubMed,
+            matched_sources: vec![
+                ArticleSource::PubTator,
+                ArticleSource::PubMed,
+                ArticleSource::SemanticScholar,
+            ],
             score: None,
             is_retracted: Some(false),
             abstract_snippet: None,
@@ -3716,9 +4030,14 @@ mod tests {
         assert_eq!(summary.routing, vec!["planner=federated".to_string()]);
         assert!(summary.sources.contains(&"PubTator3".to_string()));
         assert!(summary.sources.contains(&"Europe PMC".to_string()));
+        assert!(summary.sources.contains(&"PubMed".to_string()));
         assert_eq!(
             summary.matched_sources,
-            vec!["PubTator3".to_string(), "Semantic Scholar".to_string()]
+            vec![
+                "PubTator3".to_string(),
+                "PubMed".to_string(),
+                "Semantic Scholar".to_string()
+            ]
         );
     }
 
@@ -3830,6 +4149,7 @@ mod tests {
         let merged = merge_federated_pages(
             Ok(pubtator_page),
             Ok(europe_page),
+            None,
             Ok(Vec::new()),
             3,
             0,
@@ -3861,6 +4181,7 @@ mod tests {
         let merged = merge_federated_pages(
             Ok(pubtator_page),
             Err(europe_err),
+            None,
             Ok(Vec::new()),
             2,
             0,
@@ -3895,6 +4216,7 @@ mod tests {
         let merged = merge_federated_pages(
             Err(pubtator_err),
             Ok(europe_page),
+            None,
             Ok(Vec::new()),
             2,
             0,
@@ -3947,6 +4269,7 @@ mod tests {
         let merged = merge_federated_pages(
             Err(pubtator_err),
             Ok(europe_page),
+            None,
             Ok(Vec::new()),
             1,
             1,
@@ -3974,6 +4297,7 @@ mod tests {
         let err = merge_federated_pages(
             Err(pubtator_err),
             Err(europe_err),
+            None,
             Ok(Vec::new()),
             10,
             0,
@@ -4007,6 +4331,7 @@ mod tests {
         let merged = merge_federated_pages(
             Ok(pubtator_page),
             Ok(europe_page),
+            None,
             Ok(Vec::new()),
             2,
             3,
@@ -4062,6 +4387,7 @@ mod tests {
         let citation_merged = merge_federated_pages(
             Ok(citation_pubtator_page),
             Ok(citation_europe_page),
+            None,
             Ok(Vec::new()),
             10,
             0,
@@ -4114,6 +4440,7 @@ mod tests {
         let date_merged = merge_federated_pages(
             Ok(date_pubtator_page),
             Ok(date_europe_page),
+            None,
             Ok(Vec::new()),
             10,
             0,
@@ -4648,6 +4975,7 @@ mod tests {
         let merged = merge_federated_pages(
             Ok(pubtator_page),
             Ok(europe_page),
+            None,
             Ok(Vec::new()),
             10,
             0,
