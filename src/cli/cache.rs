@@ -24,14 +24,168 @@ pub fn render_path() -> Result<String, BioMcpError> {
     Ok(config.cache_root.join("http").display().to_string())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct CacheStatsAgeRange {
+    pub(crate) oldest_ms: u64,
+    pub(crate) newest_ms: u64,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CacheStatsOrigin {
+    Env,
+    File,
+    Default,
+}
+
+impl CacheStatsOrigin {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Env => "env",
+            Self::File => "file",
+            Self::Default => "default",
+        }
+    }
+}
+
+impl From<crate::cache::ConfigOrigin> for CacheStatsOrigin {
+    fn from(value: crate::cache::ConfigOrigin) -> Self {
+        match value {
+            crate::cache::ConfigOrigin::Env => Self::Env,
+            crate::cache::ConfigOrigin::File => Self::File,
+            crate::cache::ConfigOrigin::Default => Self::Default,
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct CacheStatsReport {
+    pub(crate) path: String,
+    pub(crate) blob_bytes: u64,
+    pub(crate) blob_count: usize,
+    pub(crate) orphan_count: usize,
+    pub(crate) age_range: Option<CacheStatsAgeRange>,
+    pub(crate) max_size_bytes: u64,
+    pub(crate) max_size_origin: CacheStatsOrigin,
+    pub(crate) max_age_secs: u64,
+    pub(crate) max_age_origin: CacheStatsOrigin,
+}
+
+impl CacheStatsReport {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn to_markdown(&self) -> String {
+        let age_display = match &self.age_range {
+            Some(range) => format!("{} .. {}", range.oldest_ms, range.newest_ms),
+            None => "none".to_string(),
+        };
+        [
+            format!("| Path | {} |", self.path),
+            format!("| Blob bytes | {} |", self.blob_bytes),
+            format!("| Blob files | {} |", self.blob_count),
+            format!("| Orphan blobs | {} |", self.orphan_count),
+            format!("| Age range | {age_display} |"),
+            format!(
+                "| Max size | {} bytes ({}) |",
+                self.max_size_bytes,
+                self.max_size_origin.as_str()
+            ),
+            format!(
+                "| Max age | {} s ({}) |",
+                self.max_age_secs,
+                self.max_age_origin.as_str()
+            ),
+            String::new(), // trailing newline
+        ]
+        .join("\n")
+    }
+}
+
+fn checked_timestamp_ms(timestamp: u128) -> Result<u64, BioMcpError> {
+    u64::try_from(timestamp).map_err(|_| {
+        BioMcpError::InvalidArgument(format!(
+            "cache entry timestamp {timestamp} does not fit into u64"
+        ))
+    })
+}
+
+pub(crate) fn build_cache_stats_report(
+    snapshot: &crate::cache::CacheSnapshot,
+    config: &crate::cache::ResolvedCacheConfig,
+) -> Result<CacheStatsReport, BioMcpError> {
+    let age_range = match (
+        snapshot.entries.iter().map(|entry| entry.time_ms).min(),
+        snapshot.entries.iter().map(|entry| entry.time_ms).max(),
+    ) {
+        (Some(oldest), Some(newest)) => Some(CacheStatsAgeRange {
+            oldest_ms: checked_timestamp_ms(oldest)?,
+            newest_ms: checked_timestamp_ms(newest)?,
+        }),
+        (None, None) => None,
+        _ => unreachable!("min/max over the same iterator source must agree"),
+    };
+
+    Ok(CacheStatsReport {
+        path: snapshot.cache_path.display().to_string(),
+        blob_bytes: snapshot.blobs.iter().map(|blob| blob.size_bytes).sum(),
+        blob_count: snapshot.blobs.len(),
+        orphan_count: snapshot
+            .blobs
+            .iter()
+            .filter(|blob| blob.refcount == 0)
+            .count(),
+        age_range,
+        max_size_bytes: config.max_size,
+        max_size_origin: CacheStatsOrigin::from(config.origins.max_size),
+        max_age_secs: config.max_age.as_secs(),
+        max_age_origin: CacheStatsOrigin::from(config.origins.max_age),
+    })
+}
+
+#[allow(dead_code)]
+pub(crate) fn collect_cache_stats_report() -> Result<CacheStatsReport, BioMcpError> {
+    collect_cache_stats_report_with(
+        crate::cache::resolve_cache_config,
+        crate::cache::snapshot_cache,
+    )
+}
+
+fn collect_cache_stats_report_with<R, S>(
+    resolve_config: R,
+    snapshotter: S,
+) -> Result<CacheStatsReport, BioMcpError>
+where
+    R: FnOnce() -> Result<crate::cache::ResolvedCacheConfig, BioMcpError>,
+    S: FnOnce(
+        &std::path::Path,
+    ) -> Result<crate::cache::CacheSnapshot, crate::cache::CachePlannerError>,
+{
+    let config = resolve_config()?;
+    let http_path = config.cache_root.join("http");
+    let snapshot =
+        snapshotter(&http_path).map_err(|err| BioMcpError::Io(std::io::Error::other(err)))?;
+    build_cache_stats_report(&snapshot, &config)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use ssri::Integrity;
     use tokio::sync::MutexGuard;
 
-    use super::render_path;
+    use super::{
+        CacheStatsAgeRange, CacheStatsOrigin, CacheStatsReport, build_cache_stats_report,
+        collect_cache_stats_report_with, render_path,
+    };
+    use crate::cache::{
+        CacheBlob, CacheConfigOrigins, CacheEntry, CacheSnapshot, ConfigOrigin, ResolvedCacheConfig,
+    };
     use crate::error::BioMcpError;
 
     fn env_lock() -> MutexGuard<'static, ()> {
@@ -252,5 +406,252 @@ mod tests {
         assert_eq!(rendered, env_cache.join("http").display().to_string());
         assert!(legacy.exists());
         assert!(!env_cache.join("http").exists());
+    }
+
+    fn test_integrity(bytes: &[u8]) -> Integrity {
+        Integrity::from(bytes)
+    }
+
+    fn test_entry(key: &str, bytes: &[u8], time_ms: u128) -> CacheEntry {
+        CacheEntry {
+            key: key.to_string(),
+            integrity: test_integrity(bytes),
+            time_ms,
+            size_bytes: bytes.len() as u64,
+        }
+    }
+
+    fn test_blob(label: &str, bytes: &[u8], refcount: usize) -> CacheBlob {
+        CacheBlob {
+            integrity: test_integrity(bytes),
+            path: PathBuf::from(format!("content-v2/mock/{label}.blob")),
+            size_bytes: bytes.len() as u64,
+            refcount,
+        }
+    }
+
+    fn test_snapshot(
+        cache_path: impl Into<PathBuf>,
+        entries: Vec<CacheEntry>,
+        blobs: Vec<CacheBlob>,
+    ) -> CacheSnapshot {
+        CacheSnapshot {
+            cache_path: cache_path.into(),
+            entries,
+            blobs,
+        }
+    }
+
+    fn test_config(
+        cache_root: impl Into<PathBuf>,
+        max_size: u64,
+        max_age_secs: u64,
+        origins: CacheConfigOrigins,
+    ) -> ResolvedCacheConfig {
+        ResolvedCacheConfig {
+            cache_root: cache_root.into(),
+            max_size,
+            max_age: Duration::from_secs(max_age_secs),
+            origins,
+        }
+    }
+
+    #[test]
+    fn build_cache_stats_report_empty_snapshot_has_zero_counts_null_age_and_default_origins() {
+        let snapshot = test_snapshot("/tmp/cache/http", Vec::new(), Vec::new());
+        let config = test_config(
+            "/tmp/cache",
+            10_000_000_000,
+            86_400,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Default,
+                max_age: ConfigOrigin::Default,
+            },
+        );
+
+        let report = build_cache_stats_report(&snapshot, &config).expect("empty snapshot report");
+
+        assert_eq!(
+            report,
+            CacheStatsReport {
+                path: "/tmp/cache/http".into(),
+                blob_bytes: 0,
+                blob_count: 0,
+                orphan_count: 0,
+                age_range: None,
+                max_size_bytes: 10_000_000_000,
+                max_size_origin: CacheStatsOrigin::Default,
+                max_age_secs: 86_400,
+                max_age_origin: CacheStatsOrigin::Default,
+            }
+        );
+
+        let json = crate::render::json::to_pretty(&report).expect("json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert!(value["age_range"].is_null());
+        assert_eq!(value["max_size_origin"], "default");
+        assert_eq!(value["max_age_origin"], "default");
+        assert!(report.to_markdown().contains("| Age range | none |"));
+    }
+
+    #[test]
+    fn build_cache_stats_report_counts_orphans_and_includes_all_blob_bytes() {
+        let snapshot = test_snapshot(
+            "/tmp/cache/http",
+            vec![test_entry("retained", b"live-bytes", 100)],
+            vec![
+                test_blob("retained", b"live-bytes", 1),
+                test_blob("orphan", b"orphan-bytes", 0),
+            ],
+        );
+        let config = test_config(
+            "/tmp/cache",
+            1_024,
+            3_600,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Default,
+                max_age: ConfigOrigin::Default,
+            },
+        );
+
+        let report = build_cache_stats_report(&snapshot, &config).expect("report");
+        assert_eq!(
+            report.blob_bytes,
+            b"live-bytes".len() as u64 + b"orphan-bytes".len() as u64
+        );
+        assert_eq!(report.blob_count, 2);
+        assert_eq!(report.orphan_count, 1);
+    }
+
+    #[test]
+    fn build_cache_stats_report_uses_index_entry_timestamps_only_for_age_range() {
+        let snapshot = test_snapshot(
+            "/tmp/cache/http",
+            vec![
+                test_entry("older", b"shared", 100),
+                test_entry("newer", b"other", 500),
+            ],
+            vec![
+                test_blob("shared", b"shared", 1),
+                test_blob("other", b"other", 1),
+                test_blob("orphan", b"orphan", 0),
+            ],
+        );
+        let config = test_config(
+            "/tmp/cache",
+            2_048,
+            7_200,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Default,
+                max_age: ConfigOrigin::Default,
+            },
+        );
+
+        let report = build_cache_stats_report(&snapshot, &config).expect("report");
+        assert_eq!(
+            report.age_range,
+            Some(CacheStatsAgeRange {
+                oldest_ms: 100,
+                newest_ms: 500,
+            })
+        );
+        assert!(
+            report
+                .to_markdown()
+                .lines()
+                .any(|line| line == "| Age range | 100 .. 500 |")
+        );
+    }
+
+    #[test]
+    fn cache_stats_report_json_serializes_env_and_file_origins_lowercase() {
+        let snapshot = test_snapshot("/tmp/cache/http", Vec::new(), Vec::new());
+        let config = test_config(
+            "/tmp/cache",
+            5_000,
+            7_200,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Env,
+                max_age: ConfigOrigin::File,
+            },
+        );
+
+        let report = build_cache_stats_report(&snapshot, &config).expect("report");
+        let json = crate::render::json::to_pretty(&report).expect("json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(value["max_size_origin"], "env");
+        assert_eq!(value["max_age_origin"], "file");
+    }
+
+    #[test]
+    fn cache_stats_report_markdown_is_heading_free_and_stable() {
+        let report = CacheStatsReport {
+            path: "/tmp/cache/http".into(),
+            blob_bytes: 42,
+            blob_count: 3,
+            orphan_count: 1,
+            age_range: Some(CacheStatsAgeRange {
+                oldest_ms: 100,
+                newest_ms: 500,
+            }),
+            max_size_bytes: 5_000,
+            max_size_origin: CacheStatsOrigin::Env,
+            max_age_secs: 7_200,
+            max_age_origin: CacheStatsOrigin::File,
+        };
+
+        assert_eq!(
+            report.to_markdown(),
+            "\
+| Path | /tmp/cache/http |
+| Blob bytes | 42 |
+| Blob files | 3 |
+| Orphan blobs | 1 |
+| Age range | 100 .. 500 |
+| Max size | 5000 bytes (env) |
+| Max age | 7200 s (file) |
+"
+        );
+    }
+
+    #[test]
+    fn collect_cache_stats_report_calls_snapshot_once_for_resolved_http_path() {
+        let config = test_config(
+            "/tmp/resolved-cache",
+            5_000,
+            7_200,
+            CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Env,
+                max_age: ConfigOrigin::File,
+            },
+        );
+        let calls = Cell::new(0);
+        let seen_path = RefCell::new(None);
+
+        let report = collect_cache_stats_report_with(
+            || Ok(config),
+            |path: &Path| {
+                calls.set(calls.get() + 1);
+                *seen_path.borrow_mut() = Some(path.to_path_buf());
+                Ok(test_snapshot(
+                    path.to_path_buf(),
+                    vec![test_entry("entry", b"blob", 100)],
+                    vec![test_blob("blob", b"blob", 1)],
+                ))
+            },
+        )
+        .expect("collector report");
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            seen_path.borrow().as_ref(),
+            Some(&PathBuf::from("/tmp/resolved-cache/http"))
+        );
+        assert_eq!(report.path, "/tmp/resolved-cache/http");
     }
 }
