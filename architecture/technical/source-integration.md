@@ -237,11 +237,14 @@ generic multi-source rule above:
    it through dedup on the merged `ArticleSearchResult`. Cross-source append
    order is not part of the relevance contract.
 4. Sort federated article rows with explicit ranking signals rather than hidden
-   source identity. The target ordering is lexical evidence first, then
-   source-aware rescue for weak lexical rows, then study/review cues, citation
-   support, source-local backend position, and stable ID.
+   source identity. The target ordering is calibrated PubMed rescue first, then
+   lexical evidence, then study/review cues, citation support, source-local
+   backend position, and stable ID. The calibrated rescue only exists for
+   PubMed-backed weak lexical rows where PubMed is local position `0`.
 5. Constrain source-aware rescue so it explains PubMed-unique wins over generic
-   zero-hit noise without becoming a blanket "PubMed beats Europe PMC" rule.
+   zero-hit noise without becoming a blanket "PubMed beats Europe PMC" rule:
+   PubMed-unique rows may rescue, and merged rows only rescue when PubMed is
+   strictly source-leading over every non-PubMed contributor.
 6. Preserve provenance on the result row and, when ranking metadata is
    serialized, expose enough signal detail that a boosted PubMed-unique row is
    explainable in JSON output.
@@ -253,8 +256,9 @@ The article-specific invariants are:
 - source-local rank is comparable within a source, not a proxy for source
   priority across the whole federation;
 - merge order must not be observable as a relevance penalty; and
-- PubMed-unique rescue may separate strong PubMed evidence from other zero-hit
-  rows, but literal lexical matches still outrank rescue-only rows by default.
+- top-ranked weak PubMed-unique or strictly PubMed-led rows may outrank
+  lexically stronger competitors when calibrated rescue fires, but only when
+  PubMed is local position `0` and the row stays in the weak lexical tiers.
 
 ## Non-JSON Transport Guidance
 

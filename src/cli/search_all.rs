@@ -2134,6 +2134,9 @@ mod tests {
                 all_anchors_in_title: true,
                 all_anchors_in_text: true,
                 study_or_review_cue: true,
+                pubmed_rescue: false,
+                pubmed_rescue_kind: None,
+                pubmed_source_position: None,
             }),
             normalized_title: "braf melanoma review".into(),
             normalized_abstract: "abstract".into(),
@@ -2151,6 +2154,9 @@ mod tests {
             serde_json::Value::String("semanticscholar".into())
         );
         assert_eq!(rows[0]["ranking"]["study_or_review_cue"], true);
+        assert_eq!(rows[0]["ranking"]["pubmed_rescue"], false);
+        assert!(rows[0]["ranking"]["pubmed_rescue_kind"].is_null());
+        assert!(rows[0]["ranking"]["pubmed_source_position"].is_null());
     }
 
     #[test]

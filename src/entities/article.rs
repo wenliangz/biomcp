@@ -176,6 +176,13 @@ pub struct ArticleSearchResult {
     pub source_local_position: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArticlePubMedRescueKind {
+    Unique,
+    Led,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArticleRankingMetadata {
     pub directness_tier: u8,
@@ -186,6 +193,24 @@ pub struct ArticleRankingMetadata {
     pub all_anchors_in_title: bool,
     pub all_anchors_in_text: bool,
     pub study_or_review_cue: bool,
+    #[serde(default)]
+    pub pubmed_rescue: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pubmed_rescue_kind: Option<ArticlePubMedRescueKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pubmed_source_position: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ArticleSourcePosition {
+    source: ArticleSource,
+    local_position: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ArticleCandidate {
+    row: ArticleSearchResult,
+    source_positions: Vec<ArticleSourcePosition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -368,11 +393,13 @@ const FEDERATED_PAGE_SIZE_CAP: usize = if EUROPE_PMC_PAGE_SIZE < PUBTATOR_PAGE_S
 };
 const MAX_FEDERATED_FETCH_RESULTS: usize = MAX_PAGE_FETCHES * FEDERATED_PAGE_SIZE_CAP;
 const FULLTEXT_CACHE_VERSION: &str = "jats-v1";
+const PUBMED_RESCUE_POSITION_MAX: usize = 0;
 const INVALID_ARTICLE_ID_MSG: &str = "\
 Unsupported identifier format. BioMCP resolves PMID (digits only, e.g., 22663011), \
 PMCID (starts with PMC, e.g., PMC9984800), and DOI (starts with 10., \
 e.g., 10.1056/NEJMoa1203421). publisher PIIs (e.g., S1535610826000103) are not \
 indexed by PubMed or Europe PMC and cannot be resolved.";
+pub const ARTICLE_RELEVANCE_RANKING_POLICY: &str = "calibrated PubMed rescue + lexical directness (top-ranked weak PubMed unique/led rows > title coverage > title+abstract coverage > study/review cue > citation support > source-local position)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendPlan {
@@ -966,6 +993,30 @@ fn ensure_matched_sources(row: &mut ArticleSearchResult) {
     row.matched_sources.dedup();
 }
 
+fn article_candidate_from_row(mut row: ArticleSearchResult) -> ArticleCandidate {
+    ensure_matched_sources(&mut row);
+    ArticleCandidate {
+        source_positions: vec![ArticleSourcePosition {
+            source: row.source,
+            local_position: row.source_local_position,
+        }],
+        row,
+    }
+}
+
+fn collapse_source_positions(source_positions: &mut Vec<ArticleSourcePosition>) {
+    source_positions
+        .sort_by_key(|entry| (article_source_priority(entry.source), entry.local_position));
+    source_positions.dedup_by_key(|entry| entry.source);
+}
+
+fn min_source_local_position(source_positions: &[ArticleSourcePosition]) -> Option<usize> {
+    source_positions
+        .iter()
+        .map(|entry| entry.local_position)
+        .min()
+}
+
 fn article_rows_overlap(left: &ArticleSearchResult, right: &ArticleSearchResult) -> bool {
     let left_pmid = normalize_row_identifier(Some(&left.pmid));
     let right_pmid = normalize_row_identifier(Some(&right.pmid));
@@ -997,55 +1048,72 @@ fn merge_missing_u64(target: &mut Option<u64>, incoming: Option<u64>) {
     }
 }
 
-fn merge_article_candidate(target: &mut ArticleSearchResult, incoming: ArticleSearchResult) {
-    merge_missing_string(&mut target.pmcid, incoming.pmcid);
-    merge_missing_string(&mut target.doi, incoming.doi);
-    if target.pmid.trim().is_empty() && !incoming.pmid.trim().is_empty() {
-        target.pmid = incoming.pmid;
+fn merge_article_candidate(target: &mut ArticleCandidate, incoming: ArticleCandidate) {
+    let ArticleCandidate {
+        row: incoming_row,
+        mut source_positions,
+    } = incoming;
+    let target_row = &mut target.row;
+    merge_missing_string(&mut target_row.pmcid, incoming_row.pmcid);
+    merge_missing_string(&mut target_row.doi, incoming_row.doi);
+    if target_row.pmid.trim().is_empty() && !incoming_row.pmid.trim().is_empty() {
+        target_row.pmid = incoming_row.pmid;
     }
-    if target.title.trim().is_empty() && !incoming.title.trim().is_empty() {
-        target.title = incoming.title;
+    if target_row.title.trim().is_empty() && !incoming_row.title.trim().is_empty() {
+        target_row.title = incoming_row.title;
     }
-    merge_missing_string(&mut target.journal, incoming.journal);
-    merge_missing_string(&mut target.date, incoming.date);
-    merge_missing_u64(&mut target.citation_count, incoming.citation_count);
+    merge_missing_string(&mut target_row.journal, incoming_row.journal);
+    merge_missing_string(&mut target_row.date, incoming_row.date);
+    merge_missing_u64(&mut target_row.citation_count, incoming_row.citation_count);
     merge_missing_u64(
-        &mut target.influential_citation_count,
-        incoming.influential_citation_count,
+        &mut target_row.influential_citation_count,
+        incoming_row.influential_citation_count,
     );
-    if target.score.is_none() {
-        target.score = incoming.score;
+    if target_row.score.is_none() {
+        target_row.score = incoming_row.score;
     }
-    if target.is_retracted.is_none() && incoming.is_retracted.is_some() {
-        target.is_retracted = incoming.is_retracted;
+    if target_row.is_retracted.is_none() && incoming_row.is_retracted.is_some() {
+        target_row.is_retracted = incoming_row.is_retracted;
     }
-    merge_missing_string(&mut target.abstract_snippet, incoming.abstract_snippet);
-    if target.ranking.is_none() {
-        target.ranking = incoming.ranking;
+    merge_missing_string(
+        &mut target_row.abstract_snippet,
+        incoming_row.abstract_snippet,
+    );
+    if target_row.ranking.is_none() {
+        target_row.ranking = incoming_row.ranking;
     }
-    if target.normalized_title.is_empty() && !incoming.normalized_title.is_empty() {
-        target.normalized_title = incoming.normalized_title;
+    if target_row.normalized_title.is_empty() && !incoming_row.normalized_title.is_empty() {
+        target_row.normalized_title = incoming_row.normalized_title;
     }
-    if target.normalized_abstract.is_empty() && !incoming.normalized_abstract.is_empty() {
-        target.normalized_abstract = incoming.normalized_abstract;
+    if target_row.normalized_abstract.is_empty() && !incoming_row.normalized_abstract.is_empty() {
+        target_row.normalized_abstract = incoming_row.normalized_abstract;
     }
-    merge_missing_string(&mut target.publication_type, incoming.publication_type);
-    target.source_local_position = target
-        .source_local_position
-        .min(incoming.source_local_position);
-    target.matched_sources.extend(incoming.matched_sources);
-    ensure_matched_sources(target);
+    merge_missing_string(
+        &mut target_row.publication_type,
+        incoming_row.publication_type,
+    );
+    target_row
+        .matched_sources
+        .extend(incoming_row.matched_sources);
+    ensure_matched_sources(target_row);
+    target.source_positions.append(&mut source_positions);
+    collapse_source_positions(&mut target.source_positions);
+    if let Some(local_position) = min_source_local_position(&target.source_positions) {
+        target_row.source_local_position = local_position;
+    }
 }
 
-fn merge_article_candidates(results: Vec<ArticleSearchResult>) -> Vec<ArticleSearchResult> {
-    let mut merged: Vec<ArticleSearchResult> = Vec::with_capacity(results.len());
+fn merge_article_candidates(results: Vec<ArticleSearchResult>) -> Vec<ArticleCandidate> {
+    let mut merged: Vec<ArticleCandidate> = Vec::with_capacity(results.len());
 
-    for mut row in results {
-        ensure_matched_sources(&mut row);
+    for row in results {
+        let row = article_candidate_from_row(row);
         let matches = merged
             .iter()
             .enumerate()
-            .filter_map(|(idx, existing)| article_rows_overlap(existing, &row).then_some(idx))
+            .filter_map(|(idx, existing)| {
+                article_rows_overlap(&existing.row, &row.row).then_some(idx)
+            })
             .collect::<Vec<_>>();
 
         if matches.is_empty() {
@@ -1169,24 +1237,67 @@ fn has_study_or_review_cue(row: &ArticleSearchResult) -> bool {
     .any(|cue| title.contains(cue) || publication_type.contains(cue))
 }
 
-fn rank_articles_by_directness(rows: &mut [ArticleSearchResult], filters: &ArticleSearchFilters) {
+fn pubmed_rescue_metadata(
+    row: &ArticleSearchResult,
+    source_positions: &[ArticleSourcePosition],
+    directness_tier: u8,
+) -> (bool, Option<ArticlePubMedRescueKind>, Option<usize>) {
+    let Some(pubmed_position) = source_positions
+        .iter()
+        .find(|entry| entry.source == ArticleSource::PubMed)
+        .map(|entry| entry.local_position)
+    else {
+        return (false, None, None);
+    };
+
+    if pubmed_position > PUBMED_RESCUE_POSITION_MAX || directness_tier > 1 {
+        return (false, None, None);
+    }
+
+    let pubmed_unique = matches!(row.matched_sources.as_slice(), [ArticleSource::PubMed]);
+    let has_non_pubmed_source = source_positions
+        .iter()
+        .any(|entry| entry.source != ArticleSource::PubMed);
+    let pubmed_led = row.matched_sources.contains(&ArticleSource::PubMed)
+        && has_non_pubmed_source
+        && source_positions
+            .iter()
+            .filter(|entry| entry.source != ArticleSource::PubMed)
+            .all(|entry| pubmed_position < entry.local_position);
+
+    let pubmed_rescue_kind = if pubmed_unique {
+        Some(ArticlePubMedRescueKind::Unique)
+    } else if pubmed_led {
+        Some(ArticlePubMedRescueKind::Led)
+    } else {
+        None
+    };
+
+    (
+        pubmed_rescue_kind.is_some(),
+        pubmed_rescue_kind,
+        pubmed_rescue_kind.map(|_| pubmed_position),
+    )
+}
+
+fn rank_articles_by_directness(rows: &mut [ArticleCandidate], filters: &ArticleSearchFilters) {
     let anchors = build_anchor_set(filters);
 
     for row in rows.iter_mut() {
-        ensure_matched_sources(row);
+        ensure_matched_sources(&mut row.row);
         let title_hits = anchors
             .iter()
-            .filter(|anchor| anchor_matches_text(&row.normalized_title, anchor))
+            .filter(|anchor| anchor_matches_text(&row.row.normalized_title, anchor))
             .count();
         let abstract_hits = anchors
             .iter()
-            .filter(|anchor| anchor_matches_text(&row.normalized_abstract, anchor))
+            .filter(|anchor| anchor_matches_text(&row.row.normalized_abstract, anchor))
             .count();
         let combined_hits = anchors
             .iter()
             .filter(|anchor| {
-                anchor_matches_text(&row.normalized_title, anchor)
-                    || anchor_matches_text(&row.normalized_abstract, anchor)
+                anchor_matches_text(&row.row.normalized_title, anchor)
+                    || anchor_matches_text(&row.row.normalized_abstract, anchor)
             })
             .count();
         let anchor_count = anchors.len();
@@ -1201,8 +1312,11 @@ fn rank_articles_by_directness(rows: &mut [ArticleSearchResult], filters: &Artic
         } else {
             0
         };
+        let study_or_review_cue = has_study_or_review_cue(&row.row);
+        let (pubmed_rescue, pubmed_rescue_kind, pubmed_source_position) =
+            pubmed_rescue_metadata(&row.row, &row.source_positions, directness_tier);
 
-        row.ranking = Some(ArticleRankingMetadata {
+        row.row.ranking = Some(ArticleRankingMetadata {
             directness_tier,
             anchor_count: anchor_count.min(u8::MAX as usize) as u8,
             title_anchor_hits: title_hits.min(u8::MAX as usize) as u8,
@@ -1210,16 +1324,24 @@ fn rank_articles_by_directness(rows: &mut [ArticleSearchResult], filters: &Artic
             combined_anchor_hits: combined_hits.min(u8::MAX as usize) as u8,
             all_anchors_in_title,
             all_anchors_in_text,
-            study_or_review_cue: has_study_or_review_cue(row),
+            study_or_review_cue,
+            pubmed_rescue,
+            pubmed_rescue_kind,
+            pubmed_source_position,
         });
     }
 
     rows.sort_by(|left, right| {
-        let left_ranking = left.ranking.as_ref();
-        let right_ranking = right.ranking.as_ref();
+        let left_ranking = left.row.ranking.as_ref();
+        let right_ranking = right.row.ranking.as_ref();
         right_ranking
-            .map(|ranking| ranking.directness_tier)
-            .cmp(&left_ranking.map(|ranking| ranking.directness_tier))
+            .map(|ranking| ranking.pubmed_rescue)
+            .cmp(&left_ranking.map(|ranking| ranking.pubmed_rescue))
+            .then_with(|| {
+                right_ranking
+                    .map(|ranking| ranking.directness_tier)
+                    .cmp(&left_ranking.map(|ranking| ranking.directness_tier))
+            })
             .then_with(|| {
                 right_ranking
                     .map(|ranking| ranking.title_anchor_hits)
@@ -1235,33 +1357,40 @@ fn rank_articles_by_directness(rows: &mut [ArticleSearchResult], filters: &Artic
                     .map(|ranking| ranking.study_or_review_cue)
                     .cmp(&left_ranking.map(|ranking| ranking.study_or_review_cue))
             })
-            .then_with(|| compare_optional_citations_desc(Some(left), Some(right)))
+            .then_with(|| compare_optional_citations_desc(Some(&left.row), Some(&right.row)))
             .then_with(|| {
                 right
+                    .row
                     .influential_citation_count
-                    .cmp(&left.influential_citation_count)
+                    .cmp(&left.row.influential_citation_count)
             })
-            .then_with(|| left.source_local_position.cmp(&right.source_local_position))
-            .then_with(|| stable_article_identifier(left).cmp(&stable_article_identifier(right)))
+            .then_with(|| {
+                left.row
+                    .source_local_position
+                    .cmp(&right.row.source_local_position)
+            })
+            .then_with(|| {
+                stable_article_identifier(&left.row).cmp(&stable_article_identifier(&right.row))
+            })
     });
 }
 
 fn sort_article_rows(
-    rows: &mut [ArticleSearchResult],
+    rows: &mut [ArticleCandidate],
     sort: ArticleSort,
     filters: &ArticleSearchFilters,
 ) {
     match sort {
         ArticleSort::Relevance => rank_articles_by_directness(rows, filters),
         ArticleSort::Citations => rows.sort_by(|left, right| {
-            compare_optional_citations_desc(Some(left), Some(right))
-                .then_with(|| compare_optional_dates_desc(Some(left), Some(right)))
-                .then_with(|| left.pmid.cmp(&right.pmid))
+            compare_optional_citations_desc(Some(&left.row), Some(&right.row))
+                .then_with(|| compare_optional_dates_desc(Some(&left.row), Some(&right.row)))
+                .then_with(|| left.row.pmid.cmp(&right.row.pmid))
         }),
         ArticleSort::Date => rows.sort_by(|left, right| {
-            compare_optional_dates_desc(Some(left), Some(right))
-                .then_with(|| compare_optional_citations_desc(Some(left), Some(right)))
-                .then_with(|| left.pmid.cmp(&right.pmid))
+            compare_optional_dates_desc(Some(&left.row), Some(&right.row))
+                .then_with(|| compare_optional_citations_desc(Some(&left.row), Some(&right.row)))
+                .then_with(|| left.row.pmid.cmp(&right.row.pmid))
         }),
     }
 }
@@ -2436,6 +2565,10 @@ fn finalize_article_candidates(
 
     let mut rows = merge_article_candidates(rows);
     sort_article_rows(&mut rows, filters.sort, filters);
+    let mut rows = rows
+        .into_iter()
+        .map(|candidate| candidate.row)
+        .collect::<Vec<_>>();
     rows.retain(|row| !row.pmid.trim().is_empty());
     rows.drain(0..offset.min(rows.len()));
     rows.truncate(limit);
@@ -4333,6 +4466,21 @@ mod tests {
         }
     }
 
+    fn rank_result_rows_by_directness(
+        rows: &mut [ArticleSearchResult],
+        filters: &ArticleSearchFilters,
+    ) {
+        let mut candidates = rows
+            .iter()
+            .cloned()
+            .map(article_candidate_from_row)
+            .collect::<Vec<_>>();
+        rank_articles_by_directness(&mut candidates, filters);
+        for (slot, candidate) in rows.iter_mut().zip(candidates.into_iter()) {
+            *slot = candidate.row;
+        }
+    }
+
     #[test]
     fn merge_federated_pages_dedups_with_pubtator_priority() {
         let pubtator_page = SearchPage::offset(
@@ -5501,26 +5649,26 @@ mod tests {
         ]);
 
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].source, ArticleSource::PubTator);
-        assert_eq!(merged[0].pmid, "100");
-        assert_eq!(merged[0].pmcid.as_deref(), Some("PMC100"));
-        assert_eq!(merged[0].doi.as_deref(), Some("10.1000/example"));
+        assert_eq!(merged[0].row.source, ArticleSource::PubTator);
+        assert_eq!(merged[0].row.pmid, "100");
+        assert_eq!(merged[0].row.pmcid.as_deref(), Some("PMC100"));
+        assert_eq!(merged[0].row.doi.as_deref(), Some("10.1000/example"));
         assert_eq!(
-            merged[0].matched_sources,
+            merged[0].row.matched_sources,
             vec![
                 ArticleSource::PubTator,
                 ArticleSource::EuropePmc,
                 ArticleSource::SemanticScholar,
             ]
         );
-        assert_eq!(merged[0].citation_count, Some(15));
-        assert_eq!(merged[0].influential_citation_count, Some(7));
+        assert_eq!(merged[0].row.citation_count, Some(15));
+        assert_eq!(merged[0].row.influential_citation_count, Some(7));
         assert_eq!(
-            merged[0].abstract_snippet.as_deref(),
+            merged[0].row.abstract_snippet.as_deref(),
             Some("Europe abstract")
         );
-        assert_eq!(merged[0].is_retracted, Some(false));
-        assert_eq!(merged[0].source_local_position, 1);
+        assert_eq!(merged[0].row.is_retracted, Some(false));
+        assert_eq!(merged[0].row.source_local_position, 1);
     }
 
     #[test]
@@ -5533,10 +5681,41 @@ mod tests {
         let merged = merge_article_candidates(vec![europe, pubmed]);
 
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].source_local_position, 1);
+        assert_eq!(merged[0].row.source_local_position, 1);
         assert_eq!(
-            merged[0].matched_sources,
+            merged[0].row.matched_sources,
             vec![ArticleSource::EuropePmc, ArticleSource::PubMed]
+        );
+    }
+
+    #[test]
+    fn pubmed_led_rescue_preserves_per_source_positions_through_merge() {
+        let mut europe = row("100", ArticleSource::EuropePmc);
+        europe.source_local_position = 4;
+        let mut pubmed = row("100", ArticleSource::PubMed);
+        pubmed.source_local_position = 0;
+        let mut semantic = row("100", ArticleSource::SemanticScholar);
+        semantic.source_local_position = 2;
+
+        let merged = merge_article_candidates(vec![europe, pubmed, semantic]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].source_positions,
+            vec![
+                ArticleSourcePosition {
+                    source: ArticleSource::EuropePmc,
+                    local_position: 4,
+                },
+                ArticleSourcePosition {
+                    source: ArticleSource::PubMed,
+                    local_position: 0,
+                },
+                ArticleSourcePosition {
+                    source: ArticleSource::SemanticScholar,
+                    local_position: 2,
+                },
+            ]
         );
     }
 
@@ -5577,7 +5756,7 @@ mod tests {
             ..row("100", ArticleSource::EuropePmc)
         }];
 
-        rank_articles_by_directness(&mut rows, &filters);
+        rank_result_rows_by_directness(&mut rows, &filters);
 
         let ranking = rows[0].ranking.as_ref().expect("ranking should be present");
         assert_eq!(ranking.anchor_count, 3);
@@ -5595,7 +5774,7 @@ mod tests {
             ..row("100", ArticleSource::EuropePmc)
         }];
 
-        rank_articles_by_directness(&mut rows, &filters);
+        rank_result_rows_by_directness(&mut rows, &filters);
 
         let ranking = rows[0].ranking.as_ref().expect("ranking should be present");
         assert_eq!(ranking.anchor_count, 3);
@@ -5613,7 +5792,7 @@ mod tests {
             ..row("100", ArticleSource::EuropePmc)
         }];
 
-        rank_articles_by_directness(&mut rows, &filters);
+        rank_result_rows_by_directness(&mut rows, &filters);
 
         let ranking = rows[0].ranking.as_ref().expect("ranking should be present");
         assert_eq!(ranking.anchor_count, 1);
@@ -5695,8 +5874,14 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing row for PMID {pmid}"))
         }
 
+        fn row_position(rows: &[ArticleSearchResult], pmid: &str) -> usize {
+            rows.iter()
+                .position(|row| row.pmid == pmid)
+                .unwrap_or_else(|| panic!("missing row for PMID {pmid}"))
+        }
+
         #[test]
-        fn mesh_synonym_gap_records_pubmed_tier0_baseline() {
+        fn mesh_synonym_pubmed_rescue_surfaces_above_literal_competitor() {
             let (filters, candidates) = lb100_mesh_synonym_fixture();
             let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
             let pubmed = row_by_pmid(&page.results, "31832001");
@@ -5712,28 +5897,25 @@ mod tests {
             assert_eq!(pubmed_ranking.combined_anchor_hits, 0);
             assert!(
                 competitor_ranking.directness_tier > pubmed_ranking.directness_tier,
-                "literal-match Europe PMC row should outrank the tier-0 PubMed answer on directness alone",
+                "the baseline lexical signal should still be weaker on the PubMed answer itself",
             );
 
-            let pubmed_pos = page
-                .results
-                .iter()
-                .position(|row| row.pmid == "31832001")
-                .expect("PubMed answer should be present");
-            let competitor_pos = page
-                .results
-                .iter()
-                .position(|row| row.pmid == "99000001")
-                .expect("literal-match Europe PMC row should be present");
-            // Ticket 150 should add a rescue signal that flips this ordering.
+            let pubmed_pos = row_position(&page.results, "31832001");
+            let competitor_pos = row_position(&page.results, "99000001");
             assert!(
-                pubmed_pos > competitor_pos,
-                "current baseline should rank the literal-match Europe PMC row above the PubMed answer",
+                pubmed_pos < competitor_pos,
+                "a top-ranked PubMed-only weak lexical row should rescue above the literal-match Europe PMC competitor",
             );
+            assert!(pubmed_ranking.pubmed_rescue);
+            assert_eq!(
+                pubmed_ranking.pubmed_rescue_kind,
+                Some(ArticlePubMedRescueKind::Unique)
+            );
+            assert_eq!(pubmed_ranking.pubmed_source_position, Some(0));
         }
 
         #[test]
-        fn anchor_count_gap_records_pubmed_title_hit_deficit_baseline() {
+        fn anchor_count_pubmed_rescue_surfaces_above_higher_title_hit_competitor() {
             let (filters, candidates) = lb100_anchor_count_fixture();
             let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
             let pubmed = row_by_pmid(&page.results, "31832001");
@@ -5751,23 +5933,213 @@ mod tests {
             assert_eq!(competitor_ranking.title_anchor_hits, 3);
             assert!(
                 competitor_ranking.title_anchor_hits > pubmed_ranking.title_anchor_hits,
-                "current baseline should reward the literal disease-title row more heavily than the PubMed answer",
+                "the baseline lexical signal should still favor the Europe PMC competitor itself",
             );
 
-            let pubmed_pos = page
-                .results
-                .iter()
-                .position(|row| row.pmid == "31832001")
-                .expect("PubMed answer should be present");
-            let competitor_pos = page
-                .results
-                .iter()
-                .position(|row| row.pmid == "99000002")
-                .expect("literal-match Europe PMC row should be present");
-            // Ticket 150 should add a rescue signal that flips this ordering.
+            let pubmed_pos = row_position(&page.results, "31832001");
+            let competitor_pos = row_position(&page.results, "99000002");
+            assert!(
+                pubmed_pos < competitor_pos,
+                "a top-ranked PubMed-only weak lexical row should rescue above the higher-title-hit Europe PMC competitor",
+            );
+            assert!(pubmed_ranking.pubmed_rescue);
+            assert_eq!(
+                pubmed_ranking.pubmed_rescue_kind,
+                Some(ArticlePubMedRescueKind::Unique)
+            );
+            assert_eq!(pubmed_ranking.pubmed_source_position, Some(0));
+        }
+
+        #[test]
+        fn pubmed_led_row_rescues_when_pubmed_position_is_strictly_best() {
+            let (filters, mut candidates) = lb100_anchor_count_fixture();
+            let mut europe_duplicate = calibration_row(
+                "31832001",
+                ArticleSource::EuropePmc,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                3,
+            );
+            europe_duplicate.pmcid = Some("PMC31832001".into());
+            candidates.push(europe_duplicate);
+
+            let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
+            let pubmed_led_pos = row_position(&page.results, "31832001");
+            let competitor_pos = row_position(&page.results, "99000002");
+
+            assert!(
+                pubmed_led_pos < competitor_pos,
+                "a merged row should rescue when PubMed found it first and the non-PubMed duplicate trails behind",
+            );
+            let pubmed_led = row_by_pmid(&page.results, "31832001");
+            let pubmed_led_ranking = pubmed_led
+                .ranking
+                .as_ref()
+                .expect("ranking should be present");
+            assert!(pubmed_led_ranking.pubmed_rescue);
+            assert_eq!(
+                pubmed_led_ranking.pubmed_rescue_kind,
+                Some(ArticlePubMedRescueKind::Led)
+            );
+            assert_eq!(pubmed_led_ranking.pubmed_source_position, Some(0));
+        }
+
+        #[test]
+        fn shared_source_tie_does_not_count_as_pubmed_led() {
+            let (filters, mut candidates) = lb100_anchor_count_fixture();
+            let europe_tied_duplicate = calibration_row(
+                "31832001",
+                ArticleSource::EuropePmc,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                0,
+            );
+            candidates.push(europe_tied_duplicate);
+
+            let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
+            let pubmed_led_pos = row_position(&page.results, "31832001");
+            let competitor_pos = row_position(&page.results, "99000002");
+
+            assert!(
+                pubmed_led_pos > competitor_pos,
+                "a shared-source tie at position 0 must not count as PubMed-led rescue",
+            );
+            let pubmed_led = row_by_pmid(&page.results, "31832001");
+            let pubmed_led_ranking = pubmed_led
+                .ranking
+                .as_ref()
+                .expect("ranking should be present");
+            assert!(!pubmed_led_ranking.pubmed_rescue);
+            assert_eq!(pubmed_led_ranking.pubmed_rescue_kind, None);
+            assert_eq!(pubmed_led_ranking.pubmed_source_position, None);
+        }
+
+        #[test]
+        fn shared_source_row_with_better_non_pubmed_position_does_not_rescue() {
+            let (filters, mut candidates) = lb100_anchor_count_fixture();
+            let europe_leading_duplicate = calibration_row(
+                "31832001",
+                ArticleSource::EuropePmc,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                0,
+            );
+            let mut pubmed_nonleading = calibration_row(
+                "31832001",
+                ArticleSource::PubMed,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                1,
+            );
+            pubmed_nonleading.pmcid = Some("PMC31832001".into());
+
+            candidates.retain(|row| row.pmid != "31832001");
+            candidates.push(europe_leading_duplicate);
+            candidates.push(pubmed_nonleading);
+
+            let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
+            let merged_pos = row_position(&page.results, "31832001");
+            let competitor_pos = row_position(&page.results, "99000002");
+
+            assert!(
+                merged_pos > competitor_pos,
+                "a merged row where Europe PMC leads PubMed must not rescue",
+            );
+            let merged = row_by_pmid(&page.results, "31832001");
+            let merged_ranking = merged.ranking.as_ref().expect("ranking should be present");
+            assert!(!merged_ranking.pubmed_rescue);
+            assert_eq!(merged_ranking.pubmed_rescue_kind, None);
+            assert_eq!(merged_ranking.pubmed_source_position, None);
+        }
+
+        #[test]
+        fn pubmed_nonfirst_position_does_not_rescue() {
+            let (filters, mut candidates) = lb100_mesh_synonym_fixture();
+            let pubmed = candidates
+                .iter_mut()
+                .find(|row| row.pmid == "31832001")
+                .expect("PubMed fixture row should be present");
+            pubmed.source_local_position = 1;
+
+            let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
+            let pubmed_pos = row_position(&page.results, "31832001");
+            let competitor_pos = row_position(&page.results, "99000001");
+
             assert!(
                 pubmed_pos > competitor_pos,
-                "current baseline should rank the higher title-hit Europe PMC row above the PubMed answer",
+                "PubMed rows beyond local position 0 must not rescue",
+            );
+            let pubmed = row_by_pmid(&page.results, "31832001");
+            let pubmed_ranking = pubmed.ranking.as_ref().expect("ranking should be present");
+            assert!(!pubmed_ranking.pubmed_rescue);
+            assert_eq!(pubmed_ranking.pubmed_rescue_kind, None);
+            assert_eq!(pubmed_ranking.pubmed_source_position, None);
+        }
+
+        #[test]
+        fn rescue_metadata_records_kind_and_position() {
+            let (filters, mut led_candidates) = lb100_anchor_count_fixture();
+            led_candidates.push(calibration_row(
+                "31832001",
+                ArticleSource::EuropePmc,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                3,
+            ));
+            let led_page = finalize_article_candidates(led_candidates, 10, 0, None, &filters);
+            let led = row_by_pmid(&led_page.results, "31832001")
+                .ranking
+                .as_ref()
+                .expect("ranking should be present");
+            assert_eq!(led.pubmed_rescue_kind, Some(ArticlePubMedRescueKind::Led));
+            assert_eq!(led.pubmed_source_position, Some(0));
+
+            let (unique_filters, unique_candidates) = lb100_mesh_synonym_fixture();
+            let unique_page =
+                finalize_article_candidates(unique_candidates, 10, 0, None, &unique_filters);
+            let unique = row_by_pmid(&unique_page.results, "31832001")
+                .ranking
+                .as_ref()
+                .expect("ranking should be present");
+            assert_eq!(
+                unique.pubmed_rescue_kind,
+                Some(ArticlePubMedRescueKind::Unique)
+            );
+            assert_eq!(unique.pubmed_source_position, Some(0));
+        }
+
+        #[test]
+        fn rescued_rows_still_use_lexical_and_citation_tiebreaks() {
+            let mut filters = empty_filters();
+            filters.gene = Some("BRAF".into());
+            filters.keyword = Some("melanoma review".into());
+
+            let mut weak = calibration_row("100", ArticleSource::PubMed, "BRAF case report", "", 0);
+            weak.citation_count = Some(1);
+
+            let mut stronger = calibration_row(
+                "200",
+                ArticleSource::PubMed,
+                "BRAF review of outcomes",
+                "",
+                0,
+            );
+            stronger.citation_count = Some(5);
+            stronger.publication_type = Some("Review".into());
+
+            let mut cited =
+                calibration_row("300", ArticleSource::PubMed, "melanoma case report", "", 0);
+            cited.citation_count = Some(50);
+
+            let page =
+                finalize_article_candidates(vec![weak, cited, stronger], 10, 0, None, &filters);
+
+            assert_eq!(
+                page.results
+                    .iter()
+                    .map(|row| row.pmid.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["200", "300", "100"]
             );
         }
     }
@@ -5846,7 +6218,7 @@ mod tests {
             },
         ];
 
-        rank_articles_by_directness(&mut rows, &filters);
+        rank_result_rows_by_directness(&mut rows, &filters);
 
         assert_eq!(rows[0].pmid, "100");
         assert_eq!(
@@ -5948,7 +6320,7 @@ mod tests {
             },
         ];
 
-        rank_articles_by_directness(&mut rows, &filters);
+        rank_result_rows_by_directness(&mut rows, &filters);
 
         let pmids: Vec<&str> = rows.iter().map(|row| row.pmid.as_str()).collect();
         assert_eq!(pmids, vec!["300", "200", "100"]);

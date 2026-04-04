@@ -3313,9 +3313,8 @@ fn article_search_json(
         query: query.to_string(),
         sort: sort.as_str().to_string(),
         semantic_scholar_enabled,
-        ranking_policy: (sort == crate::entities::article::ArticleSort::Relevance).then_some(
-            "directness-first (title coverage > title+abstract coverage > study/review cue > citation support)",
-        ),
+        ranking_policy: (sort == crate::entities::article::ArticleSort::Relevance)
+            .then_some(crate::entities::article::ARTICLE_RELEVANCE_RANKING_POLICY),
         note,
         pagination,
         count,
@@ -8146,6 +8145,9 @@ mod tests {
                     all_anchors_in_title: true,
                     all_anchors_in_text: true,
                     study_or_review_cue: true,
+                    pubmed_rescue: false,
+                    pubmed_rescue_kind: None,
+                    pubmed_source_position: None,
                 }),
                 normalized_title: "braf melanoma review".into(),
                 normalized_abstract: "abstract".into(),
@@ -8162,11 +8164,17 @@ mod tests {
         assert_eq!(value["sort"], "relevance");
         assert_eq!(value["semantic_scholar_enabled"], true);
         assert_eq!(
+            value["ranking_policy"],
+            crate::entities::article::ARTICLE_RELEVANCE_RANKING_POLICY
+        );
+        assert_eq!(
             value["note"],
             "Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering."
         );
-        assert!(value["ranking_policy"].as_str().is_some());
         assert_eq!(value["results"][0]["ranking"]["directness_tier"], 3);
+        assert_eq!(value["results"][0]["ranking"]["pubmed_rescue"], false);
+        assert!(value["results"][0]["ranking"]["pubmed_rescue_kind"].is_null());
+        assert!(value["results"][0]["ranking"]["pubmed_source_position"].is_null());
         assert_eq!(
             value["results"][0]["matched_sources"][1],
             serde_json::Value::String("semanticscholar".into())

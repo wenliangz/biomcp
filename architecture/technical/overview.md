@@ -105,8 +105,11 @@ pipeline should be split into three explicit responsibilities:
    source-local backend position through merge and dedup so PubMed rank survives
    federation.
 3. **Explicit source-aware rescue:** allow source evidence such as
-   "found only by PubMed" and PubMed-local rank to rescue otherwise zero-hit
-   rows above generic noise without hard-coding a global source priority.
+   "found only by PubMed" and PubMed-local rank to rescue otherwise weak lexical
+   rows above competing results, but only for top-ranked PubMed-unique rows or
+   strictly PubMed-led merged rows. The rescue is calibrated: PubMed must be
+   local position `0`, the row must stay in the weak lexical tiers, and merged
+   rows only qualify when PubMed beat every other contributing source.
 
 The architectural invariants for the target state are:
 
@@ -115,8 +118,9 @@ The architectural invariants for the target state are:
   result normalization;
 - multi-concept keywords must not collapse into one exact-phrase anchor for
   ranking; and
-- lexical matches remain the primary relevance signal, with source-aware rescue
-  used to separate high-value PubMed-unique rows from other weak matches.
+- calibrated PubMed rescue may let top-ranked weak PubMed-unique or strictly
+  PubMed-led rows outrank lexically stronger competitors, but only inside the
+  explicit guardrails above; it is not a blanket "PubMed always wins" rule.
 
 The validation boundary is also part of the architecture contract:
 
