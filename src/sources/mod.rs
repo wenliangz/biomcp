@@ -7,9 +7,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use http::Extensions;
-use http_cache_reqwest::{
-    CACacheManager, Cache, CacheMode, CacheOptions, HttpCache, HttpCacheOptions,
-};
+use http_cache_reqwest::{Cache, CacheMode, CacheOptions, HttpCache, HttpCacheOptions};
 use reqwest::StatusCode;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderValue, RETRY_AFTER};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Middleware, Next, RequestBuilder};
@@ -249,7 +247,8 @@ where
 }
 
 fn build_http_client(kind: SharedHttpClientKind) -> Result<ClientWithMiddleware, BioMcpError> {
-    let cache_root = crate::cache::resolve_cache_config()?.cache_root;
+    let config = crate::cache::resolve_cache_config()?;
+    let cache_root = config.cache_root.clone();
     apply_migration_non_fatal(&cache_root, crate::cache::migrate_http_cache, |err| {
         warn!(
             cache_root = %cache_root.display(),
@@ -283,7 +282,7 @@ fn build_http_client(kind: SharedHttpClientKind) -> Result<ClientWithMiddleware,
 
     let builder = ClientBuilder::new(base_client).with(Cache(HttpCache {
         mode: CacheMode::Default,
-        manager: CACacheManager { path: cache_path },
+        manager: crate::cache::SizeAwareCacheManager::new(cache_path, config),
         options: cache_options,
     }));
     let builder = builder.with(
@@ -829,6 +828,7 @@ mod tests {
         let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let path = crate::cache::resolve_cache_config()
             .expect("default cache root should resolve")
@@ -848,6 +848,7 @@ mod tests {
         let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", Some(&override_root.to_string_lossy()));
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let path = crate::cache::resolve_cache_config()
             .expect("env override cache root should resolve")
@@ -889,6 +890,7 @@ mod tests {
         let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", Some(&override_root.to_string_lossy()));
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let result = build_http_client(SharedHttpClientKind::Default);
 

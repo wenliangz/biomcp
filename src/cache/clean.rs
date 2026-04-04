@@ -171,7 +171,8 @@ mod tests {
 
     use super::{CleanOptions, CleanReport, execute_cache_clean, execute_cache_clean_with};
     use crate::cache::{
-        CacheConfigOrigins, CachePlannerError, ConfigOrigin, ResolvedCacheConfig, snapshot_cache,
+        CacheConfigOrigins, CachePlannerError, ConfigOrigin, DiskFreeThreshold,
+        ResolvedCacheConfig, snapshot_cache,
     };
     use crate::error::BioMcpError;
 
@@ -244,10 +245,12 @@ mod tests {
         ResolvedCacheConfig {
             cache_root: cache_root.to_path_buf(),
             max_size,
+            min_disk_free: DiskFreeThreshold::Percent(10),
             max_age,
             origins: CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: max_size_origin,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: max_age_origin,
             },
         }

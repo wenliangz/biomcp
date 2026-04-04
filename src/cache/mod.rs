@@ -1,6 +1,8 @@
 mod clean;
 mod clear;
 mod config;
+mod limits;
+mod manager;
 pub(crate) mod migration;
 mod planner;
 
@@ -10,8 +12,15 @@ pub(crate) use clean::{CleanOptions, CleanReport, execute_cache_clean};
 pub(crate) use clear::{ClearReport, execute_cache_clear};
 #[allow(unused_imports)]
 pub(crate) use config::{
-    CacheConfig, CacheConfigOrigins, ConfigOrigin, ResolvedCacheConfig, resolve_cache_config,
+    CacheConfig, CacheConfigOrigins, ConfigOrigin, DiskFreeThreshold, ResolvedCacheConfig,
+    resolve_cache_config,
 };
+#[allow(unused_imports)]
+pub(crate) use limits::{
+    CacheLimitEvaluation, CacheUsage, FilesystemSpace, evaluate_cache_limits,
+    inspect_filesystem_space, summarize_cache_usage,
+};
+pub(crate) use manager::SizeAwareCacheManager;
 pub(crate) use migration::{MigrationOutcome, migrate_http_cache};
 #[allow(unused_imports)]
 pub(crate) use planner::{
