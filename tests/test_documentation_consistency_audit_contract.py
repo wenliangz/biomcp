@@ -392,13 +392,15 @@ def test_cache_path_docs_match_resolved_cache_root_contract() -> None:
         assert "/tmp/biomcp" not in text
 
     assert "biomcp cache clean" in troubleshooting
+    assert "biomcp cache clear --yes" in troubleshooting
     assert "biomcp cache path" in troubleshooting
     assert "--dry-run" in troubleshooting
     assert "--max-age 7d" in troubleshooting
     assert "resolved cache root" in troubleshooting_ws
     assert "print the managed HTTP cache path" in troubleshooting_ws
     assert "safe first step" in troubleshooting_ws
-    assert "manual operator step" in troubleshooting_ws
+    assert "downloads/" in troubleshooting
+    assert "manual operator step" not in troubleshooting_ws
 
     assert "`<cache_root>/http`" in data_sources
     assert "`~/.cache/biomcp/http` on Linux" in data_sources

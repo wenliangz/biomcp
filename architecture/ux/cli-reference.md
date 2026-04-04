@@ -28,6 +28,7 @@ biomcp skill list             → list embedded worked examples
 biomcp cache path             → print the managed HTTP cache path (plain text; ignores `--json`)
 biomcp cache stats            → show HTTP cache statistics (JSON supported)
 biomcp cache clean            → remove orphan blobs and optionally age- or size-evict the HTTP cache (JSON supported)
+biomcp cache clear [--yes]    → destructively wipe the managed HTTP cache tree (JSON success; TTY or `--yes` required)
 biomcp serve-http            → run the MCP Streamable HTTP server at `/mcp`
 ```
 
@@ -222,10 +223,11 @@ These properties should be preserved across releases:
    real commands
 
 JSON is the default script contract for query commands, with a documented
-plain-text exception for `biomcp cache path`. `biomcp cache stats` and
-`biomcp cache clean` support `--json` normally. The cache family remains
-CLI-only because revealing workstation-local filesystem paths over MCP would
-cross the runtime security boundary.
+plain-text exception for `biomcp cache path`. `biomcp cache stats`,
+`biomcp cache clean`, and `biomcp cache clear` support `--json` on success,
+while `cache clear` still refuses non-TTY destructive runs unless `--yes` is
+present. The cache family remains CLI-only because revealing workstation-local
+filesystem paths over MCP would cross the runtime security boundary.
 
 ## See Also and Next Commands
 
