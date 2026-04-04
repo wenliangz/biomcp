@@ -121,12 +121,6 @@ pub(crate) fn render_clean_text(report: &crate::cache::CleanReport) -> String {
     )
 }
 
-pub(crate) fn execute_clear() -> Result<crate::cache::ClearReport, BioMcpError> {
-    let config = crate::cache::resolve_cache_config()?;
-    let cache_path = config.cache_root.join("http");
-    crate::cache::execute_cache_clear(&cache_path)
-}
-
 pub(crate) fn render_clear_text(report: &crate::cache::ClearReport) -> String {
     if report.bytes_freed.is_none() && report.entries_removed == 0 {
         return "Cache clear cancelled: bytes_freed=null entries_removed=0".to_string();
@@ -142,11 +136,12 @@ pub(crate) fn render_clear_text(report: &crate::cache::ClearReport) -> String {
     )
 }
 
-pub(crate) fn prompt_clear_confirmation() -> Result<bool, BioMcpError> {
+pub(crate) fn prompt_clear_confirmation(cache_path: &std::path::Path) -> Result<bool, BioMcpError> {
     let mut stderr = io::stderr();
     write!(
         &mut stderr,
-        "This will permanently delete the managed HTTP cache at <resolved cache_root>/http. Continue? [y/N]: "
+        "This will permanently delete the managed HTTP cache at {}. Continue? [y/N]: ",
+        cache_path.display()
     )?;
     stderr.flush()?;
 

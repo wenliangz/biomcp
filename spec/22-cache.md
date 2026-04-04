@@ -200,8 +200,9 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 mkdir -p "$tmp_root/cache-home/biomcp/http/nested" "$tmp_root/config-home"
 printf 'cache-data' >"$tmp_root/cache-home/biomcp/http/nested/entry.bin"
-env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
-  "$bin" cache clear --yes > /dev/null
+out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
+  "$bin" cache clear --yes)"
+echo "$out" | mustmatch like "Cache clear: bytes_freed="
 test ! -e "$tmp_root/cache-home/biomcp/http"
 ```
 
@@ -217,7 +218,8 @@ trap 'rm -rf "$tmp_root"' EXIT
 mkdir -p "$tmp_root/cache-home/biomcp/http" "$tmp_root/config-home"
 printf '12345' >"$tmp_root/cache-home/biomcp/http/entry.bin"
 out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache clear --yes)"
-echo "$out" | jq -e '. == {"bytes_freed": 5, "entries_removed": 2}' > /dev/null
+echo "$out" | mustmatch like '"bytes_freed": 5'
+echo "$out" | mustmatch like '"entries_removed": 2'
 ```
 
 ## Cache Clear Is Idempotent When the HTTP Cache Is Already Gone
@@ -231,5 +233,6 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
 out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache clear --yes)"
-echo "$out" | jq -e '. == {"bytes_freed": 0, "entries_removed": 0}' > /dev/null
+echo "$out" | mustmatch like '"bytes_freed": 0'
+echo "$out" | mustmatch like '"entries_removed": 0'
 ```
