@@ -1,12 +1,41 @@
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 
+use bytesize::ByteSize;
 use serde::Deserialize;
 
 use crate::error::BioMcpError;
 
 const DEFAULT_MAX_SIZE: u64 = 10_000_000_000;
 const DEFAULT_MAX_AGE_SECS: u64 = 86_400;
+const DEFAULT_MIN_DISK_FREE: DiskFreeThreshold = DiskFreeThreshold::Percent(10);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiskFreeThreshold {
+    Percent(u8),
+    Bytes(u64),
+}
+
+impl DiskFreeThreshold {
+    pub(crate) fn required_free_bytes(&self, total_bytes: u64) -> u64 {
+        match self {
+            Self::Percent(percent) => total_bytes.saturating_mul(u64::from(*percent)) / 100,
+            Self::Bytes(bytes) => *bytes,
+        }
+    }
+
+    pub(crate) fn is_violated(&self, available_bytes: u64, total_bytes: u64) -> bool {
+        available_bytes < self.required_free_bytes(total_bytes)
+    }
+
+    pub(crate) fn display(&self) -> String {
+        match self {
+            Self::Percent(percent) => format!("{percent}%"),
+            Self::Bytes(bytes) => ByteSize(*bytes).to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConfigOrigin {
@@ -19,6 +48,7 @@ pub(crate) enum ConfigOrigin {
 pub(crate) struct CacheConfigOrigins {
     pub(crate) cache_root: ConfigOrigin,
     pub(crate) max_size: ConfigOrigin,
+    pub(crate) min_disk_free: ConfigOrigin,
     pub(crate) max_age: ConfigOrigin,
 }
 
@@ -26,6 +56,7 @@ pub(crate) struct CacheConfigOrigins {
 pub(crate) struct ResolvedCacheConfig {
     pub(crate) cache_root: PathBuf,
     pub(crate) max_size: u64,
+    pub(crate) min_disk_free: DiskFreeThreshold,
     pub(crate) max_age: Duration,
     pub(crate) origins: CacheConfigOrigins,
 }
@@ -44,12 +75,14 @@ struct CacheToml {
 struct CacheTomlSection {
     dir: Option<String>,
     max_size: Option<u64>,
+    min_disk_free: Option<String>,
     max_age_secs: Option<u64>,
 }
 
 pub(crate) fn resolve_cache_config() -> Result<CacheConfig, BioMcpError> {
     let env_dir = std::env::var("BIOMCP_CACHE_DIR").ok();
     let env_max_size = std::env::var("BIOMCP_CACHE_MAX_SIZE").ok();
+    let env_min_disk_free = std::env::var("BIOMCP_CACHE_MIN_DISK_FREE").ok();
     let default_cache_root = default_cache_root();
     let config_path = config_file_path();
     let toml_content = match config_path.as_deref() {
@@ -60,6 +93,7 @@ pub(crate) fn resolve_cache_config() -> Result<CacheConfig, BioMcpError> {
     resolve_cache_config_with_source(
         env_dir.as_deref(),
         env_max_size.as_deref(),
+        env_min_disk_free.as_deref(),
         toml_content.as_deref(),
         default_cache_root,
         config_path.as_deref(),
@@ -75,6 +109,7 @@ fn resolve_cache_config_from_parts(
     resolve_cache_config_with_source(
         env_dir,
         env_max_size,
+        None,
         toml_content,
         default_cache_root,
         None,
@@ -94,6 +129,7 @@ fn config_file_path() -> Option<PathBuf> {
 fn resolve_cache_config_with_source(
     env_dir: Option<&str>,
     env_max_size: Option<&str>,
+    env_min_disk_free: Option<&str>,
     toml_content: Option<&str>,
     default_cache_root: PathBuf,
     config_path: Option<&std::path::Path>,
@@ -103,6 +139,7 @@ fn resolve_cache_config_with_source(
             CacheTomlSection {
                 dir: toml_dir,
                 max_size: toml_max_size,
+                min_disk_free: toml_min_disk_free,
                 max_age_secs: toml_max_age_secs,
             },
     } = parse_cache_toml(toml_content, config_path)?;
@@ -125,6 +162,17 @@ fn resolve_cache_config_with_source(
         (DEFAULT_MAX_SIZE, ConfigOrigin::Default)
     };
 
+    let (min_disk_free, min_disk_free_origin) =
+        if let Some(threshold) = parse_env_min_disk_free(env_min_disk_free)? {
+            (threshold, ConfigOrigin::Env)
+        } else if let Some(threshold) =
+            parse_toml_min_disk_free(toml_min_disk_free.as_deref(), config_path)?
+        {
+            (threshold, ConfigOrigin::File)
+        } else {
+            (DEFAULT_MIN_DISK_FREE, ConfigOrigin::Default)
+        };
+
     let (max_age_secs, max_age_origin) = if let Some(age_secs) =
         parse_toml_positive_u64(toml_max_age_secs, "[cache].max_age_secs", config_path)?
     {
@@ -136,10 +184,12 @@ fn resolve_cache_config_with_source(
     Ok(ResolvedCacheConfig {
         cache_root,
         max_size,
+        min_disk_free,
         max_age: Duration::from_secs(max_age_secs),
         origins: CacheConfigOrigins {
             cache_root: cache_root_origin,
             max_size: max_size_origin,
+            min_disk_free: min_disk_free_origin,
             max_age: max_age_origin,
         },
     })
@@ -196,6 +246,20 @@ fn parse_env_max_size(value: Option<&str>) -> Result<Option<u64>, BioMcpError> {
     Ok(Some(parsed))
 }
 
+fn parse_env_min_disk_free(value: Option<&str>) -> Result<Option<DiskFreeThreshold>, BioMcpError> {
+    let Some(value) = normalize_env_value(value) else {
+        return Ok(None);
+    };
+
+    parse_disk_free_threshold(value)
+        .map(Some)
+        .map_err(|message| {
+            BioMcpError::InvalidArgument(format!(
+                "BIOMCP_CACHE_MIN_DISK_FREE {message}: got '{value}'"
+            ))
+        })
+}
+
 fn parse_toml_dir(
     value: Option<&str>,
     config_path: Option<&std::path::Path>,
@@ -230,6 +294,50 @@ fn parse_toml_positive_u64(
     }
 }
 
+fn parse_toml_min_disk_free(
+    value: Option<&str>,
+    config_path: Option<&std::path::Path>,
+) -> Result<Option<DiskFreeThreshold>, BioMcpError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(invalid_config(
+            config_path,
+            "[cache].min_disk_free must not be blank".into(),
+        ));
+    }
+
+    parse_disk_free_threshold(trimmed)
+        .map(Some)
+        .map_err(|message| invalid_config(config_path, format!("[cache].min_disk_free {message}")))
+}
+
+fn parse_disk_free_threshold(value: &str) -> Result<DiskFreeThreshold, &'static str> {
+    if let Some(percent) = value.strip_suffix('%') {
+        let parsed = percent.trim().parse::<u8>().map_err(
+            |_| "must be a whole-number percent like 10% or a positive byte size like 5G",
+        )?;
+        if parsed == 0 {
+            return Err("must be greater than 0");
+        }
+        if parsed > 100 {
+            return Err("percent must be between 1 and 100");
+        }
+        return Ok(DiskFreeThreshold::Percent(parsed));
+    }
+
+    let parsed = ByteSize::from_str(value)
+        .map_err(|_| "must be a whole-number percent like 10% or a positive byte size like 5G")?
+        .as_u64();
+    if parsed == 0 {
+        return Err("must be greater than 0");
+    }
+    Ok(DiskFreeThreshold::Bytes(parsed))
+}
+
 fn invalid_config(config_path: Option<&std::path::Path>, message: String) -> BioMcpError {
     BioMcpError::InvalidArgument(format!("{}: {message}", config_source_label(config_path)))
 }
@@ -244,10 +352,12 @@ fn config_source_label(config_path: Option<&std::path::Path>) -> String {
 mod tests {
     use super::{
         CacheConfig, CacheConfigOrigins, ConfigOrigin, DEFAULT_MAX_AGE_SECS, DEFAULT_MAX_SIZE,
-        default_cache_root, resolve_cache_config, resolve_cache_config_from_parts,
+        DEFAULT_MIN_DISK_FREE, DiskFreeThreshold, default_cache_root, resolve_cache_config,
+        resolve_cache_config_from_parts,
     };
     use crate::error::BioMcpError;
     use std::path::{Path, PathBuf};
+    use std::str::FromStr;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::sync::MutexGuard;
 
@@ -315,10 +425,12 @@ mod tests {
         CacheConfig {
             cache_root: root.into(),
             max_size: DEFAULT_MAX_SIZE,
+            min_disk_free: DEFAULT_MIN_DISK_FREE,
             max_age: Duration::from_secs(DEFAULT_MAX_AGE_SECS),
             origins: CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Default,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::Default,
             },
         }
@@ -423,6 +535,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Env,
                 max_size: ConfigOrigin::File,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::File,
             }
         );
@@ -442,6 +555,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Default,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::Default,
             }
         );
@@ -561,6 +675,7 @@ mod tests {
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
         let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let config = resolve_cache_config().expect("defaults should resolve");
         assert_eq!(config, default_config_with_root(default_cache_root()));
@@ -587,16 +702,19 @@ mod tests {
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
         let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let config = resolve_cache_config().expect("toml should resolve");
         assert_eq!(config.cache_root, root.path().join("resolved-cache"));
         assert_eq!(config.max_size, 1_234);
+        assert_eq!(config.min_disk_free, DEFAULT_MIN_DISK_FREE);
         assert_eq!(config.max_age, Duration::from_secs(7_200));
         assert_eq!(
             config.origins,
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::File,
                 max_size: ConfigOrigin::File,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::File,
             }
         );
@@ -624,16 +742,19 @@ mod tests {
             Some(&format!("  {}  ", env_dir.display())),
         );
         let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", Some(" 5000 "));
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let config = resolve_cache_config().expect("env should override file");
         assert_eq!(config.cache_root, env_dir);
         assert_eq!(config.max_size, 5_000);
+        assert_eq!(config.min_disk_free, DEFAULT_MIN_DISK_FREE);
         assert_eq!(config.max_age, Duration::from_secs(7_200));
         assert_eq!(
             config.origins,
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Env,
                 max_size: ConfigOrigin::Env,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::File,
             }
         );
@@ -654,6 +775,7 @@ mod tests {
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
         let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let err = resolve_cache_config().expect_err("invalid file should fail");
         let message = err.to_string();
@@ -678,6 +800,7 @@ mod tests {
         let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
         let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
         let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", None);
 
         let err = resolve_cache_config().expect_err("directory at cache.toml path should fail");
         let message = err.to_string();
@@ -686,5 +809,107 @@ mod tests {
             message.contains(&*config_path.to_string_lossy()),
             "expected read error to include config path, got: {message}"
         );
+    }
+
+    #[test]
+    fn default_min_disk_free_is_10_percent_with_default_origin() {
+        let config =
+            resolve_cache_config_from_parts(None, None, None, PathBuf::from("/tmp/default-cache"))
+                .expect("defaults should resolve");
+
+        assert_eq!(config.min_disk_free, DiskFreeThreshold::Percent(10));
+        assert_eq!(config.origins.min_disk_free, ConfigOrigin::Default);
+    }
+
+    #[test]
+    fn toml_min_disk_free_parses_absolute_bytes_and_tracks_file_origin() {
+        let config = resolve_cache_config_from_parts(
+            None,
+            None,
+            Some("[cache]\nmin_disk_free = \"5G\"\n"),
+            PathBuf::from("/tmp/default-cache"),
+        )
+        .expect("toml min_disk_free should resolve");
+
+        assert_eq!(
+            config.min_disk_free,
+            DiskFreeThreshold::Bytes(bytesize::ByteSize::from_str("5G").expect("parse").as_u64())
+        );
+        assert_eq!(config.origins.min_disk_free, ConfigOrigin::File);
+    }
+
+    #[test]
+    fn env_min_disk_free_overrides_file_and_tracks_env_origin() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("min-disk-free-env");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        let config_dir = config_home.join("biomcp");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        std::fs::write(
+            config_dir.join("cache.toml"),
+            "[cache]\nmin_disk_free = \"5G\"\n",
+        )
+        .expect("write cache.toml");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", Some("10%"));
+
+        let config = resolve_cache_config().expect("env min_disk_free should override file");
+
+        assert_eq!(config.min_disk_free, DiskFreeThreshold::Percent(10));
+        assert_eq!(config.origins.min_disk_free, ConfigOrigin::Env);
+    }
+
+    #[test]
+    fn invalid_env_min_disk_free_returns_error() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("min-disk-free-invalid");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", Some("0%"));
+
+        let err = resolve_cache_config().expect_err("invalid env min_disk_free should fail");
+        assert_invalid_argument_contains(err, &["BIOMCP_CACHE_MIN_DISK_FREE", "greater than 0"]);
+    }
+
+    #[test]
+    fn invalid_env_min_disk_free_over_100_percent_returns_error() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("min-disk-free-over100");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", Some("101%"));
+
+        let err = resolve_cache_config().expect_err("percent > 100 should fail");
+        assert_invalid_argument_contains(err, &["BIOMCP_CACHE_MIN_DISK_FREE", "between 1 and 100"]);
+    }
+
+    #[test]
+    fn disk_free_threshold_methods_cover_percent_bytes_and_display() {
+        let percent = DiskFreeThreshold::Percent(10);
+        assert_eq!(percent.required_free_bytes(1_000), 100);
+        assert!(percent.is_violated(99, 1_000));
+        assert_eq!(percent.display(), "10%");
+
+        let bytes = DiskFreeThreshold::Bytes(500);
+        assert_eq!(bytes.required_free_bytes(1_000), 500);
+        assert!(bytes.is_violated(499, 1_000));
+        assert_eq!(bytes.display(), "500 B");
     }
 }

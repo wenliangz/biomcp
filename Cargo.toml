@@ -36,7 +36,9 @@ cacache = { version = "13.1.0", default-features = false, features = ["mmap"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "multipart"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.7"
+http-cache = { version = "0.20", default-features = false }
 http-cache-reqwest = "0.15"
+http-cache-semantics = "2"
 http = "1"
 
 # gRPC (AlphaGenome)
@@ -60,6 +62,7 @@ csv = "1"
 roxmltree = "0.20"
 ssri = "9"
 toml = "0.8"
+fs2 = "0.4"
 
 # MCP
 rmcp = { version = "1.1.1", features = ["server", "transport-io", "transport-streamable-http-server"] }

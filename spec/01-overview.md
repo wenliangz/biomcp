@@ -22,7 +22,7 @@ echo "$out" | mustmatch '/^biomcp [0-9]+\.[0-9]+\.[0-9]+/'
 
 ## Health Check
 
-The API-only health command reports one row per live upstream provider plus explicit excluded rows for key-gated sources. Full `biomcp health` adds local readiness rows such as EMA local data and cache dir. We assert on the API-only table header and the explicit status summary here because those are stable formatting markers for the upstream inventory contract.
+The API-only health command reports one row per live upstream provider plus explicit excluded rows for key-gated sources. Full `biomcp health` adds local readiness rows such as EMA local data, cache dir, and cache-limit warnings. We assert on the API-only table header and the explicit status summary here because those are stable formatting markers for the upstream inventory contract.
 
 ```bash
 bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
@@ -58,7 +58,7 @@ echo "$out" | mustmatch like "article citations <id>"
 echo "$out" | mustmatch like "batch <entity> <id1,id2,...>"
 echo "$out" | mustmatch like "enrich <GENE1,GENE2,...>"
 echo "$out" | mustmatch like '- `cache path` - print the managed HTTP cache directory `<resolved cache_root>/http`; output stays plain text and ignores `--json`'
-echo "$out" | mustmatch like '- `cache stats` - show HTTP cache statistics (blob counts, bytes, age range, configured limits); supports `--json` for machine-readable output'
+echo "$out" | mustmatch like '- `cache stats` - show HTTP cache statistics (total blob inventory, referenced blob bytes, age range, resolved limits including min disk free); supports `--json` for machine-readable output'
 echo "$out" | mustmatch like '- `cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]` - remove orphan blobs and optionally age- or size-evict the HTTP cache; supports `--json` for machine-readable output'
 echo "$out" | mustmatch like '- `cache clear [--yes]` - destructively wipe `<resolved cache_root>/http`; never touches `downloads/`; supports `--json` on success and requires a TTY unless `--yes` is passed'
 echo "$out" | mustmatch like "- `discover <query>`"

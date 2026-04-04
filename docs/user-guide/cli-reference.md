@@ -68,15 +68,17 @@ biomcp skill article-follow-up
 ```
 
 `biomcp health --apis-only` is the upstream inventory smoke test. Full
-`biomcp health` also reports local readiness rows such as EMA local data and
-cache dir status.
+`biomcp health` also reports local readiness rows such as EMA local data,
+cache dir status, and cache-limit warnings when the managed HTTP cache is
+over size or below the configured disk-free floor.
 
 `biomcp cache path` is a local-CLI-only operator command. It prints the managed
 HTTP cache path as plain text and ignores the global `--json` flag.
 
 `biomcp cache stats` is the companion local-CLI operator command. It reports the
-resolved cache path, blob bytes/files, orphan count, age range, and configured
-cache limits; under `--json`, it returns the same contract as a JSON object.
+resolved cache path, total blob inventory, referenced blob bytes used for
+enforcement, orphan count, age range, and the resolved cache limits including
+`min_disk_free`; under `--json`, it returns the same contract as a JSON object.
 
 `biomcp cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]`
 is the targeted maintenance command for the same cache family. It always removes
