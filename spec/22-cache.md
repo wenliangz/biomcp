@@ -58,7 +58,7 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
 out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache stats)"
-echo "$out" | mustmatch like '"path":'
+echo "$out" | mustmatch like '"max_age_origin": "default"'
 echo "$out" | jq -e --arg path "$tmp_root/cache-home/biomcp/http" '
   . == {
     path: $path,
