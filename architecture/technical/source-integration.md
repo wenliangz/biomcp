@@ -202,9 +202,59 @@ Two semantics are non-negotiable:
 - there is no fixed source-priority rule within the same title-match tier
 - federated totals are source-aware:
   - if rows from both sources are merged, the total is not presented as an
-    exact combined count
+     exact combined count
   - if only one source contributes rows and that source has an authoritative
-    total, that source total may be preserved
+     total, that source total may be preserved
+
+### Current article-search gap
+
+Article federation currently violates the "no fixed source-priority rule within
+the same tier" intent in one specific way: the merged slice is appended in
+source order, then `insertion_index` is used as a late relevance tiebreaker.
+That makes merge order behave like an implicit source preference and penalizes
+PubMed-unique rows when they share the same lexical tier as Europe PMC or
+PubTator rows.
+
+Article search also has a lexical-preparation gap: `--keyword` is treated as a
+single free-text phrase for ranking, and punctuation variants such as
+hyphenated versus compact compound names are not normalized into the same match
+space.
+
+### Target state: article-search ranking contract
+
+For federated article search, the target contract is more specific than the
+generic multi-source rule above:
+
+1. Build ranking concepts from the typed article filters in
+   `src/entities/article.rs`. Structured filters remain one concept each, while
+   `--keyword` is decomposed into independently matchable concepts instead of
+   one exact phrase blob.
+2. Apply one shared normalization strategy in `src/transform/article.rs` to
+   both anchor creation and result normalization, including compact matching for
+   compound-name punctuation variants that PubMed commonly resolves through MeSH
+   or author keywords.
+3. Capture source-local backend position before cross-source merge and preserve
+   it through dedup on the merged `ArticleSearchResult`. Cross-source append
+   order is not part of the relevance contract.
+4. Sort federated article rows with explicit ranking signals rather than hidden
+   source identity. The target ordering is lexical evidence first, then
+   source-aware rescue for weak lexical rows, then study/review cues, citation
+   support, source-local backend position, and stable ID.
+5. Constrain source-aware rescue so it explains PubMed-unique wins over generic
+   zero-hit noise without becoming a blanket "PubMed beats Europe PMC" rule.
+6. Preserve provenance on the result row and, when ranking metadata is
+   serialized, expose enough signal detail that a boosted PubMed-unique row is
+   explainable in JSON output.
+
+The article-specific invariants are:
+
+- the same query and document normalization must be used on both sides of
+  anchor matching;
+- source-local rank is comparable within a source, not a proxy for source
+  priority across the whole federation;
+- merge order must not be observable as a relevance penalty; and
+- PubMed-unique rescue may separate strong PubMed evidence from other zero-hit
+  rows, but literal lexical matches still outrank rescue-only rows by default.
 
 ## Non-JSON Transport Guidance
 
