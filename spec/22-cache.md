@@ -1,10 +1,15 @@
 # Cache Commands
 
-`biomcp cache path`, `biomcp cache stats`, and `biomcp cache clean` are the local
-operator commands for the managed HTTP cache. One locates the resolved cache
-directory, one reports local cache inventory and configured limits, and one safely
-removes orphan blobs plus optional age/size evictions. They stay CLI-only because
-they expose workstation-local filesystem paths.
+`biomcp cache path`, `biomcp cache stats`, `biomcp cache clean`, and
+`biomcp cache clear` are the local operator commands for the managed HTTP cache.
+One locates the resolved cache directory, one reports local cache inventory and
+configured limits, one safely removes orphan blobs plus optional age/size
+evictions, and one destructively wipes the managed `http/` tree. They stay
+CLI-only because they expose workstation-local filesystem paths.
+
+The only `cache clear` behavior intentionally proven outside this markdown spec
+is the interactive TTY accept/decline flow; that contract is covered by the
+Unix-only Rust PTY tests.
 
 ## Cache Path
 
@@ -159,4 +164,73 @@ trap 'rm -rf "$tmp_root"' EXIT
 mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
 env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
   "$bin" cache clean --max-age 30d --max-size 500M --dry-run > /dev/null
+```
+
+## Cache Clear Refuses Non-Interactive Destructive Runs
+
+`biomcp cache clear` is destructive, so non-interactive use must refuse unless
+the operator opts in with `--yes`. That refusal stays on plain stderr even when
+the global `--json` flag is present.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
+set +e
+env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
+  "$bin" --json cache clear >"$tmp_root/stdout" 2>"$tmp_root/stderr"
+status=$?
+set -e
+test "$status" = "1"
+test ! -s "$tmp_root/stdout"
+stderr="$(cat "$tmp_root/stderr")"
+echo "$stderr" | mustmatch like "--yes"
+echo "$stderr" | mustmatch like "TTY"
+echo "$stderr" | mustmatch not like "{"
+```
+
+## Cache Clear Supports Full-Wipe Automation with --yes
+
+`--yes` is the automation escape hatch for the destructive full wipe. When the
+managed `http/` tree exists, the command should remove it completely.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home/biomcp/http/nested" "$tmp_root/config-home"
+printf 'cache-data' >"$tmp_root/cache-home/biomcp/http/nested/entry.bin"
+env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
+  "$bin" cache clear --yes > /dev/null
+test ! -e "$tmp_root/cache-home/biomcp/http"
+```
+
+## Cache Clear Reports Machine-Readable Results
+
+Successful `cache clear --json` output keeps the report shape stable for scripts:
+exactly `{ bytes_freed, entries_removed }`.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home/biomcp/http" "$tmp_root/config-home"
+printf '12345' >"$tmp_root/cache-home/biomcp/http/entry.bin"
+out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache clear --yes)"
+echo "$out" | jq -e '. == {"bytes_freed": 5, "entries_removed": 2}' > /dev/null
+```
+
+## Cache Clear Is Idempotent When the HTTP Cache Is Already Gone
+
+Running `cache clear --yes` against a missing managed `http/` directory should
+be a no-op with the zero-removal report.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
+out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache clear --yes)"
+echo "$out" | jq -e '. == {"bytes_freed": 0, "entries_removed": 0}' > /dev/null
 ```

@@ -513,6 +513,12 @@ mod tests {
             mcp_rejection_message(&stats_args),
             CACHE_FAMILY_MCP_REJECTION_MESSAGE
         );
+
+        let clear_args = vec!["biomcp".into(), "cache".into(), "clear".into()];
+        assert_eq!(
+            mcp_rejection_message(&clear_args),
+            CACHE_FAMILY_MCP_REJECTION_MESSAGE
+        );
     }
 
     #[test]

@@ -67,11 +67,13 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "biomcp cache path" in cli_reference
     assert "biomcp cache stats" in cli_reference
     assert "biomcp cache clean" in cli_reference
+    assert "biomcp cache clear" in cli_reference
     assert "biomcp skill list                 # list embedded worked examples" in cli_reference
     assert (
         "`--json` normally returns structured output, but `biomcp cache path` "
-        "is a plain-text exception. `biomcp cache stats` and `biomcp cache clean` "
-        "respect `--json` and return JSON objects."
+        "is a plain-text exception. `biomcp cache stats`, `biomcp cache clean`, "
+        "and `biomcp cache clear` respect `--json` on success. `biomcp cache clear` "
+        "still refuses non-TTY destructive runs with plain stderr unless you pass `--yes`."
         in cli_reference
     )
     assert "biomcp serve-sse                  # removed compatibility command; use serve-http" not in cli_reference
@@ -95,6 +97,7 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "`cache path`" in mcp_server
     assert "`cache stats`" in mcp_server
     assert "`cache clean`" in mcp_server
+    assert "`cache clear`" in mcp_server
     assert "reveal workstation-local paths" in mcp_server
 
     assert "one markdown resource per embedded BioMCP worked example" in claude_desktop

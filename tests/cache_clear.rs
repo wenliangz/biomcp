@@ -119,8 +119,16 @@ fn cache_clear_without_tty_refuses_with_plain_stderr_even_under_json() {
     let result = run_biomcp(&["--json", "cache", "clear"], &cache_home, &config_home);
 
     assert_eq!(result.status.code(), Some(1));
-    assert!(result.stdout.trim().is_empty(), "stdout:\n{}", result.stdout);
-    assert!(result.stderr.contains("--yes"), "stderr:\n{}", result.stderr);
+    assert!(
+        result.stdout.trim().is_empty(),
+        "stdout:\n{}",
+        result.stdout
+    );
+    assert!(
+        result.stderr.contains("--yes"),
+        "stderr:\n{}",
+        result.stderr
+    );
     assert!(
         !result.stderr.trim_start().starts_with('{'),
         "stderr should remain plain text under --json\nstderr:\n{}",
@@ -150,7 +158,11 @@ fn cache_clear_yes_deletes_only_http_tree() {
         result.stdout,
         result.stderr
     );
-    assert!(result.stdout.starts_with("Cache clear:"), "stdout:\n{}", result.stdout);
+    assert!(
+        result.stdout.starts_with("Cache clear:"),
+        "stdout:\n{}",
+        result.stdout
+    );
     assert!(!http_dir.exists(), "http cache tree should be removed");
     assert!(downloads_dir.is_dir(), "downloads sibling should remain");
     assert_eq!(
@@ -169,7 +181,11 @@ fn cache_clear_yes_json_reports_machine_shape() {
     fs::create_dir_all(&config_home).expect("config home should exist");
     fs::write(http_dir.join("entry.bin"), b"12345").expect("seed http file");
 
-    let result = run_biomcp(&["--json", "cache", "clear", "--yes"], &cache_home, &config_home);
+    let result = run_biomcp(
+        &["--json", "cache", "clear", "--yes"],
+        &cache_home,
+        &config_home,
+    );
 
     assert!(
         result.status.success(),
@@ -191,9 +207,18 @@ fn cache_clear_yes_missing_path_is_idempotent() {
     fs::create_dir_all(&cache_home).expect("cache home should exist");
     fs::create_dir_all(&config_home).expect("config home should exist");
 
-    let result = run_biomcp(&["--json", "cache", "clear", "--yes"], &cache_home, &config_home);
+    let result = run_biomcp(
+        &["--json", "cache", "clear", "--yes"],
+        &cache_home,
+        &config_home,
+    );
 
-    assert!(result.status.success(), "stdout:\n{}\nstderr:\n{}", result.stdout, result.stderr);
+    assert!(
+        result.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        result.stdout,
+        result.stderr
+    );
     let value: serde_json::Value =
         serde_json::from_str(&result.stdout).expect("stdout should be valid JSON");
     assert_eq!(value["bytes_freed"], serde_json::json!(0));
@@ -217,15 +242,30 @@ fn cache_clear_yes_root_symlink_is_unlinked_without_traversal() {
     fs::write(&target_file, b"outside").expect("target file should exist");
     symlink(&target_dir, cache_root.join("http")).expect("http symlink should be created");
 
-    let result = run_biomcp(&["--json", "cache", "clear", "--yes"], &cache_home, &config_home);
+    let result = run_biomcp(
+        &["--json", "cache", "clear", "--yes"],
+        &cache_home,
+        &config_home,
+    );
 
-    assert!(result.status.success(), "stdout:\n{}\nstderr:\n{}", result.stdout, result.stderr);
+    assert!(
+        result.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        result.stdout,
+        result.stderr
+    );
     let value: serde_json::Value =
         serde_json::from_str(&result.stdout).expect("stdout should be valid JSON");
     assert_eq!(value["bytes_freed"], serde_json::Value::Null);
     assert_eq!(value["entries_removed"], serde_json::json!(1));
-    assert!(!cache_root.join("http").exists(), "root symlink should be removed");
-    assert!(target_file.is_file(), "symlink target must not be traversed or removed");
+    assert!(
+        !cache_root.join("http").exists(),
+        "root symlink should be removed"
+    );
+    assert!(
+        target_file.is_file(),
+        "symlink target must not be traversed or removed"
+    );
 }
 
 #[cfg(unix)]
@@ -239,14 +279,18 @@ fn cache_clear_tty_accepts_after_confirmation() {
     fs::create_dir_all(&config_home).expect("config home should exist");
     fs::write(http_dir.join("nested").join("entry.bin"), b"accept-me").expect("seed http file");
 
-    let output = pty_helpers::run_biomcp_with_tty(&["cache", "clear"], &cache_home, &config_home, "yes")
-        .expect("tty cache clear should run");
+    let output =
+        pty_helpers::run_biomcp_with_tty(&["cache", "clear"], &cache_home, &config_home, "yes")
+            .expect("tty cache clear should run");
 
     assert!(
         output.contains("Cache clear: bytes_freed=9 entries_removed=3"),
         "unexpected PTY output:\n{output}"
     );
-    assert!(!http_dir.exists(), "http cache tree should be removed after acceptance");
+    assert!(
+        !http_dir.exists(),
+        "http cache tree should be removed after acceptance"
+    );
 }
 
 #[cfg(unix)]
@@ -261,15 +305,22 @@ fn cache_clear_tty_decline_returns_zero_report_without_deleting() {
     fs::create_dir_all(&config_home).expect("config home should exist");
     fs::write(&nested_file, b"decline-me").expect("seed http file");
 
-    let output = pty_helpers::run_biomcp_with_tty(&["cache", "clear"], &cache_home, &config_home, "no")
-        .expect("tty cache clear should run");
+    let output =
+        pty_helpers::run_biomcp_with_tty(&["cache", "clear"], &cache_home, &config_home, "no")
+            .expect("tty cache clear should run");
 
     assert!(
         output.contains("Cache clear cancelled: bytes_freed=null entries_removed=0"),
         "unexpected PTY output:\n{output}"
     );
-    assert!(http_dir.is_dir(), "http cache tree should remain after decline");
-    assert!(nested_file.is_file(), "existing cache files should remain after decline");
+    assert!(
+        http_dir.is_dir(),
+        "http cache tree should remain after decline"
+    );
+    assert!(
+        nested_file.is_file(),
+        "existing cache files should remain after decline"
+    );
 }
 
 #[test]
@@ -288,8 +339,16 @@ fn cache_clear_yes_preserves_downloads_sibling() {
 
     let result = run_biomcp(&["cache", "clear", "--yes"], &cache_home, &config_home);
 
-    assert!(result.status.success(), "stdout:\n{}\nstderr:\n{}", result.stdout, result.stderr);
+    assert!(
+        result.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        result.stdout,
+        result.stderr
+    );
     assert!(!http_dir.exists(), "http tree should be removed");
     assert!(downloads_dir.is_dir(), "downloads dir should remain");
-    assert!(downloads_dir.join("keep.bin").is_file(), "downloads file should remain");
+    assert!(
+        downloads_dir.join("keep.bin").is_file(),
+        "downloads file should remain"
+    );
 }

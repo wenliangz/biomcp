@@ -7,7 +7,7 @@ BioMCP provides one command family with entity-oriented subcommands.
 - `--json`: return structured JSON output
 - `--no-cache`: bypass HTTP cache for the current command
 
-`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception. `biomcp cache stats` and `biomcp cache clean` respect `--json` and return JSON objects.
+`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception. `biomcp cache stats`, `biomcp cache clean`, and `biomcp cache clear` respect `--json` on success. `biomcp cache clear` still refuses non-TTY destructive runs with plain stderr unless you pass `--yes`.
 
 ## Core command patterns
 
@@ -37,6 +37,7 @@ biomcp chart [type]
 biomcp cache path
 biomcp cache stats
 biomcp cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]
+biomcp cache clear [--yes]
 biomcp ema sync
 biomcp health [--apis-only]
 biomcp list [entity]
@@ -81,6 +82,13 @@ cache limits; under `--json`, it returns the same contract as a JSON object.
 is the targeted maintenance command for the same cache family. It always removes
 orphan blobs, can optionally evict entries older than a duration or LRU-evict to
 a byte target, and keeps the same structured report under `--json`.
+
+`biomcp cache clear [--yes]` is the destructive sibling for the same managed
+HTTP cache tree. It wipes `<resolved cache_root>/http` completely, never touches
+the sibling `downloads/` directory, prompts for confirmation when stdin is a
+TTY, and refuses non-interactive runs with plain stderr unless you pass
+`--yes`. Successful `--json` output uses `{ "bytes_freed": <number|null>,
+"entries_removed": <number> }`.
 
 ## Search command families
 

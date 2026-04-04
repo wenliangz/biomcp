@@ -43,9 +43,12 @@ biomcp cache clean --dry-run
 biomcp cache clean --max-age 7d
 ```
 
-If cleanup still does not recover the cache, treat a full `http/` removal as a
-manual operator step tied to the resolved cache path you printed with
-`biomcp cache path`, rather than a hard-coded platform example.
+If targeted cleanup still does not recover the cache, use
+`biomcp cache clear --yes` for a full wipe of the managed `http/` tree tied to
+the resolved cache root you printed with `biomcp cache path`. `cache clear`
+never touches the sibling `downloads/` directory, so the choice is explicit:
+start with `cache clean` for targeted GC, escalate to `cache clear --yes` only
+when you need the destructive full wipe.
 
 ## 3) ClinicalTrials.gov API v2 quirks
 
