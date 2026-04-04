@@ -1,9 +1,10 @@
 # Cache Commands
 
-`biomcp cache path` and `biomcp cache stats` are the local operator commands for
-inspecting the managed HTTP cache. One locates the resolved cache directory,
-while the other reports local cache inventory and configured limits. Both stay
-CLI-only because they expose workstation-local filesystem paths.
+`biomcp cache path`, `biomcp cache stats`, and `biomcp cache clean` are the local
+operator commands for the managed HTTP cache. One locates the resolved cache
+directory, one reports local cache inventory and configured limits, and one safely
+removes orphan blobs plus optional age/size evictions. They stay CLI-only because
+they expose workstation-local filesystem paths.
 
 ## Cache Path
 
@@ -93,4 +94,69 @@ echo "$out" | mustmatch like "| Orphan blobs | 0 |"
 echo "$out" | mustmatch like "| Age range | none |"
 echo "$out" | mustmatch like "| Max size | 10000000000 bytes (default) |"
 echo "$out" | mustmatch like "| Max age | 86400 s (default) |"
+```
+
+## Cache Clean JSON
+
+`biomcp cache clean --json` should expose the stable machine contract for cleanup
+reports on an empty cache, including the dry-run flag and an explicit error list.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
+out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache clean)"
+echo "$out" | jq -e --argjson dry_run false '
+  . == {
+    dry_run: $dry_run,
+    orphans_removed: 0,
+    entries_removed: 0,
+    bytes_freed: 0,
+    errors: []
+  }
+' > /dev/null
+```
+
+## Cache Clean Summary
+
+Default `cache clean` output is a single operator summary line rather than a
+markdown block.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
+out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" cache clean)"
+echo "$out" | mustmatch like "Cache clean: dry_run=false orphans_removed=0 entries_removed=0 bytes_freed=0 errors=0"
+test "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "1"
+```
+
+## Cache Clean Dry Run
+
+`--dry-run` should keep the same structured report shape while marking the run as
+planned-only.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
+out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json cache clean --dry-run)"
+echo "$out" | jq -e '.dry_run == true and .orphans_removed == 0 and .entries_removed == 0 and .bytes_freed == 0 and (.errors | length) == 0' > /dev/null
+```
+
+## Cache Clean Flags
+
+The operator cleanup flags should parse together on an empty cache so scripts can
+preview targeted cleanup without a seeded fixture.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
+env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
+  "$bin" cache clean --max-age 30d --max-size 500M --dry-run > /dev/null
 ```

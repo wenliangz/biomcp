@@ -322,6 +322,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "biomcp skill list             → list embedded worked examples" in ux
     assert "biomcp cache path             → print the managed HTTP cache path (plain text; ignores `--json`)" in ux
     assert "biomcp cache stats            → show HTTP cache statistics (JSON supported)" in ux
+    assert "biomcp cache clean            → remove orphan blobs and optionally age- or size-evict the HTTP cache (JSON supported)" in ux
     assert "Overview: `biomcp skill`" in ux
     assert "List: `biomcp skill list`" in ux
     assert "Open: `biomcp skill 01` or `biomcp skill article-follow-up`" in ux
@@ -335,10 +336,10 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     )
     assert (
         "JSON is the default script contract for query commands, with a documented "
-        "plain-text exception for `biomcp cache path`. `biomcp cache stats` "
-        "supports `--json` normally. The cache family remains CLI-only because "
-        "revealing workstation-local filesystem paths over MCP would cross the "
-        "runtime security boundary."
+        "plain-text exception for `biomcp cache path`. `biomcp cache stats` and "
+        "`biomcp cache clean` support `--json` normally. The cache family remains "
+        "CLI-only because revealing workstation-local filesystem paths over MCP "
+        "would cross the runtime security boundary."
         in ux_ws
     )
 

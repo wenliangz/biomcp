@@ -7,7 +7,7 @@ BioMCP provides one command family with entity-oriented subcommands.
 - `--json`: return structured JSON output
 - `--no-cache`: bypass HTTP cache for the current command
 
-`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception. `biomcp cache stats` respects `--json` and returns a JSON object.
+`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception. `biomcp cache stats` and `biomcp cache clean` respect `--json` and return JSON objects.
 
 ## Core command patterns
 
@@ -36,6 +36,7 @@ biomcp batch <entity> <id1,id2,...> [--sections ...] [--source ...]
 biomcp chart [type]
 biomcp cache path
 biomcp cache stats
+biomcp cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]
 biomcp ema sync
 biomcp health [--apis-only]
 biomcp list [entity]
@@ -75,6 +76,11 @@ HTTP cache path as plain text and ignores the global `--json` flag.
 `biomcp cache stats` is the companion local-CLI operator command. It reports the
 resolved cache path, blob bytes/files, orphan count, age range, and configured
 cache limits; under `--json`, it returns the same contract as a JSON object.
+
+`biomcp cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]`
+is the targeted maintenance command for the same cache family. It always removes
+orphan blobs, can optionally evict entries older than a duration or LRU-evict to
+a byte target, and keeps the same structured report under `--json`.
 
 ## Search command families
 
