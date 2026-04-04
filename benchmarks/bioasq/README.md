@@ -37,6 +37,13 @@ registration and participant-area downloads are a separate lane.
   tracking or future runner inputs.
 - `annotations/validity.jsonl` is the overlay scaffold for temporal review.
 
+## Ranking calibration
+
+For the repo-local article-ranking fixture surface, see the
+[ranking calibration guide](ranking-calibration/README.md). This is not a new
+BioASQ benchmark lane; it documents the reusable LB-100 baseline fixtures and
+historical leads used for future ranking tuning.
+
 See `datasets/README.md` for provenance details and
 `docs/reference/bioasq-benchmark.md` for the public-lane versus official-lane
 runbook.

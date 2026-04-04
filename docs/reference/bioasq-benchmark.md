@@ -51,6 +51,17 @@ The repo keeps the public versus official count mismatch explicit:
 
 That mismatch is provenance to surface, not a bug to hide.
 
+## Ranking calibration
+
+Article-ranking calibration lives in the repo-local guide at
+`benchmarks/bioasq/ranking-calibration/README.md`. That guide records the
+stable LB-100 fixture surface used for future ranking tuning, points back to the
+committed provenance files, and references the existing positive-control test.
+
+This is not a new benchmark lane. The calibration surface stays in Rust tests
+and benchmark docs because live ranking-order assertions against upstream
+article responses are unstable.
+
 ## Provenance and terms
 
 The public bundle metadata lives in `benchmarks/bioasq/datasets/manifest.json`.
