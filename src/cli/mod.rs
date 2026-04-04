@@ -1,6 +1,7 @@
 //! Top-level CLI parsing and command execution.
 
 use std::collections::HashSet;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
@@ -6655,6 +6656,12 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         Ok(crate::cli::cache::render_clean_text(&report))
                     }
                 }
+                cache::CacheCommand::Clear { .. } => Err(
+                    crate::error::BioMcpError::InvalidArgument(
+                        "cache clear must be executed through run_outcome()".into(),
+                    )
+                    .into(),
+                ),
             },
             Commands::Ema { cmd } => match cmd {
                 EmaCommand::Sync => {
@@ -6746,6 +6753,33 @@ async fn run_outcome_inner(
     alias_suggestions_as_json: bool,
 ) -> anyhow::Result<CommandOutcome> {
     match cli.command {
+        Commands::Cache {
+            cmd: cache::CacheCommand::Clear { yes },
+        } => {
+            if !yes && !std::io::stdin().is_terminal() {
+                return Ok(CommandOutcome::stderr_with_exit(
+                    "Error: biomcp cache clear requires a TTY or --yes for non-interactive use."
+                        .to_string(),
+                    1,
+                ));
+            }
+
+            let report = if yes || crate::cli::cache::prompt_clear_confirmation()? {
+                crate::cli::cache::execute_clear()?
+            } else {
+                crate::cache::ClearReport {
+                    bytes_freed: None,
+                    entries_removed: 0,
+                }
+            };
+
+            let text = if cli.json {
+                crate::render::json::to_pretty(&report)?
+            } else {
+                crate::cli::cache::render_clear_text(&report)
+            };
+            Ok(CommandOutcome::stdout(text))
+        }
         Commands::Get {
             entity: GetEntity::Gene { symbol, sections },
         } => {
@@ -7572,6 +7606,17 @@ mod tests {
     }
 
     #[test]
+    fn cache_clear_command_parses() {
+        Cli::try_parse_from(["biomcp", "cache", "clear"]).expect("cache clear should parse");
+    }
+
+    #[test]
+    fn cache_clear_command_parses_with_yes_flag() {
+        Cli::try_parse_from(["biomcp", "cache", "clear", "--yes"])
+            .expect("cache clear --yes should parse");
+    }
+
+    #[test]
     fn top_level_help_lists_cache_command() {
         let mut command = super::build_cli();
         let mut help = Vec::new();
@@ -7628,6 +7673,23 @@ mod tests {
         assert!(help.contains("--dry-run"));
         assert!(help.contains("--json"));
         assert!(help.contains("orphan"));
+    }
+
+    #[test]
+    fn cache_clear_help_mentions_yes_tty_and_destructive_scope() {
+        let help = render_cache_clear_long_help();
+
+        assert!(help.contains("--yes"));
+        assert!(help.contains("TTY"));
+        assert!(help.contains("downloads"));
+        assert!(help.contains("destructive"));
+    }
+
+    #[test]
+    fn cache_help_lists_clear_subcommand() {
+        let help = render_cache_long_help();
+
+        assert!(help.contains("clear"));
     }
 
     #[test]
@@ -7724,6 +7786,18 @@ mod tests {
         String::from_utf8(help).expect("help should be utf-8")
     }
 
+    fn render_cache_long_help() -> String {
+        let mut command = Cli::command();
+        let cache = command
+            .find_subcommand_mut("cache")
+            .expect("cache subcommand should exist");
+        let mut help = Vec::new();
+        cache
+            .write_long_help(&mut help)
+            .expect("cache help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
     fn render_cache_stats_long_help() -> String {
         let mut command = Cli::command();
         let cache = command
@@ -7751,6 +7825,21 @@ mod tests {
         clean
             .write_long_help(&mut help)
             .expect("cache clean help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_cache_clear_long_help() -> String {
+        let mut command = Cli::command();
+        let cache = command
+            .find_subcommand_mut("cache")
+            .expect("cache subcommand should exist");
+        let clear = cache
+            .find_subcommand_mut("clear")
+            .expect("cache clear subcommand should exist");
+        let mut help = Vec::new();
+        clear
+            .write_long_help(&mut help)
+            .expect("cache clear help should render");
         String::from_utf8(help).expect("help should be utf-8")
     }
 

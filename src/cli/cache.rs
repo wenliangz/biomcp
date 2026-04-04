@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Subcommand;
@@ -44,6 +45,21 @@ This command is CLI-only because cache commands reveal workstation-local filesys
         /// Show the cleanup plan without deleting anything
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Wipe the entire managed HTTP cache directory
+    #[command(long_about = "\
+Wipe the entire managed HTTP cache directory.
+
+Deletes all contents of <resolved cache_root>/http. This is a destructive full wipe;
+use `biomcp cache clean` for targeted cleanup instead. The managed downloads/ sibling
+directory is never touched. Interactive confirmation is required unless you pass
+--yes. Without a TTY and without --yes, this command refuses even under `--json`.
+
+This command is CLI-only because cache commands reveal workstation-local filesystem paths.")]
+    Clear {
+        /// Skip the confirmation prompt for non-interactive or scripted use
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -103,6 +119,41 @@ pub(crate) fn render_clean_text(report: &crate::cache::CleanReport) -> String {
         report.bytes_freed,
         report.errors.len()
     )
+}
+
+pub(crate) fn execute_clear() -> Result<crate::cache::ClearReport, BioMcpError> {
+    let config = crate::cache::resolve_cache_config()?;
+    let cache_path = config.cache_root.join("http");
+    crate::cache::execute_cache_clear(&cache_path)
+}
+
+pub(crate) fn render_clear_text(report: &crate::cache::ClearReport) -> String {
+    if report.bytes_freed.is_none() && report.entries_removed == 0 {
+        return "Cache clear cancelled: bytes_freed=null entries_removed=0".to_string();
+    }
+
+    let bytes_freed = report
+        .bytes_freed
+        .map(|bytes| bytes.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "Cache clear: bytes_freed={bytes_freed} entries_removed={}",
+        report.entries_removed
+    )
+}
+
+pub(crate) fn prompt_clear_confirmation() -> Result<bool, BioMcpError> {
+    let mut stderr = io::stderr();
+    write!(
+        &mut stderr,
+        "This will permanently delete the managed HTTP cache at <resolved cache_root>/http. Continue? [y/N]: "
+    )?;
+    stderr.flush()?;
+
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    let answer = answer.trim();
+    Ok(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
