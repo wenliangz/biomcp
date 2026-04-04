@@ -153,7 +153,7 @@ exposes that through `ranking.anchor_count`.
 
 ```bash
 out="$(biomcp --json search article -q 'alternative microexon splicing metastasis' --limit 5)"
-echo "$out" | jq -r 'all(.results[]; .ranking.anchor_count == 4)' | mustmatch "true"
+echo "$out" | jq -r '(.results | length > 0) and all(.results[]; .ranking.anchor_count == 4)' | mustmatch "true"
 ```
 
 ## Type Filter Uses The Compatible Source Set
