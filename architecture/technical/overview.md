@@ -77,6 +77,47 @@ not expose a user-facing `--source semanticscholar` mode.
 After fetch, article results deduplicate across PMID, PMCID, and DOI where
 possible, then re-rank locally.
 
+### Current ranking problem
+
+The current article relevance ranker is directness-first in a way that works
+for literal title and abstract matches but under-ranks PubMed's unique value in
+federated search. Today the ranker:
+
+- treats a multi-concept `--keyword` string as one exact normalized phrase;
+- preserves whitespace but not compound-name punctuation variants such as
+  `LB-100` vs `LB100`;
+- ignores `matched_sources` and PubMed's own backend ordering after merge; and
+- uses cross-source append order as the late `insertion_index` tiebreaker.
+
+That combination buries PubMed-unique rows that were found through MeSH or
+author-keyword synonymy when the title and abstract do not repeat the user's
+literal query terms.
+
+### Target state
+
+The target architecture keeps local post-fetch ranking, but the article
+pipeline should be split into three explicit responsibilities:
+
+1. **Lexical preparation:** build ranking concepts from structured filters plus
+   decomposed keyword terms, then normalize query-side and document-side text
+   symmetrically.
+2. **Per-source provenance:** preserve `matched_sources` together with
+   source-local backend position through merge and dedup so PubMed rank survives
+   federation.
+3. **Explicit source-aware rescue:** allow source evidence such as
+   "found only by PubMed" and PubMed-local rank to rescue otherwise zero-hit
+   rows above generic noise without hard-coding a global source priority.
+
+The architectural invariants for the target state are:
+
+- merge order must never act as an implicit source priority;
+- compound-name normalization must stay symmetric between anchor creation and
+  result normalization;
+- multi-concept keywords must not collapse into one exact-phrase anchor for
+  ranking; and
+- lexical matches remain the primary relevance signal, with source-aware rescue
+  used to separate high-value PubMed-unique rows from other weak matches.
+
 The validation boundary is also part of the architecture contract:
 
 - `search article` rejects missing filters, invalid date values, inverted date
