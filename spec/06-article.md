@@ -118,6 +118,20 @@ echo "$out" | mustmatch like "| PMID | Title |"
 echo "$out" | mustmatch not like "No articles found"
 ```
 
+## Source-Specific PubMed Search
+
+Explicit PubMed routing should expose the source in the rendered query context
+and preserve the standard article table contract for stable smoke queries.
+
+```bash
+bin="${BIOMCP_BIN:-biomcp}"
+out="$("$bin" search article -g BRAF --source pubmed --limit 3)"
+echo "$out" | mustmatch like "source=pubmed"
+echo "$out" | mustmatch like "| PMID | Title |"
+echo "$out" | mustmatch not like "No articles found"
+printf '%s\n' "$out" | grep -F -- '--source <all|pubtator|europepmc|pubmed>' >/dev/null
+```
+
 ## Federated Search Preserves Non-EuropePMC Matches Under Default Retraction Filter
 
 JSON article search preserves the tri-state `is_retracted` contract as
@@ -131,16 +145,20 @@ echo "$out" | jq -r 'all(.results[]; (.matched_sources | type) == "array")' | mu
 echo "$out" | jq -r 'any(.results[]; (.matched_sources | index("pubtator")) != null)' | mustmatch "true"
 ```
 
-## Type Filter Warns About Europe PMC Restriction
+## Type Filter Uses The Compatible Source Set
 
-`--type` remains a strict Europe PMC-only filter today. The rendered output
-must say so explicitly instead of silently narrowing the search surface.
+`--type` on `--source all` should use Europe PMC + PubMed when the selected
+filters are PubMed-compatible, and should collapse to Europe PMC-only when
+other selected filters make PubMed ineligible.
 
 ```bash
 bin="${BIOMCP_BIN:-biomcp}"
 out="$("$bin" search article -g BRAF --type review --limit 3)"
-echo "$out" | mustmatch like "> Note: --type currently restricts article search to Europe PMC"
+echo "$out" | mustmatch like "> Note: --type restricts article search to Europe PMC and PubMed."
 echo "$out" | mustmatch like "| PMID | Title |"
+
+strict_out="$("$bin" search article -g BRAF --type review --no-preprints --limit 3)"
+echo "$strict_out" | mustmatch like "> Note: --type restricts this article search to Europe PMC."
 ```
 
 ## Getting Article Details
@@ -310,24 +328,34 @@ The optional debug plan should expose the actual search surface, planner
 markers, and sources in both markdown and JSON without changing default output.
 
 ```bash
-out="$(env -u S2_API_KEY biomcp search article -g BRAF --debug-plan --limit 3)"
+bin="${BIOMCP_BIN:-biomcp}"
+out="$(env -u S2_API_KEY "$bin" search article -g BRAF --debug-plan --limit 3)"
 echo "$out" | mustmatch like "## Debug plan"
 echo "$out" | mustmatch like '"surface": "search_article"'
 echo "$out" | mustmatch like '"planner=federated"'
+printf '%s\n' "$out" | grep -F '"PubMed"' >/dev/null
 echo "$out" | mustmatch like "Semantic Scholar"
 
-json_out="$(env -u S2_API_KEY biomcp --json search article -g BRAF --debug-plan --limit 3)"
+json_out="$(env -u S2_API_KEY "$bin" --json search article -g BRAF --debug-plan --limit 3)"
 echo "$json_out" | mustmatch like '"debug_plan": {'
 echo "$json_out" | mustmatch like '"surface": "search_article"'
 echo "$json_out" | mustmatch like '"leg": "article"'
 echo "$json_out" | mustmatch like '"sources": ['
 echo "$json_out" | mustmatch like '"Semantic Scholar"'
 
-typed_out="$(biomcp search article -g BRAF --type review --debug-plan --limit 3)"
-echo "$typed_out" | mustmatch like '"Note: --type currently restricts article search to Europe PMC'
+typed_out="$("$bin" search article -g BRAF --type review --debug-plan --limit 3)"
+echo "$typed_out" | mustmatch like '"planner=type_capable"'
+printf '%s\n' "$typed_out" | grep -F '"PubMed"' >/dev/null
+echo "$typed_out" | mustmatch like '"Note: --type restricts article search to Europe PMC and PubMed'
 
-typed_json="$(biomcp --json search article -g BRAF --type review --debug-plan --limit 3)"
-echo "$typed_json" | mustmatch like '"note": "Note: --type currently restricts article search to Europe PMC'
+typed_json="$("$bin" --json search article -g BRAF --type review --debug-plan --limit 3)"
+echo "$typed_json" | mustmatch like '"planner=type_capable"'
+echo "$typed_json" | mustmatch like '"note": "Note: --type restricts article search to Europe PMC and PubMed'
+
+strict_json="$("$bin" --json search article -g BRAF --type review --no-preprints --debug-plan --limit 3)"
+echo "$strict_json" | mustmatch like '"planner=europe_only_strict_filters"'
+echo "$strict_json" | mustmatch like '"Europe PMC"'
+echo "$strict_json" | mustmatch not like '"PubMed"'
 ```
 
 ## Semantic Scholar TLDR Section
@@ -422,7 +450,9 @@ echo "$out" | mustmatch like "# Articles: keyword=melanoma, exclude_retracted=tr
 
 ## Federated Deep Offset Guard
 
-Federated article search merges PubTator3 and Europe PMC before applying paging. Very deep offsets must fail fast with an explicit bound so callers do not get silently incorrect merged windows.
+Federated article search merges PubTator3, Europe PMC, and PubMed before
+applying paging. Very deep offsets must fail fast with an explicit bound so
+callers do not get silently incorrect merged windows.
 
 ```bash
 status=0

@@ -226,7 +226,7 @@ fn list_article() -> String {
 - `search article --exclude-retracted`
 - `search article --include-retracted`
 - `search article --sort <date|citations|relevance>`
-- `search article --source <all|pubtator|europepmc>`
+- `search article --source <all, pubtator, europepmc, pubmed>`
 - `search article --debug-plan` - include executed planner/routing metadata in markdown or JSON
 - `search article ... --limit <N> --offset <N>`
 
@@ -234,7 +234,8 @@ fn list_article() -> String {
 
 - Set `NCBI_API_KEY` to increase throughput for NCBI-backed article enrichment.
 - Set `S2_API_KEY` to send authenticated Semantic Scholar requests at 1 req/sec. Without it, BioMCP uses the shared pool at 1 req/2sec.
-- `search article` still keeps `--source <all|pubtator|europepmc>` in v1; Semantic Scholar is automatic when the filter set is compatible, with or without the key.
+- `search article` defaults to PubTator3 + Europe PMC + PubMed when the filter set is compatible; Semantic Scholar is still automatic when the filter set is compatible, with or without the key.
+- `search article --type ...` on `--source all` uses Europe PMC + PubMed when PubMed-compatible filters are selected, and collapses to Europe PMC-only when `--open-access` or `--no-preprints` makes PubMed ineligible.
 - Default `search article --sort relevance` is directness-first rather than citation-first.
 "#
     .to_string()

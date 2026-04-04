@@ -14,6 +14,12 @@ Semantic Scholar leg is eligible whenever the filter set is compatible.
 `S2_API_KEY` upgrades those Semantic Scholar requests to authenticated quota;
 without it, BioMCP uses the shared pool.
 
+## Search PubMed directly
+
+```bash
+biomcp search article -g BRAF --source pubmed --limit 5
+```
+
 ## Add disease context
 
 ```bash
@@ -55,9 +61,12 @@ in full detail. The helper preserves input order and still works when
 biomcp search article -g BRAF --type review --limit 5
 ```
 
-`--type` is Europe PMC only today. BioMCP keeps the filter strict instead of
-guessing publication type across PubTator3 or Semantic Scholar rows, so avoid
-`--type` when recall across sources matters for niche queries.
+`--type` on the default `--source all` route uses Europe PMC + PubMed when the
+other selected filters are PubMed-compatible. If you also need
+`--open-access` or `--no-preprints`, PubMed drops out and the search collapses
+to Europe PMC-only with an explicit note. Use `--source pubmed` when you want
+PubMed's own MeSH/title/abstract search directly and do not need those
+PubMed-incompatible filters.
 
 ## Inspect the ranking rationale in JSON
 

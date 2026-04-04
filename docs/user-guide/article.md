@@ -37,12 +37,13 @@ biomcp search article -g BRAF --since 2024-01-01 --no-preprints --limit 5
 
 ### Multi-source federation
 
-Article search fans out to PubTator3 and Europe PMC in parallel by default.
-When the filter set is compatible, BioMCP also adds a Semantic Scholar search
-leg for the same typed query and merges duplicates across PMID, PMCID, and DOI
-where possible. `S2_API_KEY` upgrades that leg to authenticated requests at
-1 req/sec; without it, BioMCP uses the shared unauthenticated pool at 1 req/2sec.
-Search results are still deduplicated by PMID when BioMCP can resolve one.
+Article search fans out to PubTator3, Europe PMC, and PubMed by default when
+the filter set is compatible. When the filter set is also Semantic
+Scholar-compatible, BioMCP adds that search leg for the same typed query and
+merges duplicates across PMID, PMCID, and DOI where possible. `S2_API_KEY`
+upgrades the Semantic Scholar leg to authenticated requests at 1 req/sec;
+without it, BioMCP uses the shared unauthenticated pool at 1 req/2sec. Search
+results are still deduplicated by PMID when BioMCP can resolve one.
 
 Default `--sort relevance` is directness-first: title coverage ranks ahead of
 title+abstract coverage, then study/review cues, then citation support.
@@ -50,20 +51,24 @@ Markdown preserves the merged rank order, and JSON includes row-level
 `matched_sources`, `ranking`, `citation_count`, and
 `influential_citation_count`.
 
-Use `--source <all|pubtator|europepmc>` to select one backend or keep the default federated search.
+Use `--source <all, pubtator, europepmc, pubmed>` to select one backend or keep
+the default federated search.
 Default article search excludes confirmed retractions unless you pass
 `--include-retracted`. Sources that do not expose retraction metadata still
 participate in the search, and JSON search rows keep the tri-state contract:
 `"is_retracted": true`, `false`, or `null`.
-`--type` is Europe PMC only today; BioMCP surfaces that note in markdown, JSON,
-and debug-plan output instead of silently pretending the filter applies across
-PubTator3 and Semantic Scholar.
+`--type` on `--source all` uses Europe PMC + PubMed when `--open-access` and
+`--no-preprints` are both absent. If you add `--open-access` or
+`--no-preprints`, PubMed becomes ineligible and BioMCP surfaces the Europe
+PMC-only note in markdown, JSON, and debug-plan output instead of silently
+pretending the filter applies across every source.
 
 To search a single backend:
 
 ```bash
 biomcp search article -g BRAF --source pubtator --limit 5
 biomcp search article -g BRAF --source europepmc --limit 5
+biomcp search article -g BRAF --source pubmed --limit 5
 ```
 
 ## Get an article
@@ -79,8 +84,9 @@ biomcp get article 22663011
 Default article output can include an optional Semantic Scholar section with
 TLDR text, influence counts, and open-access PDF metadata when that paper
 resolves in Semantic Scholar. `S2_API_KEY` makes those requests authenticated;
-without it, BioMCP uses the shared pool. `--source` still stays
-`all|pubtator|europepmc` in v1.
+without it, BioMCP uses the shared pool. `search article --source` now supports
+`all`, `pubtator`, `europepmc`, and `pubmed`; Semantic Scholar remains an automatic
+compatible-leg rather than a directly selectable backend.
 
 ## Request specific sections
 

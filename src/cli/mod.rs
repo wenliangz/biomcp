@@ -724,7 +724,7 @@ See also: biomcp list gwas")]
         #[arg(long, default_value = "0")]
         offset: usize,
     },
-    /// Search articles by gene, disease, drug, keyword, or author (PubTator3 + Europe PMC, optional Semantic Scholar)
+    /// Search articles by gene, disease, drug, keyword, or author (PubTator3 + Europe PMC + PubMed, optional Semantic Scholar)
     #[command(after_help = "\
 When to use: use keyword search to scan a topic before you know the entities. Add -g/--gene when you already know the molecular anchor. Prefer --type review for synthesis questions.
 
@@ -734,6 +734,7 @@ EXAMPLES:
   biomcp search article -g BRAF --date-from 2024-01-01
   biomcp search article -d melanoma --type review --journal Nature --limit 5
   biomcp search article -g BRAF --source pubtator --limit 20
+  biomcp search article -g BRAF --source pubmed --limit 5
   biomcp search article -g BRAF --debug-plan --limit 5
 
 See also: biomcp list article")]
@@ -802,8 +803,8 @@ See also: biomcp list article")]
         #[arg(long, default_value = "relevance", value_parser = ["date", "citations", "relevance"])]
         sort: String,
 
-        /// Article source [values: all, pubtator, europepmc] (default: all)
-        #[arg(long, default_value = "all", value_parser = ["all", "pubtator", "europepmc"])]
+        /// Article source [values: all, pubtator, europepmc, pubmed] (default: all)
+        #[arg(long, default_value = "all", value_parser = ["all", "pubtator", "europepmc", "pubmed"])]
         source: String,
 
         /// Maximum results (default: 10)
@@ -7948,7 +7949,7 @@ mod tests {
             crate::entities::article::ArticleSort::Relevance,
             true,
             Some(
-                "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.".into(),
+                "Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering.".into(),
             ),
             None,
             vec![crate::entities::article::ArticleSearchResult {
@@ -7994,7 +7995,7 @@ mod tests {
         assert_eq!(value["semantic_scholar_enabled"], true);
         assert_eq!(
             value["note"],
-            "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
+            "Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering."
         );
         assert!(value["ranking_policy"].as_str().is_some());
         assert_eq!(value["results"][0]["ranking"]["directness_tier"], 3);
@@ -8084,7 +8085,7 @@ mod tests {
             plan.legs[0]
                 .note
                 .as_deref()
-                .is_some_and(|value: &str| value.contains("Europe PMC"))
+                .is_some_and(|value: &str| value.contains("Europe PMC and PubMed"))
         );
     }
 
@@ -8710,6 +8711,31 @@ mod tests {
                 assert!(debug_plan);
                 assert_eq!(limit, 5);
                 assert_eq!(offset, 0);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_article_parses_pubmed_source_flag() {
+        let cli = Cli::try_parse_from([
+            "biomcp", "search", "article", "-g", "BRAF", "--source", "pubmed", "--limit", "5",
+        ])
+        .expect("search article with --source pubmed should parse");
+
+        match cli.command {
+            Commands::Search {
+                entity:
+                    super::SearchEntity::Article {
+                        gene,
+                        source,
+                        limit,
+                        ..
+                    },
+            } => {
+                assert_eq!(gene.as_deref(), Some("BRAF"));
+                assert_eq!(source, "pubmed");
+                assert_eq!(limit, 5);
             }
             other => panic!("unexpected command: {other:?}"),
         }

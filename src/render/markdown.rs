@@ -8607,13 +8607,13 @@ pub(crate) mod tests {
             crate::entities::article::ArticleSort::Relevance,
             true,
             Some(
-                "Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering.",
+                "Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering.",
             ),
             None,
         )
         .expect("markdown should render");
         assert!(markdown.contains(
-            "> Note: --type currently restricts article search to Europe PMC because PubTator3 and Semantic Scholar search results do not expose publication-type filtering."
+            "> Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering."
         ));
         assert!(markdown.contains("Semantic Scholar: enabled"));
         assert!(markdown.contains("Ranking: directness-first"));
