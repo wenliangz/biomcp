@@ -185,8 +185,7 @@ set -e
 test "$status" = "1"
 test ! -s "$tmp_root/stdout"
 stderr="$(cat "$tmp_root/stderr")"
-echo "$stderr" | mustmatch like "--yes"
-echo "$stderr" | mustmatch like "TTY"
+echo "$stderr" | mustmatch like "cache clear requires a TTY or --yes for non-interactive use."
 echo "$stderr" | mustmatch not like "{"
 ```
 
