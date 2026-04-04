@@ -1,54 +1,73 @@
-# Code Review Log — Ticket 148: Tokenize article keyword anchors and compact compounds
+# Code Review Log — Ticket 149: Add Article Ranking Calibration Fixtures
 
-## Summary
+## Critique
 
-Clean implementation. No defects found. No fixes needed.
+### Design Completeness Audit
 
-## Design Completeness Audit
+All six architecture decisions from `design-final.md` have corresponding code
+changes:
 
-All 4 implementation plan items have matching code changes:
+1. **AD1** — `mod ranking_calibration` with `lb100_mesh_synonym_fixture()` and
+   `lb100_anchor_count_fixture()` builders: present in `src/entities/article.rs`
+2. **AD2** — Two baseline tests (`mesh_synonym_gap_records_pubmed_tier0_baseline`,
+   `anchor_count_gap_records_pubmed_title_hit_deficit_baseline`): present
+3. **AD3** — `benchmarks/bioasq/ranking-calibration/README.md` with verified
+   scenarios and historical leads: present and well-structured
+4. **AD4** — Discoverability links in `benchmarks/bioasq/README.md` and
+   `docs/reference/bioasq-benchmark.md`: both present
+5. **AD5** — Contract test extensions in `tests/test_bioasq_benchmark_contract.py`:
+   two new test functions covering all five required assertions
+6. **AD6** — No new spec: confirmed, no spec changes in diff
 
-1. **Compact compound-name hyphens** — `normalize_compound_hyphens()` added in `src/transform/article.rs:45-50` with `OnceLock<Regex>` pattern matching adjacent code.
-2. **Decompose keyword into multiple anchors** — `build_anchor_set()` in `src/entities/article.rs:1097-1127` separates keyword tokenization from structured filters.
-3. **Keep `anchor_matches_text()` unchanged** — confirmed no changes to this function.
-4. **Public-surface spec** — `spec/06-article.md` new section with `anchor_count == 4` assertion.
+No design items are missing from the implementation.
 
-All 8 acceptance criteria have corresponding code or tests. No gaps found.
+### Test-Design Traceability
 
-## Test-Design Traceability
+Every proof matrix entry has a matching test:
 
-All 7 proof matrix entries have matching tests:
-
-| Proof matrix entry | Test found | Verified |
+| Proof Matrix Item | Test Location | Verified |
 |---|---|---|
-| Multi-word keyword becomes multiple anchors | `keyword_tokenization_decomposes_multi_word_into_separate_anchors` | yes |
-| Structured/keyword overlap deduplicated | `keyword_tokenization_dedups_structured_filter_overlap` | yes |
-| Compound forms normalize to one token | `normalize_article_search_text_compacts_compound_hyphens` | yes |
-| Hyphenated query matches compact title | `compound_name_variants_match_symmetrically_in_ranking` | yes |
-| Partial multi-token produces nonzero directness | `multi_concept_keyword_partial_match_scores_nonzero` | yes |
-| All tokens in title produce tier 3 | `multi_concept_keyword_all_tokens_in_title_scores_tier3` | yes |
-| JSON metadata reflects tokenized count | `spec/06-article.md` anchor_count == 4 assertion | yes |
+| Mode A fixture tier-0 baseline | `article.rs:5699` | yes |
+| Mode B fixture anchor-count baseline | `article.rs:5736` | yes |
+| Positive control PubMed win | `article.rs:4170` (pre-existing) | yes |
+| Calibration docs discoverable | `test_bioasq_benchmark_contract.py:27,47` | yes |
+| Existing live JSON contract | `spec/06-article.md` (pre-existing, no new spec per design) | yes |
+| `make check` | Ran independently, all green | yes |
 
-No missing tests.
+No gaps found between design proof matrix and test coverage.
 
-## Implementation Quality
+### Quality Checks
 
-- **Convention adherence**: Follows existing `OnceLock<Regex>` pattern, reuses `normalize_article_search_text` symmetry, dedup via `HashSet` is consistent with prior code.
-- **Test quality**: Tests verify contract behavior (exact anchor vectors, tier levels, hit counts), not implementation details. Would catch regressions.
-- **Performance**: `contains('-')` guard avoids regex overhead for the common case. `into_owned()` on `Cow` is idiomatic and bounded to hyphen-containing strings only.
-- **No duplication**: Searched repo — no existing functions do similar compound-hyphen normalization or keyword tokenization.
+- **Implementation quality**: Code follows existing test module conventions.
+  The `calibration_row` builder properly extends the existing `row()` helper.
+  The nested `mod ranking_calibration` keeps the calibration surface
+  well-scoped.
+- **Test quality**: Tests assert ranking contract behavior (tier assignment,
+  anchor hit counts, sort ordering). Position-based assertions correctly
+  capture the baseline for ticket 150 to flip.
+- **Performance**: N/A — test-only code and documentation.
+- **Data completeness**: Calibration README covers all design-required sections.
+  Contract tests verify content strings.
+- **Security**: No user input handling, network calls, or shell commands.
+- **Duplication**: `row_by_pmid` helper is new and scoped to the calibration
+  module. No pre-existing equivalent in the test module.
 
-## Security
+### Spec Coverage
 
-No concerns. No untrusted input flows into file paths, shell commands, or queries. Regex is compiled once and reused.
+The design explicitly excludes new spec coverage (AD6). The existing structural
+proof at `spec/06-article.md::Keyword Anchors Tokenize In JSON Ranking Metadata`
+covers ranking metadata on the live JSON path. Ranking-order assertions against
+live article responses are intentionally kept in Rust fixtures rather than specs,
+per design rationale.
 
-## Spec Coverage
+## Fixes Applied
 
-The new spec heading tests outside-in behavior: user passes a multi-word keyword query, JSON output reflects tokenized anchor count. Existing markdown rendering tests remain green and cover the rendering surface.
+None required. The implementation is correct and complete.
 
-## Residual Concerns for Verify
+## Residual Concerns
 
-None.
+None for verify to watch. The calibration surface is well-isolated from shipped
+ranking behavior.
 
 ## Defect Register
 
