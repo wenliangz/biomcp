@@ -8150,7 +8150,7 @@ mod tests {
                 normalized_title: "braf melanoma review".into(),
                 normalized_abstract: "abstract".into(),
                 publication_type: Some("Review".into()),
-                insertion_index: 0,
+                source_local_position: 0,
             }],
             pagination,
         )

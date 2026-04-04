@@ -173,7 +173,7 @@ pub struct ArticleSearchResult {
     #[serde(skip)]
     pub publication_type: Option<String>,
     #[serde(skip)]
-    pub insertion_index: usize,
+    pub source_local_position: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1030,7 +1030,9 @@ fn merge_article_candidate(target: &mut ArticleSearchResult, incoming: ArticleSe
         target.normalized_abstract = incoming.normalized_abstract;
     }
     merge_missing_string(&mut target.publication_type, incoming.publication_type);
-    target.insertion_index = target.insertion_index.min(incoming.insertion_index);
+    target.source_local_position = target
+        .source_local_position
+        .min(incoming.source_local_position);
     target.matched_sources.extend(incoming.matched_sources);
     ensure_matched_sources(target);
 }
@@ -1230,7 +1232,7 @@ fn rank_articles_by_directness(rows: &mut [ArticleSearchResult], filters: &Artic
                     .influential_citation_count
                     .cmp(&left.influential_citation_count)
             })
-            .then_with(|| left.insertion_index.cmp(&right.insertion_index))
+            .then_with(|| left.source_local_position.cmp(&right.source_local_position))
             .then_with(|| stable_article_identifier(left).cmp(&stable_article_identifier(right)))
     });
 }
@@ -1483,6 +1485,7 @@ async fn search_pubmed_page(
     let mut total: Option<usize> = None;
     let mut batch_start = 0usize;
     let mut visible_skipped = 0usize;
+    let mut source_position = 0usize;
     let mut fetched_pages = 0usize;
     while out.len() < limit && fetched_pages < MAX_PAGE_FETCHES {
         fetched_pages = fetched_pages.saturating_add(1);
@@ -1514,15 +1517,16 @@ async fn search_pubmed_page(
         let batch_len = response.idlist.len();
         let entries = client.esummary(&response.idlist).await?;
         for entry in entries {
-            let row = transform::article::from_pubmed_esummary_entry(&entry).ok_or_else(|| {
-                BioMcpError::Api {
-                    api: "pubmed-eutils".to_string(),
-                    message: format!(
-                        "ESummary entry for PMID {} has blank title after cleaning",
-                        entry.uid
-                    ),
-                }
-            })?;
+            let mut row =
+                transform::article::from_pubmed_esummary_entry(&entry).ok_or_else(|| {
+                    BioMcpError::Api {
+                        api: "pubmed-eutils".to_string(),
+                        message: format!(
+                            "ESummary entry for PMID {} has blank title after cleaning",
+                            entry.uid
+                        ),
+                    }
+                })?;
             if !matches_result_filters(
                 &row,
                 filters,
@@ -1534,6 +1538,8 @@ async fn search_pubmed_page(
             if !seen_pmids.insert(row.pmid.clone()) {
                 continue;
             }
+            row.source_local_position = source_position;
+            source_position = source_position.saturating_add(1);
             if visible_skipped < offset {
                 visible_skipped = visible_skipped.saturating_add(1);
                 continue;
@@ -2137,6 +2143,7 @@ async fn search_europepmc_page(
     let mut total: Option<usize> = None;
     let mut page: usize = (offset / EUROPE_PMC_PAGE_SIZE) + 1;
     let mut local_skip = offset % EUROPE_PMC_PAGE_SIZE;
+    let mut source_position = 0usize;
     let mut fetched_pages = 0usize;
     while out.len() < limit && fetched_pages < MAX_PAGE_FETCHES {
         fetched_pages = fetched_pages.saturating_add(1);
@@ -2167,7 +2174,7 @@ async fn search_europepmc_page(
                 continue;
             }
 
-            let Some(row) = transform::article::from_europepmc_search_result(&hit) else {
+            let Some(mut row) = transform::article::from_europepmc_search_result(&hit) else {
                 continue;
             };
             if !matches_result_filters(
@@ -2181,6 +2188,8 @@ async fn search_europepmc_page(
             if !seen_pmids.insert(row.pmid.clone()) {
                 continue;
             }
+            row.source_local_position = source_position;
+            source_position = source_position.saturating_add(1);
             out.push(row);
             if out.len() >= limit {
                 break;
@@ -2217,11 +2226,12 @@ async fn search_europepmc_page(
                             normalized_date_to.as_deref(),
                         )
                 });
-            if let Some(row) = replacement {
+            if let Some(mut row) = replacement {
                 if out.len() >= limit && !out.is_empty() {
                     out.pop();
                 }
                 if out.len() < limit {
+                    row.source_local_position = out.len();
                     seen_pmids.insert(row.pmid.clone());
                     out.push(row);
                 }
@@ -2247,6 +2257,7 @@ async fn search_pubtator_page(
     let mut total: Option<usize> = None;
     let mut page: usize = (offset / PUBTATOR_PAGE_SIZE) + 1;
     let mut local_skip = offset % PUBTATOR_PAGE_SIZE;
+    let mut source_position = 0usize;
     let mut fetched_pages = 0usize;
     while out.len() < limit && fetched_pages < MAX_PAGE_FETCHES {
         fetched_pages = fetched_pages.saturating_add(1);
@@ -2269,7 +2280,7 @@ async fn search_pubtator_page(
                 local_skip -= 1;
                 continue;
             }
-            let Some(row) = transform::article::from_pubtator_search_result(&hit) else {
+            let Some(mut row) = transform::article::from_pubtator_search_result(&hit) else {
                 continue;
             };
             if !matches_result_filters(
@@ -2283,6 +2294,8 @@ async fn search_pubtator_page(
             if !seen_pmids.insert(row.pmid.clone()) {
                 continue;
             }
+            row.source_local_position = source_position;
+            source_position = source_position.saturating_add(1);
             out.push(row);
             if out.len() >= limit {
                 break;
@@ -2331,6 +2344,7 @@ async fn search_semantic_scholar_candidates(
     };
 
     let mut rows = Vec::with_capacity(response.data.len());
+    let mut source_position = 0usize;
     for paper in response.data {
         let external_ids = paper.external_ids.as_ref();
         let title = paper
@@ -2342,7 +2356,7 @@ async fn search_semantic_scholar_candidates(
             .abstract_text
             .as_deref()
             .map(transform::article::clean_abstract);
-        let row = ArticleSearchResult {
+        let mut row = ArticleSearchResult {
             pmid: external_ids
                 .and_then(|ids| ids.pubmed.clone())
                 .unwrap_or_default()
@@ -2383,7 +2397,7 @@ async fn search_semantic_scholar_candidates(
                 .map(transform::article::normalize_article_search_text)
                 .unwrap_or_default(),
             publication_type: None,
-            insertion_index: 0,
+            source_local_position: 0,
         };
         if matches_result_filters(
             &row,
@@ -2391,6 +2405,8 @@ async fn search_semantic_scholar_candidates(
             normalized_date_from.as_deref(),
             normalized_date_to.as_deref(),
         ) {
+            row.source_local_position = source_position;
+            source_position = source_position.saturating_add(1);
             rows.push(row);
         }
     }
@@ -2405,8 +2421,7 @@ fn finalize_article_candidates(
     total: Option<usize>,
     filters: &ArticleSearchFilters,
 ) -> SearchPage<ArticleSearchResult> {
-    for (idx, row) in rows.iter_mut().enumerate() {
-        row.insertion_index = idx;
+    for row in rows.iter_mut() {
         ensure_matched_sources(row);
     }
 
@@ -3695,6 +3710,8 @@ mod tests {
         assert_eq!(page.results.len(), 2);
         assert_eq!(page.results[0].pmid, "3");
         assert_eq!(page.results[1].pmid, "4");
+        assert_eq!(page.results[0].source_local_position, 1);
+        assert_eq!(page.results[1].source_local_position, 2);
     }
 
     #[tokio::test]
@@ -4072,7 +4089,7 @@ mod tests {
             normalized_title: "braf melanoma".into(),
             normalized_abstract: String::new(),
             publication_type: None,
-            insertion_index: 0,
+            source_local_position: 0,
         }];
 
         let summary =
@@ -4168,7 +4185,7 @@ mod tests {
             normalized_title: "braf v600e mutations in melanoma".into(),
             normalized_abstract: String::new(),
             publication_type: None,
-            insertion_index: 0,
+            source_local_position: 0,
         };
 
         // Competing rows from other backends with weaker title-anchor coverage
@@ -4191,7 +4208,7 @@ mod tests {
                 normalized_title: format!("unrelated oncology study {i}"),
                 normalized_abstract: String::new(),
                 publication_type: None,
-                insertion_index: 0,
+                source_local_position: 3,
             })
             .collect();
 
@@ -4241,6 +4258,39 @@ mod tests {
         assert!(!is_pubtator_lag_error(&other_api_400));
     }
 
+    #[test]
+    fn finalize_article_candidates_preserves_source_local_position() {
+        let mut filters = empty_filters();
+        filters.sort = ArticleSort::Date;
+
+        let mut first = row("100", ArticleSource::EuropePmc);
+        first.source_local_position = 7;
+        first.date = Some("2024-01-01".into());
+
+        let mut second = row("200", ArticleSource::PubMed);
+        second.source_local_position = 3;
+        second.date = Some("2025-01-01".into());
+
+        let page = finalize_article_candidates(vec![first, second], 10, 0, None, &filters);
+
+        assert_eq!(
+            page.results
+                .iter()
+                .find(|row| row.pmid == "100")
+                .expect("first row should remain")
+                .source_local_position,
+            7
+        );
+        assert_eq!(
+            page.results
+                .iter()
+                .find(|row| row.pmid == "200")
+                .expect("second row should remain")
+                .source_local_position,
+            3
+        );
+    }
+
     fn row(pmid: &str, source: ArticleSource) -> ArticleSearchResult {
         row_with(pmid, source, Some("2025-01-01"), Some(1), Some(false))
     }
@@ -4270,7 +4320,7 @@ mod tests {
             normalized_title: format!("title-{pmid}"),
             normalized_abstract: String::new(),
             publication_type: None,
-            insertion_index: 0,
+            source_local_position: 0,
         }
     }
 
@@ -4307,6 +4357,55 @@ mod tests {
         assert_eq!(merged.results[2].pmid, "300");
         assert_eq!(merged.results[1].source, ArticleSource::PubTator);
         assert_eq!(merged.total, None);
+    }
+
+    #[test]
+    fn federated_relevance_uses_source_local_position_not_merge_order() {
+        let mut filters = empty_filters();
+        filters.gene = Some("BRAF".into());
+        filters.keyword = Some("melanoma".into());
+
+        let mut europe_first = row("100", ArticleSource::EuropePmc);
+        europe_first.title = "BRAF melanoma study".into();
+        europe_first.normalized_title = "braf melanoma study".into();
+        europe_first.citation_count = Some(5);
+        europe_first.source_local_position = 0;
+
+        let mut europe_second = row("200", ArticleSource::EuropePmc);
+        europe_second.title = "BRAF melanoma study".into();
+        europe_second.normalized_title = "braf melanoma study".into();
+        europe_second.citation_count = Some(5);
+        europe_second.source_local_position = 1;
+
+        let mut europe_third = row("300", ArticleSource::EuropePmc);
+        europe_third.title = "BRAF melanoma study".into();
+        europe_third.normalized_title = "braf melanoma study".into();
+        europe_third.citation_count = Some(5);
+        europe_third.source_local_position = 2;
+
+        let mut pubmed_first = row("900", ArticleSource::PubMed);
+        pubmed_first.title = "BRAF melanoma study".into();
+        pubmed_first.normalized_title = "braf melanoma study".into();
+        pubmed_first.citation_count = Some(5);
+        pubmed_first.source_local_position = 0;
+
+        let page = finalize_article_candidates(
+            vec![europe_first, europe_second, europe_third, pubmed_first],
+            10,
+            0,
+            None,
+            &filters,
+        );
+
+        let pubmed_rank = page
+            .results
+            .iter()
+            .position(|row| row.pmid == "900")
+            .expect("pubmed row should remain in the ranked output");
+        assert!(
+            pubmed_rank <= 1,
+            "a source-local first PubMed row should rank with other source-local first rows"
+        );
     }
 
     #[test]
@@ -5348,7 +5447,7 @@ mod tests {
                 normalized_title: "primary pmid row".into(),
                 normalized_abstract: String::new(),
                 publication_type: None,
-                insertion_index: 0,
+                source_local_position: 3,
             },
             ArticleSearchResult {
                 pmid: String::new(),
@@ -5368,7 +5467,7 @@ mod tests {
                 normalized_title: "europe metadata".into(),
                 normalized_abstract: "europe abstract".into(),
                 publication_type: Some("Review".into()),
-                insertion_index: 1,
+                source_local_position: 1,
             },
             ArticleSearchResult {
                 pmid: String::new(),
@@ -5388,7 +5487,7 @@ mod tests {
                 normalized_title: "semantic scholar metadata".into(),
                 normalized_abstract: "semantic scholar abstract".into(),
                 publication_type: None,
-                insertion_index: 2,
+                source_local_position: 2,
             },
         ]);
 
@@ -5412,6 +5511,24 @@ mod tests {
             Some("Europe abstract")
         );
         assert_eq!(merged[0].is_retracted, Some(false));
+        assert_eq!(merged[0].source_local_position, 1);
+    }
+
+    #[test]
+    fn merge_article_candidates_keeps_min_source_local_position() {
+        let mut europe = row("100", ArticleSource::EuropePmc);
+        europe.source_local_position = 3;
+        let mut pubmed = row("100", ArticleSource::PubMed);
+        pubmed.source_local_position = 1;
+
+        let merged = merge_article_candidates(vec![europe, pubmed]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].source_local_position, 1);
+        assert_eq!(
+            merged[0].matched_sources,
+            vec![ArticleSource::EuropePmc, ArticleSource::PubMed]
+        );
     }
 
     #[test]
@@ -5444,7 +5561,7 @@ mod tests {
                 ),
                 normalized_abstract: "direct abstract".into(),
                 publication_type: None,
-                insertion_index: 0,
+                source_local_position: 0,
             },
             ArticleSearchResult {
                 pmid: "200".into(),
@@ -5464,7 +5581,7 @@ mod tests {
                 normalized_title: "meta-analysis of small molecule therapy".into(),
                 normalized_abstract: String::new(),
                 publication_type: Some("Meta-Analysis".into()),
-                insertion_index: 1,
+                source_local_position: 1,
             },
             ArticleSearchResult {
                 pmid: "300".into(),
@@ -5484,7 +5601,7 @@ mod tests {
                 normalized_title: "all biomarker response study".into(),
                 normalized_abstract: "met is discussed in the abstract".into(),
                 publication_type: None,
-                insertion_index: 2,
+                source_local_position: 2,
             },
         ];
 
@@ -5522,7 +5639,7 @@ mod tests {
     }
 
     #[test]
-    fn directness_ranking_prefers_cue_then_citation_then_insertion() {
+    fn directness_ranking_prefers_cue_then_citation_then_source_local_position() {
         let mut filters = empty_filters();
         filters.gene = Some("BRAF".into());
         filters.keyword = Some("melanoma".into());
@@ -5546,7 +5663,7 @@ mod tests {
                 normalized_title: "braf melanoma study".into(),
                 normalized_abstract: String::new(),
                 publication_type: None,
-                insertion_index: 0,
+                source_local_position: 0,
             },
             ArticleSearchResult {
                 pmid: "200".into(),
@@ -5566,7 +5683,7 @@ mod tests {
                 normalized_title: "braf melanoma systematic review".into(),
                 normalized_abstract: String::new(),
                 publication_type: Some("Review".into()),
-                insertion_index: 1,
+                source_local_position: 1,
             },
             ArticleSearchResult {
                 pmid: "300".into(),
@@ -5586,7 +5703,7 @@ mod tests {
                 normalized_title: "braf melanoma clinical trial review".into(),
                 normalized_abstract: String::new(),
                 publication_type: Some("Clinical Trial".into()),
-                insertion_index: 2,
+                source_local_position: 2,
             },
         ];
 

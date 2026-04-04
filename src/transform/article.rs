@@ -401,7 +401,7 @@ pub fn from_europepmc_search_result(hit: &EuropePmcResult) -> Option<ArticleSear
             .map(normalize_article_search_text)
             .unwrap_or_default(),
         publication_type: parse_publication_type(hit),
-        insertion_index: 0,
+        source_local_position: 0,
     })
 }
 
@@ -440,7 +440,7 @@ pub fn from_pubtator_search_result(hit: &PubTatorSearchResult) -> Option<Article
         normalized_title: normalize_article_search_text(hit.title.as_deref().unwrap_or_default()),
         normalized_abstract: String::new(),
         publication_type: None,
-        insertion_index: 0,
+        source_local_position: 0,
     })
 }
 
@@ -548,7 +548,7 @@ pub fn from_pubmed_esummary_entry(entry: &ESummaryEntry) -> Option<ArticleSearch
         normalized_title: normalize_article_search_text(&title),
         normalized_abstract: String::new(),
         publication_type: None,
-        insertion_index: 0,
+        source_local_position: 0,
     })
 }
 

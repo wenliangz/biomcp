@@ -8567,7 +8567,7 @@ pub(crate) mod tests {
                 normalized_title: "entity-ranked".into(),
                 normalized_abstract: "abstract one".into(),
                 publication_type: None,
-                insertion_index: 0,
+                source_local_position: 0,
             },
             ArticleSearchResult {
                 pmid: "2".into(),
@@ -8596,7 +8596,7 @@ pub(crate) mod tests {
                 normalized_title: "field-ranked".into(),
                 normalized_abstract: "abstract two".into(),
                 publication_type: Some("Review".into()),
-                insertion_index: 1,
+                source_local_position: 1,
             },
         ];
 
@@ -8660,7 +8660,7 @@ pub(crate) mod tests {
             normalized_title: "partial coverage".into(),
             normalized_abstract: String::new(),
             publication_type: None,
-            insertion_index: 0,
+            source_local_position: 0,
         };
         let why = article_ranking_why(&row, ArticleSort::Relevance);
         assert_eq!(why, "title+abstract 2/3");
@@ -8736,7 +8736,7 @@ pub(crate) mod tests {
             normalized_title: "entity-ranked".into(),
             normalized_abstract: "abstract one".into(),
             publication_type: None,
-            insertion_index: 0,
+            source_local_position: 0,
         }];
 
         let markdown = article_search_markdown_with_footer_and_context(
