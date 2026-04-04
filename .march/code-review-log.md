@@ -1,4 +1,4 @@
-# Code Review Log — Ticket 145: Fix PubMed E-utilities query construction AND NOT bug
+# Code Review Log — Ticket 147: Separate article source position from merge order
 
 ## Summary
 
@@ -6,58 +6,60 @@ Clean implementation. No defects found. No fixes needed.
 
 ## Design Completeness Audit
 
-All 6 design changes verified in the diff:
+All 9 acceptance criteria from `design-final.md` have corresponding code changes:
 
-| Design Item | Status | Location in Diff |
-|---|---|---|
-| Change 1: Fix `build_pubmed_search_term` | Present | article.rs:1403-1411 |
-| Change 2: Update multi-filter regression test | Present | article.rs:3339 |
-| Change 3: New standalone NOT unit test | Present | `build_pubmed_search_term_uses_standalone_not_for_retraction_filter` |
-| Change 4: Wiremock request-path test | Present | `search_pubmed_page_sends_standalone_not_retraction_term` |
-| Change 5: Federated participation test | Present | `federated_search_includes_pubmed_rows_in_matched_sources` |
-| Change 6: Europe PMC unchanged | Confirmed | No Europe PMC code in diff |
+| AC | Description | Status | Location |
+|---|---|---|---|
+| 1 | `source_local_position` field with `#[serde(skip)]` | Present | `article.rs:175-176` |
+| 2 | `finalize_article_candidates` no overwrite | Present | `article.rs:2421-2423` |
+| 3 | `merge_article_candidate` preserves min | Present | `article.rs:1032-1034` |
+| 4 | `rank_articles_by_directness` tiebreaker | Present | `article.rs:1235` |
+| 5 | Explicit per-leg counter in all 4 sources | Present | All four search functions |
+| 6 | PubMed pre-offset positions preserved | Present | Position assigned before `visible_skipped` check |
+| 7 | No append-order penalty | Present | New test proves it |
+| 8 | Deduped rows keep min position | Present | New test proves it |
+| 9 | `make check` passes | Confirmed | 1283 tests pass |
 
 No design items are missing from the implementation.
 
 ## Test-Design Traceability
 
-All 8 proof matrix items verified:
+All 7 proof matrix items from `design-final.md` verified:
 
 | Proof Matrix Item | Test/Proof | Found |
 |---|---|---|
-| Simple PubMed term uses standalone NOT | `build_pubmed_search_term_uses_standalone_not_for_retraction_filter` | Yes |
-| Multi-filter term keeps aliases + standalone NOT | `build_pubmed_esearch_params_reuses_article_type_aliases` (updated) | Yes |
-| `search_pubmed_page` sends corrected upstream term | `search_pubmed_page_sends_standalone_not_retraction_term` | Yes |
-| Europe PMC retraction syntax unchanged | `build_search_query_excludes_retracted_when_requested` (unmodified) | Yes |
-| Federated search surfaces PubMed participation | `federated_search_includes_pubmed_rows_in_matched_sources` | Yes |
-| Live `--source pubmed` returns results | Verified in code-log via CLI | Yes |
-| Live federated includes PubMed in `matched_sources` | Verified in code-log via CLI | Yes |
-| `make check` passes | Independently confirmed during review | Yes |
+| Field exists, serialization unchanged | `article_search_result_serializes_unknown_retraction_as_null` (existing, passes) | Yes |
+| PubMed pre-offset positions | `search_pubmed_page_applies_offset_after_filtering` (extended with position assertions) | Yes |
+| Finalization preserves positions | `finalize_article_candidates_preserves_source_local_position` (new) | Yes |
+| Dedup keeps min position | `merge_article_candidates_keeps_min_source_local_position` (new) | Yes |
+| Federated relevance uses leg-local position | `federated_relevance_uses_source_local_position_not_merge_order` (new) | Yes |
+| Existing ranking/merge behavior holds | Updated fixtures + renamed test | Yes |
+| `make check` green | Independently verified | Yes |
 
 ## Implementation Quality
 
-- **Fix is minimal and correct**: Positive clauses joined with `" AND "`, then retraction clause appended with standalone `" NOT "`. Matches PubMed E-utilities boolean grammar.
-- **Empty-base guard**: Defensive branch for unreachable-in-practice case where no positive clauses exist. Returns `"NOT retracted publication[pt]"` without leading space. Matches design rationale.
-- **No new abstractions**: Fix stays within `build_pubmed_search_term`. No helpers, utilities, or structural changes.
-- **Convention adherence**: Code follows existing patterns in the file (early returns, string formatting, test structure).
-- **Europe PMC isolation**: Searched for `AND NOT` in src/. Europe PMC uses `AND NOT PUB_TYPE:` (Solr syntax) — correct and unchanged. Trial code uses `AND NOT` in boolean expression parsing — unrelated.
+- **Minimal and correct**: Rename + one removed assignment + four push-site position assignments. No new structs, enums, or helpers.
+- **Convention adherence**: Follows existing patterns (explicit counter with `saturating_add`, filter-then-assign-then-push flow).
+- **EuropePMC retraction injection**: Replacement row uses `out.len()` for position. At that point `source_position == out.len()` (or `out.len() + 1` after pop), so values are equivalent. Consistent with design rule.
+- **Semantic Scholar**: Initial struct sets `source_local_position: 0`, then overwrites with counter before push. Correct — initial value never reaches ranking.
+- **No duplication**: 1:1 rename of existing field. No parallel tracking.
 
 ## Security
 
-No concerns. Search filters are validated upstream before reaching `build_pubmed_search_term`. No untrusted input flows into shell commands, file paths, or queries without validation.
+No concerns. `source_local_position` is `#[serde(skip)]` — no external input, no injection surface, no auth implications.
 
 ## Performance
 
-N/A. String construction at search request time. No algorithmic concerns.
+No impact. O(1) position assignments at push sites. Same sort comparator structure.
 
 ## Spec Coverage
 
-- `spec/06-article.md` lines 126-133 cover live `--source pubmed` smoke test (existing, should now pass with the fix).
-- **Spec gap noted in design**: No stable spec assertion for federated `matched_sources` containing PubMed. The deterministic wiremock test (`federated_search_includes_pubmed_rows_in_matched_sources`) covers this locally. This is acceptable — live federated results are non-deterministic due to ranking.
+No new `spec/` file required. The changed behavior is an internal relevance tiebreaker using a `#[serde(skip)]` field — no stable CLI/documentation surface to assert with executable markdown. Intentional gap per approved design.
 
 ## Residual Concerns for Verify
 
-None. The implementation is complete and all proof matrix items are covered.
+- Architecture docs (`overview.md`, `source-integration.md`) still reference `insertion_index` in their problem-description sections. These are accurate as historical descriptions and out of scope for this ticket.
+- The `weak_rows` fixture in `directness_ranking_uses_full_title_and_token_boundaries` was changed from `insertion_index: 0` to `source_local_position: 3`. Cosmetic only — the test outcome is determined by title-anchor coverage, not position.
 
 ## Defect Register
 
