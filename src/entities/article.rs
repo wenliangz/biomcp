@@ -5621,6 +5621,157 @@ mod tests {
         assert_eq!(ranking.directness_tier, 3);
     }
 
+    mod ranking_calibration {
+        use super::*;
+
+        fn calibration_row(
+            pmid: &str,
+            source: ArticleSource,
+            title: &str,
+            abstract_snippet: &str,
+            source_local_position: usize,
+        ) -> ArticleSearchResult {
+            let mut row = row(pmid, source);
+            row.title = title.to_string();
+            row.normalized_title = crate::transform::article::normalize_article_search_text(title);
+            row.abstract_snippet =
+                (!abstract_snippet.is_empty()).then(|| abstract_snippet.to_string());
+            row.normalized_abstract =
+                crate::transform::article::normalize_article_search_text(abstract_snippet);
+            row.matched_sources = vec![source];
+            row.source_local_position = source_local_position;
+            row
+        }
+
+        fn lb100_mesh_synonym_fixture() -> (ArticleSearchFilters, Vec<ArticleSearchResult>) {
+            let mut filters = empty_filters();
+            filters.keyword = Some("hepatic steatosis PP2A phosphatase inhibitor".into());
+
+            let pubmed_answer = calibration_row(
+                "31832001",
+                ArticleSource::PubMed,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                0,
+            );
+            let literal_match_competitor = calibration_row(
+                "99000001",
+                ArticleSource::EuropePmc,
+                "PP2A phosphatase inhibitor response in hepatic steatosis",
+                "",
+                1,
+            );
+
+            (filters, vec![literal_match_competitor, pubmed_answer])
+        }
+
+        fn lb100_anchor_count_fixture() -> (ArticleSearchFilters, Vec<ArticleSearchResult>) {
+            let mut filters = empty_filters();
+            filters.drug = Some("LB-100".into());
+            filters.disease = Some("hepatic steatosis".into());
+            filters.keyword = Some("LB-100 hepatic steatosis AMPK".into());
+
+            let pubmed_answer = calibration_row(
+                "31832001",
+                ArticleSource::PubMed,
+                "LB100 ameliorates nonalcoholic fatty liver disease via the AMPK/Sirt1 pathway",
+                "",
+                0,
+            );
+            let literal_match_competitor = calibration_row(
+                "99000002",
+                ArticleSource::EuropePmc,
+                "Dietary intervention for hepatic steatosis progression",
+                "",
+                1,
+            );
+
+            (filters, vec![literal_match_competitor, pubmed_answer])
+        }
+
+        fn row_by_pmid<'a>(rows: &'a [ArticleSearchResult], pmid: &str) -> &'a ArticleSearchResult {
+            rows.iter()
+                .find(|row| row.pmid == pmid)
+                .unwrap_or_else(|| panic!("missing row for PMID {pmid}"))
+        }
+
+        #[test]
+        fn mesh_synonym_gap_records_pubmed_tier0_baseline() {
+            let (filters, candidates) = lb100_mesh_synonym_fixture();
+            let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
+            let pubmed = row_by_pmid(&page.results, "31832001");
+            let competitor = row_by_pmid(&page.results, "99000001");
+
+            let pubmed_ranking = pubmed.ranking.as_ref().expect("ranking should be present");
+            let competitor_ranking = competitor
+                .ranking
+                .as_ref()
+                .expect("ranking should be present");
+            assert_eq!(pubmed_ranking.directness_tier, 0);
+            assert_eq!(pubmed_ranking.title_anchor_hits, 0);
+            assert_eq!(pubmed_ranking.combined_anchor_hits, 0);
+            assert!(
+                competitor_ranking.directness_tier > pubmed_ranking.directness_tier,
+                "literal-match Europe PMC row should outrank the tier-0 PubMed answer on directness alone",
+            );
+
+            let pubmed_pos = page
+                .results
+                .iter()
+                .position(|row| row.pmid == "31832001")
+                .expect("PubMed answer should be present");
+            let competitor_pos = page
+                .results
+                .iter()
+                .position(|row| row.pmid == "99000001")
+                .expect("literal-match Europe PMC row should be present");
+            // Ticket 150 should add a rescue signal that flips this ordering.
+            assert!(
+                pubmed_pos > competitor_pos,
+                "current baseline should rank the literal-match Europe PMC row above the PubMed answer",
+            );
+        }
+
+        #[test]
+        fn anchor_count_gap_records_pubmed_title_hit_deficit_baseline() {
+            let (filters, candidates) = lb100_anchor_count_fixture();
+            let page = finalize_article_candidates(candidates, 10, 0, None, &filters);
+            let pubmed = row_by_pmid(&page.results, "31832001");
+            let competitor = row_by_pmid(&page.results, "99000002");
+
+            let pubmed_ranking = pubmed.ranking.as_ref().expect("ranking should be present");
+            let competitor_ranking = competitor
+                .ranking
+                .as_ref()
+                .expect("ranking should be present");
+
+            assert_eq!(pubmed_ranking.directness_tier, 1);
+            assert_eq!(competitor_ranking.directness_tier, 1);
+            assert_eq!(pubmed_ranking.title_anchor_hits, 2);
+            assert_eq!(competitor_ranking.title_anchor_hits, 3);
+            assert!(
+                competitor_ranking.title_anchor_hits > pubmed_ranking.title_anchor_hits,
+                "current baseline should reward the literal disease-title row more heavily than the PubMed answer",
+            );
+
+            let pubmed_pos = page
+                .results
+                .iter()
+                .position(|row| row.pmid == "31832001")
+                .expect("PubMed answer should be present");
+            let competitor_pos = page
+                .results
+                .iter()
+                .position(|row| row.pmid == "99000002")
+                .expect("literal-match Europe PMC row should be present");
+            // Ticket 150 should add a rescue signal that flips this ordering.
+            assert!(
+                pubmed_pos > competitor_pos,
+                "current baseline should rank the higher title-hit Europe PMC row above the PubMed answer",
+            );
+        }
+    }
+
     #[test]
     fn directness_ranking_uses_full_title_and_token_boundaries() {
         let mut filters = empty_filters();
