@@ -728,6 +728,7 @@ mod tests {
         assert!(out.contains("`skill install` - install BioMCP skill guidance to your agent"));
         assert!(out.contains("`discover <query>`"));
         assert!(out.contains("`cache path`"));
+        assert!(out.contains("`cache stats`"));
     }
 
     #[test]

@@ -65,8 +65,14 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "biomcp skill [list|install|<name>]" not in cli_reference
     assert "biomcp skill install [dir]" in cli_reference
     assert "biomcp cache path" in cli_reference
+    assert "biomcp cache stats" in cli_reference
     assert "biomcp skill list                 # list embedded worked examples" in cli_reference
-    assert "`--json` normally returns structured output, but `biomcp cache path` is a plain-text exception." in cli_reference
+    assert (
+        "`--json` normally returns structured output, but `biomcp cache path` "
+        "is a plain-text exception. `biomcp cache stats` respects `--json` and "
+        "returns a JSON object."
+        in cli_reference
+    )
     assert "biomcp serve-sse                  # removed compatibility command; use serve-http" not in cli_reference
     assert (
         "`biomcp serve-sse` remains available only as a hidden compatibility "
@@ -85,7 +91,9 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "`/health`" in mcp_server
     assert "`/readyz`" in mcp_server
     assert "`/`" in mcp_server
-    assert "CLI-only because they reveal workstation-local paths" in mcp_server
+    assert "`cache path`" in mcp_server
+    assert "`cache stats`" in mcp_server
+    assert "reveal workstation-local paths" in mcp_server
 
     assert "one markdown resource per embedded BioMCP worked example" in claude_desktop
     assert "biomcp://help" in claude_desktop
@@ -117,12 +125,14 @@ def test_public_skill_docs_match_current_cli_contract() -> None:
     assert "Run `biomcp skill list` for worked examples" in skill_file
 
     assert "Use `article batch` as the default follow-up after `search article`" in article_guide
-    assert "--type" in article_guide and "Europe PMC only" in article_guide
+    assert "`--type` on `--source all` uses Europe PMC + PubMed" in article_guide
+    assert "PMC-only note" in article_guide
     assert (
         "Use `article batch` after search when you already know the candidate PMIDs or"
         in find_articles
     )
-    assert "`--type` is Europe PMC only today." in find_articles
+    assert "`--type` on the default `--source all` route uses Europe PMC + PubMed" in find_articles
+    assert "Europe PMC-only with an explicit note" in find_articles
 
     assert "# Pattern: Treatment / approved-drug lookup" in treatment_use_case
     assert 'biomcp search drug --indication "myasthenia gravis" --limit 5' in treatment_use_case

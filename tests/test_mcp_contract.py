@@ -97,6 +97,7 @@ async def test_biomcp_description_matches_list_contract(
         assert "study download <study_id>" not in description
         assert "study download [--list] [<study_id>]" not in description
         assert "cache path" not in description
+        assert "cache stats" not in description
         assert "update [--check]" not in description
         assert "uninstall" not in description
 
@@ -173,6 +174,21 @@ async def test_cache_path_is_rejected_in_mcp_mode(mcp_session_factory) -> None:
         result = await session.call_tool(
             "biomcp",
             arguments={"command": "biomcp cache path"},
+        )
+
+    assert _is_error(result) is True
+    assert result.content
+    assert isinstance(result.content[0], types.TextContent)
+    assert "CLI-only over MCP" in result.content[0].text
+    assert "workstation-local filesystem paths" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_cache_stats_is_rejected_in_mcp_mode(mcp_session_factory) -> None:
+    async with mcp_session_factory() as (session, _initialize_result):
+        result = await session.call_tool(
+            "biomcp",
+            arguments={"command": "biomcp cache stats"},
         )
 
     assert _is_error(result) is True
