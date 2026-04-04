@@ -1400,11 +1400,15 @@ fn build_pubmed_search_term(filters: &ArticleSearchFilters) -> Result<String, Bi
         clauses.push(clause.to_string());
     }
 
+    let base = clauses.join(" AND ");
     if filters.exclude_retracted {
-        clauses.push("NOT retracted publication[pt]".into());
+        if base.is_empty() {
+            return Ok("NOT retracted publication[pt]".to_string());
+        }
+        return Ok(format!("{base} NOT retracted publication[pt]"));
     }
 
-    Ok(clauses.join(" AND "))
+    Ok(base)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -3332,12 +3336,27 @@ mod tests {
 
         assert_eq!(
             params.term,
-            "BRAF AND melanoma AND \"Alice Smith\"[author] AND \"Nature\"[journal] AND journal article[pt] AND NOT retracted publication[pt]"
+            "BRAF AND melanoma AND \"Alice Smith\"[author] AND \"Nature\"[journal] AND journal article[pt] NOT retracted publication[pt]"
         );
         assert_eq!(params.retstart, 10);
         assert_eq!(params.retmax, 5);
         assert_eq!(params.date_from.as_deref(), Some("2020-01-01"));
         assert_eq!(params.date_to.as_deref(), Some("2024-12-01"));
+    }
+
+    #[test]
+    fn build_pubmed_search_term_uses_standalone_not_for_retraction_filter() {
+        let mut filters = empty_filters();
+        filters.gene = Some("WDR5".into());
+        filters.exclude_retracted = true;
+
+        let term = build_pubmed_search_term(&filters).expect("pubmed term should build");
+
+        assert_eq!(term, "WDR5 NOT retracted publication[pt]");
+        assert!(
+            !term.contains("AND NOT"),
+            "term must not contain 'AND NOT': {term:?}"
+        );
     }
 
     #[test]
@@ -3428,6 +3447,40 @@ mod tests {
 
         assert!(err.to_string().contains("--no-preprints"));
         assert!(err.to_string().contains("PubMed"));
+    }
+
+    #[tokio::test]
+    async fn search_pubmed_page_sends_standalone_not_retraction_term() {
+        let _guard = lock_env().await;
+        let server = MockServer::start().await;
+        let _pubmed_base = set_env_var("BIOMCP_PUBMED_BASE", Some(&server.uri()));
+        let mut filters = empty_filters();
+        filters.gene = Some("WDR5".into());
+        filters.exclude_retracted = true;
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "0"))
+            .and(query_param("retmax", "100"))
+            .and(query_param("term", "WDR5 NOT retracted publication[pt]"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "0",
+                    "idlist": []
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let page = search_pubmed_page(&filters, 1, 0)
+            .await
+            .expect("pubmed page should accept standalone NOT query");
+
+        assert!(page.results.is_empty());
+        assert_eq!(page.total, Some(0));
     }
 
     #[tokio::test]
@@ -5038,6 +5091,185 @@ mod tests {
         assert!(page.results.iter().any(|row| {
             row.source == ArticleSource::PubTator
                 || row.matched_sources.contains(&ArticleSource::PubTator)
+        }));
+    }
+
+    #[tokio::test]
+    async fn federated_search_includes_pubmed_rows_in_matched_sources() {
+        let _guard = lock_env().await;
+        let pubtator = MockServer::start().await;
+        let europepmc = MockServer::start().await;
+        let pubmed = MockServer::start().await;
+        let s2 = MockServer::start().await;
+        let _pubtator_base = set_env_var("BIOMCP_PUBTATOR_BASE", Some(&pubtator.uri()));
+        let _europepmc_base = set_env_var("BIOMCP_EUROPEPMC_BASE", Some(&europepmc.uri()));
+        let _pubmed_base = set_env_var("BIOMCP_PUBMED_BASE", Some(&pubmed.uri()));
+        let _s2_base = set_env_var("BIOMCP_S2_BASE", Some(&s2.uri()));
+        let _s2_key = set_env_var("S2_API_KEY", None);
+
+        Mock::given(method("GET"))
+            .and(path("/graph/v1/paper/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total": 0,
+                "data": []
+            })))
+            .mount(&s2)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [{
+                    "_id": "pt-1",
+                    "pmid": 22663011,
+                    "title": "PubTator match",
+                    "journal": "Cancer Cell",
+                    "date": "2025-01-01",
+                    "score": 42.0
+                }],
+                "count": 1,
+                "total_pages": 1,
+                "current": 1,
+                "page_size": 25,
+                "facets": {}
+            })))
+            .expect(1)
+            .mount(&pubtator)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(query_param("page", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [],
+                "count": 1,
+                "total_pages": 1,
+                "current": 2,
+                "page_size": 25,
+                "facets": {}
+            })))
+            .expect(1)
+            .mount(&pubtator)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param(
+                "query",
+                "alternative microexon splicing metastasis AND NOT PUB_TYPE:\"retracted publication\"",
+            ))
+            .and(query_param("format", "json"))
+            .and(query_param("page", "1"))
+            .and(query_param("pageSize", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "hitCount": 1,
+                "resultList": {
+                    "result": [{
+                        "id": "EP-1",
+                        "pmid": "22663012",
+                        "title": "Europe PMC match",
+                        "journalTitle": "Nature",
+                        "firstPublicationDate": "2024-01-01",
+                        "citedByCount": 25,
+                        "pubType": "journal article"
+                    }]
+                }
+            })))
+            .expect(1)
+            .mount(&europepmc)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("page", "2"))
+            .and(query_param("format", "json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "hitCount": 1,
+                "resultList": {
+                    "result": []
+                }
+            })))
+            .expect(1)
+            .mount(&europepmc)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "0"))
+            .and(query_param("retmax", "100"))
+            .and(query_param(
+                "term",
+                "alternative microexon splicing metastasis NOT retracted publication[pt]",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "1",
+                    "idlist": ["22663013"]
+                }
+            })))
+            .expect(1)
+            .mount(&pubmed)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esummary.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("id", "22663013"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {
+                    "uids": ["22663013"],
+                    "22663013": {
+                        "uid": "22663013",
+                        "title": "PubMed visible match",
+                        "sortpubdate": "2025/03/01 00:00",
+                        "fulljournalname": "Science",
+                        "source": "Science"
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&pubmed)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/esearch.fcgi"))
+            .and(query_param("db", "pubmed"))
+            .and(query_param("retmode", "json"))
+            .and(query_param("retstart", "1"))
+            .and(query_param("retmax", "100"))
+            .and(query_param(
+                "term",
+                "alternative microexon splicing metastasis NOT retracted publication[pt]",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "esearchresult": {
+                    "count": "1",
+                    "idlist": []
+                }
+            })))
+            .expect(1)
+            .mount(&pubmed)
+            .await;
+
+        let page = search_page(
+            &ArticleSearchFilters {
+                keyword: Some("alternative microexon splicing metastasis".into()),
+                exclude_retracted: true,
+                ..empty_filters()
+            },
+            5,
+            0,
+            ArticleSourceFilter::All,
+        )
+        .await
+        .expect("federated search should succeed");
+
+        assert!(!page.results.is_empty());
+        assert!(page.results.iter().any(|row| {
+            row.source == ArticleSource::PubMed
+                || row.matched_sources.contains(&ArticleSource::PubMed)
         }));
     }
 
