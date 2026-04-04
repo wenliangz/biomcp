@@ -637,6 +637,38 @@ mod tests {
         assert_eq!(approx_bytes.load(Ordering::Relaxed), 8);
     }
 
+    #[test]
+    fn run_eviction_cycle_propagates_snapshot_error() {
+        let root = TempDirGuard::new("eviction-error");
+        let cache_path = root.http_dir();
+        let config = test_config(root.cache_root(), 100, DiskFreeThreshold::Percent(10));
+        let approx_bytes = AtomicU64::new(999);
+
+        let result = run_eviction_cycle_with(
+            &cache_path,
+            &config,
+            &approx_bytes,
+            |_| {
+                Err(crate::cache::CachePlannerError::Io {
+                    path: cache_path.clone(),
+                    source: std::io::Error::other("simulated snapshot failure"),
+                })
+            },
+            |_| {
+                Ok(FilesystemSpace {
+                    available_bytes: 90,
+                    total_bytes: 100,
+                })
+            },
+            |_, _, _, _| unreachable!("cleaner should not run when snapshot fails"),
+            || 1_000,
+        );
+
+        assert!(result.is_err(), "expected error to propagate from snapshot");
+        // approx_bytes should be unchanged since the cycle failed before resync
+        assert_eq!(approx_bytes.load(Ordering::Relaxed), 999);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn new_manager_seeds_approximate_bytes_from_fast_estimate() {
         let root = TempDirGuard::new("seed-estimate");
