@@ -24,6 +24,37 @@ def test_bioasq_module_readme_exists_and_uses_uv_run_script() -> None:
     assert "annotations/" in readme
 
 
+def test_ranking_calibration_readme_records_verified_scenarios_and_provenance() -> None:
+    readme = _read("benchmarks/bioasq/ranking-calibration/README.md")
+
+    assert "# BioASQ Ranking Calibration" in readme
+    for snippet in [
+        "mesh_synonym_gap_records_pubmed_tier0_baseline",
+        "anchor_count_gap_records_pubmed_title_hit_deficit_baseline",
+        "pubmed_unique_row_survives_first_page_in_mixed_federation",
+        "hf-public-pre2026",
+        "uv run --quiet --script benchmarks/bioasq/ingest_public.py --bundle hf-public-pre2026",
+        "benchmarks/bioasq/datasets/manifest.json",
+        "benchmarks/bioasq/datasets/README.md",
+        "docs/reference/bioasq-benchmark.md",
+        "spec/06-article.md::Keyword Anchors Tokenize In JSON Ranking Metadata",
+        "Historical leads",
+        "unresolved",
+    ]:
+        assert snippet in readme
+
+
+def test_ranking_calibration_links_are_present_in_benchmark_docs() -> None:
+    benchmark_readme = _read("benchmarks/bioasq/README.md")
+    reference_doc = _read("docs/reference/bioasq-benchmark.md")
+
+    assert "## Ranking calibration" in benchmark_readme
+    assert "ranking-calibration/README.md" in benchmark_readme
+
+    assert "## Ranking calibration" in reference_doc
+    assert "benchmarks/bioasq/ranking-calibration/README.md" in reference_doc
+
+
 def test_manifest_has_required_top_level_keys_and_bundle_ids() -> None:
     manifest = _read_json("benchmarks/bioasq/datasets/manifest.json")
 
@@ -94,6 +125,7 @@ def test_bioasq_reference_doc_covers_lane_split_provenance_and_official_runbook(
         "## Two lanes",
         "## Public historical lane",
         "## Recommended bundle",
+        "## Ranking calibration",
         "## Provenance and terms",
         "## Validity overlay",
         "## Official competition lane",
@@ -113,6 +145,7 @@ def test_bioasq_reference_doc_covers_lane_split_provenance_and_official_runbook(
         "24 hours",
         "public historical benchmark lane",
         "official competition lane",
+        "benchmarks/bioasq/ranking-calibration/README.md",
     ]:
         assert snippet in doc
 
