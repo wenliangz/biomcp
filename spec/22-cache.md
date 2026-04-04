@@ -136,7 +136,7 @@ echo "$json_out" | jq -e 'any(.rows[]; .api == "Cache limits" and .status == "wa
 
 md_out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" health)"
 echo "$md_out" | mustmatch like "Cache limits"
-echo "$md_out" | mustmatch like "warning"
+echo "$md_out" | mustmatch like "| Cache limits | warning |"
 ```
 
 ## Cache Clean JSON
