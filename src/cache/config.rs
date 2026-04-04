@@ -323,6 +323,9 @@ fn parse_disk_free_threshold(value: &str) -> Result<DiskFreeThreshold, &'static 
         if parsed == 0 {
             return Err("must be greater than 0");
         }
+        if parsed > 100 {
+            return Err("percent must be between 1 and 100");
+        }
         return Ok(DiskFreeThreshold::Percent(parsed));
     }
 
@@ -877,6 +880,24 @@ mod tests {
 
         let err = resolve_cache_config().expect_err("invalid env min_disk_free should fail");
         assert_invalid_argument_contains(err, &["BIOMCP_CACHE_MIN_DISK_FREE", "greater than 0"]);
+    }
+
+    #[test]
+    fn invalid_env_min_disk_free_over_100_percent_returns_error() {
+        let _lock = env_lock();
+        let root = TempDirGuard::new("min-disk-free-over100");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+        let _min_disk_free = set_env_var("BIOMCP_CACHE_MIN_DISK_FREE", Some("101%"));
+
+        let err = resolve_cache_config().expect_err("percent > 100 should fail");
+        assert_invalid_argument_contains(err, &["BIOMCP_CACHE_MIN_DISK_FREE", "between 1 and 100"]);
     }
 
     #[test]
