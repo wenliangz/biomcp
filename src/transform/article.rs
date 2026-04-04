@@ -42,6 +42,13 @@ fn strip_inline_html_tags(value: &str) -> String {
     re.replace_all(value, "").to_string()
 }
 
+fn normalize_compound_hyphens(value: &str) -> String {
+    static COMPOUND_HYPHEN_RE: OnceLock<Regex> = OnceLock::new();
+    let re = COMPOUND_HYPHEN_RE
+        .get_or_init(|| Regex::new(r"([a-z])-(\d)").expect("valid compound-hyphen regex"));
+    re.replace_all(value, "${1}${2}").into_owned()
+}
+
 pub fn clean_title(value: &str) -> String {
     strip_inline_html_tags(&decode_html_entities(value))
         .trim()
@@ -55,7 +62,11 @@ pub fn clean_abstract(value: &str) -> String {
 }
 
 pub fn normalize_article_search_text(value: &str) -> String {
-    collapse_whitespace(&clean_abstract(value)).to_ascii_lowercase()
+    let base = collapse_whitespace(&clean_abstract(value)).to_ascii_lowercase();
+    if !base.contains('-') {
+        return base;
+    }
+    normalize_compound_hyphens(&base)
 }
 
 #[cfg(test)]
@@ -1149,6 +1160,17 @@ mod tests {
         assert!(out.contains("KRAS"));
         assert!(!out.contains("&lt;"));
         assert!(!out.contains("<i>"));
+    }
+
+    #[test]
+    fn normalize_article_search_text_compacts_compound_hyphens() {
+        assert_eq!(normalize_article_search_text("LB-100"), "lb100");
+        assert_eq!(normalize_article_search_text("LB100"), "lb100");
+        assert_eq!(normalize_article_search_text("IL-2"), "il2");
+        assert_eq!(
+            normalize_article_search_text("meta-analysis"),
+            "meta-analysis"
+        );
     }
 
     #[test]

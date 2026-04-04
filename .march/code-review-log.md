@@ -1,4 +1,4 @@
-# Code Review Log — Ticket 147: Separate article source position from merge order
+# Code Review Log — Ticket 148: Tokenize article keyword anchors and compact compounds
 
 ## Summary
 
@@ -6,60 +6,49 @@ Clean implementation. No defects found. No fixes needed.
 
 ## Design Completeness Audit
 
-All 9 acceptance criteria from `design-final.md` have corresponding code changes:
+All 4 implementation plan items have matching code changes:
 
-| AC | Description | Status | Location |
-|---|---|---|---|
-| 1 | `source_local_position` field with `#[serde(skip)]` | Present | `article.rs:175-176` |
-| 2 | `finalize_article_candidates` no overwrite | Present | `article.rs:2421-2423` |
-| 3 | `merge_article_candidate` preserves min | Present | `article.rs:1032-1034` |
-| 4 | `rank_articles_by_directness` tiebreaker | Present | `article.rs:1235` |
-| 5 | Explicit per-leg counter in all 4 sources | Present | All four search functions |
-| 6 | PubMed pre-offset positions preserved | Present | Position assigned before `visible_skipped` check |
-| 7 | No append-order penalty | Present | New test proves it |
-| 8 | Deduped rows keep min position | Present | New test proves it |
-| 9 | `make check` passes | Confirmed | 1283 tests pass |
+1. **Compact compound-name hyphens** — `normalize_compound_hyphens()` added in `src/transform/article.rs:45-50` with `OnceLock<Regex>` pattern matching adjacent code.
+2. **Decompose keyword into multiple anchors** — `build_anchor_set()` in `src/entities/article.rs:1097-1127` separates keyword tokenization from structured filters.
+3. **Keep `anchor_matches_text()` unchanged** — confirmed no changes to this function.
+4. **Public-surface spec** — `spec/06-article.md` new section with `anchor_count == 4` assertion.
 
-No design items are missing from the implementation.
+All 8 acceptance criteria have corresponding code or tests. No gaps found.
 
 ## Test-Design Traceability
 
-All 7 proof matrix items from `design-final.md` verified:
+All 7 proof matrix entries have matching tests:
 
-| Proof Matrix Item | Test/Proof | Found |
+| Proof matrix entry | Test found | Verified |
 |---|---|---|
-| Field exists, serialization unchanged | `article_search_result_serializes_unknown_retraction_as_null` (existing, passes) | Yes |
-| PubMed pre-offset positions | `search_pubmed_page_applies_offset_after_filtering` (extended with position assertions) | Yes |
-| Finalization preserves positions | `finalize_article_candidates_preserves_source_local_position` (new) | Yes |
-| Dedup keeps min position | `merge_article_candidates_keeps_min_source_local_position` (new) | Yes |
-| Federated relevance uses leg-local position | `federated_relevance_uses_source_local_position_not_merge_order` (new) | Yes |
-| Existing ranking/merge behavior holds | Updated fixtures + renamed test | Yes |
-| `make check` green | Independently verified | Yes |
+| Multi-word keyword becomes multiple anchors | `keyword_tokenization_decomposes_multi_word_into_separate_anchors` | yes |
+| Structured/keyword overlap deduplicated | `keyword_tokenization_dedups_structured_filter_overlap` | yes |
+| Compound forms normalize to one token | `normalize_article_search_text_compacts_compound_hyphens` | yes |
+| Hyphenated query matches compact title | `compound_name_variants_match_symmetrically_in_ranking` | yes |
+| Partial multi-token produces nonzero directness | `multi_concept_keyword_partial_match_scores_nonzero` | yes |
+| All tokens in title produce tier 3 | `multi_concept_keyword_all_tokens_in_title_scores_tier3` | yes |
+| JSON metadata reflects tokenized count | `spec/06-article.md` anchor_count == 4 assertion | yes |
+
+No missing tests.
 
 ## Implementation Quality
 
-- **Minimal and correct**: Rename + one removed assignment + four push-site position assignments. No new structs, enums, or helpers.
-- **Convention adherence**: Follows existing patterns (explicit counter with `saturating_add`, filter-then-assign-then-push flow).
-- **EuropePMC retraction injection**: Replacement row uses `out.len()` for position. At that point `source_position == out.len()` (or `out.len() + 1` after pop), so values are equivalent. Consistent with design rule.
-- **Semantic Scholar**: Initial struct sets `source_local_position: 0`, then overwrites with counter before push. Correct — initial value never reaches ranking.
-- **No duplication**: 1:1 rename of existing field. No parallel tracking.
+- **Convention adherence**: Follows existing `OnceLock<Regex>` pattern, reuses `normalize_article_search_text` symmetry, dedup via `HashSet` is consistent with prior code.
+- **Test quality**: Tests verify contract behavior (exact anchor vectors, tier levels, hit counts), not implementation details. Would catch regressions.
+- **Performance**: `contains('-')` guard avoids regex overhead for the common case. `into_owned()` on `Cow` is idiomatic and bounded to hyphen-containing strings only.
+- **No duplication**: Searched repo — no existing functions do similar compound-hyphen normalization or keyword tokenization.
 
 ## Security
 
-No concerns. `source_local_position` is `#[serde(skip)]` — no external input, no injection surface, no auth implications.
-
-## Performance
-
-No impact. O(1) position assignments at push sites. Same sort comparator structure.
+No concerns. No untrusted input flows into file paths, shell commands, or queries. Regex is compiled once and reused.
 
 ## Spec Coverage
 
-No new `spec/` file required. The changed behavior is an internal relevance tiebreaker using a `#[serde(skip)]` field — no stable CLI/documentation surface to assert with executable markdown. Intentional gap per approved design.
+The new spec heading tests outside-in behavior: user passes a multi-word keyword query, JSON output reflects tokenized anchor count. Existing markdown rendering tests remain green and cover the rendering surface.
 
 ## Residual Concerns for Verify
 
-- Architecture docs (`overview.md`, `source-integration.md`) still reference `insertion_index` in their problem-description sections. These are accurate as historical descriptions and out of scope for this ticket.
-- The `weak_rows` fixture in `directness_ranking_uses_full_title_and_token_boundaries` was changed from `insertion_index: 0` to `source_local_position: 3`. Cosmetic only — the test outcome is determined by title-anchor coverage, not position.
+None.
 
 ## Defect Register
 
