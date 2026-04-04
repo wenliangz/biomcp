@@ -11,9 +11,10 @@ use crate::entities::adverse_event::{
     DeviceEvent, DeviceEventSearchResult, RecallSearchResult,
 };
 use crate::entities::article::{
-    AnnotationCount, Article, ArticleAnnotations, ArticleBatchEntitySummary, ArticleBatchItem,
-    ArticleGraphResult, ArticleRecommendationsResult, ArticleRelatedPaper, ArticleSearchResult,
-    ArticleSort, ArticleSource,
+    ARTICLE_RELEVANCE_RANKING_POLICY, AnnotationCount, Article, ArticleAnnotations,
+    ArticleBatchEntitySummary, ArticleBatchItem, ArticleGraphResult, ArticleRankingMetadata,
+    ArticleRecommendationsResult, ArticleRelatedPaper, ArticleSearchResult, ArticleSort,
+    ArticleSource,
 };
 use crate::entities::discover::{DiscoverResult, DiscoverType};
 use crate::entities::disease::{
@@ -2213,6 +2214,43 @@ fn article_sources_label(row: &ArticleSearchResult) -> String {
         .join(", ")
 }
 
+fn article_lexical_ranking_label(ranking: &ArticleRankingMetadata) -> Option<String> {
+    if ranking.anchor_count == 0 {
+        return None;
+    }
+    if ranking.all_anchors_in_title {
+        return Some(format!(
+            "title {}/{}",
+            ranking.title_anchor_hits, ranking.anchor_count
+        ));
+    }
+    if ranking.all_anchors_in_text {
+        return Some(format!(
+            "title+abstract {}/{}",
+            ranking.combined_anchor_hits, ranking.anchor_count
+        ));
+    }
+    if ranking.abstract_anchor_hits > 0 && ranking.title_anchor_hits > 0 {
+        return Some(format!(
+            "title+abstract {}/{}",
+            ranking.combined_anchor_hits, ranking.anchor_count
+        ));
+    }
+    if ranking.abstract_anchor_hits > 0 {
+        return Some(format!(
+            "abstract {}/{}",
+            ranking.abstract_anchor_hits, ranking.anchor_count
+        ));
+    }
+    if ranking.title_anchor_hits > 0 {
+        return Some(format!(
+            "title {}/{}",
+            ranking.title_anchor_hits, ranking.anchor_count
+        ));
+    }
+    None
+}
+
 fn article_ranking_why(row: &ArticleSearchResult, sort: ArticleSort) -> String {
     if sort != ArticleSort::Relevance {
         return "-".to_string();
@@ -2220,40 +2258,14 @@ fn article_ranking_why(row: &ArticleSearchResult, sort: ArticleSort) -> String {
     let Some(ranking) = row.ranking.as_ref() else {
         return "-".to_string();
     };
-    if ranking.anchor_count == 0 {
-        return "-".to_string();
-    }
-    if ranking.all_anchors_in_title {
-        return format!(
-            "title {}/{}",
-            ranking.title_anchor_hits, ranking.anchor_count
+    let lexical_label = article_lexical_ranking_label(ranking);
+    if ranking.pubmed_rescue {
+        return lexical_label.map_or_else(
+            || "pubmed-rescue".to_string(),
+            |label| format!("pubmed-rescue + {label}"),
         );
     }
-    if ranking.all_anchors_in_text {
-        return format!(
-            "title+abstract {}/{}",
-            ranking.combined_anchor_hits, ranking.anchor_count
-        );
-    }
-    if ranking.abstract_anchor_hits > 0 && ranking.title_anchor_hits > 0 {
-        return format!(
-            "title+abstract {}/{}",
-            ranking.combined_anchor_hits, ranking.anchor_count
-        );
-    }
-    if ranking.abstract_anchor_hits > 0 {
-        return format!(
-            "abstract {}/{}",
-            ranking.abstract_anchor_hits, ranking.anchor_count
-        );
-    }
-    if ranking.title_anchor_hits > 0 {
-        return format!(
-            "title {}/{}",
-            ranking.title_anchor_hits, ranking.anchor_count
-        );
-    }
-    "-".to_string()
+    lexical_label.unwrap_or_else(|| "-".to_string())
 }
 
 pub fn article_search_markdown_with_footer_and_context(
@@ -2286,7 +2298,7 @@ pub fn article_search_markdown_with_footer_and_context(
         semantic_scholar_enabled => semantic_scholar_enabled,
         note => note,
         sort => sort.as_str(),
-        ranking_policy => "directness-first (title coverage > title+abstract coverage > study/review cue > citation support)",
+        ranking_policy => ARTICLE_RELEVANCE_RANKING_POLICY,
         pagination_footer => pagination_footer,
     })?;
     let body = with_pagination_footer(body, pagination_footer);
@@ -8562,6 +8574,9 @@ pub(crate) mod tests {
                     all_anchors_in_title: true,
                     all_anchors_in_text: true,
                     study_or_review_cue: false,
+                    pubmed_rescue: false,
+                    pubmed_rescue_kind: None,
+                    pubmed_source_position: None,
                 }),
                 matched_sources: vec![ArticleSource::PubTator, ArticleSource::SemanticScholar],
                 normalized_title: "entity-ranked".into(),
@@ -8591,6 +8606,9 @@ pub(crate) mod tests {
                     all_anchors_in_title: false,
                     all_anchors_in_text: true,
                     study_or_review_cue: true,
+                    pubmed_rescue: false,
+                    pubmed_rescue_kind: None,
+                    pubmed_source_position: None,
                 }),
                 matched_sources: vec![ArticleSource::EuropePmc],
                 normalized_title: "field-ranked".into(),
@@ -8616,7 +8634,7 @@ pub(crate) mod tests {
             "> Note: --type restricts article search to Europe PMC and PubMed. PubTator3 and Semantic Scholar do not support publication-type filtering."
         ));
         assert!(markdown.contains("Semantic Scholar: enabled"));
-        assert!(markdown.contains("Ranking: directness-first"));
+        assert!(markdown.contains("Ranking: calibrated PubMed rescue + lexical directness"));
         assert!(markdown.contains("| PMID | Title | Source(s) | Date | Why | Cit. |"));
         assert!(markdown.contains("PubTator3, Semantic Scholar"));
         assert!(markdown.contains("title 2/2"));
@@ -8656,6 +8674,9 @@ pub(crate) mod tests {
                 all_anchors_in_title: false,
                 all_anchors_in_text: false,
                 study_or_review_cue: false,
+                pubmed_rescue: false,
+                pubmed_rescue_kind: None,
+                pubmed_source_position: None,
             }),
             normalized_title: "partial coverage".into(),
             normalized_abstract: String::new(),
@@ -8664,6 +8685,45 @@ pub(crate) mod tests {
         };
         let why = article_ranking_why(&row, ArticleSort::Relevance);
         assert_eq!(why, "title+abstract 2/3");
+    }
+
+    #[test]
+    fn article_ranking_why_rescue_composes_with_lexical_reason() {
+        let row = ArticleSearchResult {
+            pmid: "1".into(),
+            title: "Rescued partial coverage".into(),
+            pmcid: None,
+            doi: None,
+            journal: None,
+            date: None,
+            citation_count: None,
+            influential_citation_count: None,
+            source: ArticleSource::PubMed,
+            matched_sources: vec![ArticleSource::PubMed],
+            score: None,
+            is_retracted: None,
+            abstract_snippet: None,
+            ranking: Some(crate::entities::article::ArticleRankingMetadata {
+                directness_tier: 1,
+                anchor_count: 3,
+                title_anchor_hits: 1,
+                abstract_anchor_hits: 1,
+                combined_anchor_hits: 2,
+                all_anchors_in_title: false,
+                all_anchors_in_text: false,
+                study_or_review_cue: false,
+                pubmed_rescue: true,
+                pubmed_rescue_kind: Some(crate::entities::article::ArticlePubMedRescueKind::Unique),
+                pubmed_source_position: Some(0),
+            }),
+            normalized_title: "rescued partial coverage".into(),
+            normalized_abstract: String::new(),
+            publication_type: None,
+            source_local_position: 0,
+        };
+
+        let why = article_ranking_why(&row, ArticleSort::Relevance);
+        assert_eq!(why, "pubmed-rescue + title+abstract 2/3");
     }
 
     #[test]
