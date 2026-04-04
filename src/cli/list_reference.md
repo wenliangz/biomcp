@@ -117,6 +117,7 @@ Results depend on source document wording and may vary across sources.
 ## Ops
 
 - `cache path` - print the managed HTTP cache directory `<resolved cache_root>/http`; output stays plain text and ignores `--json`
+- `cache stats` - show HTTP cache statistics (blob counts, bytes, age range, configured limits); supports `--json` for machine-readable output
 - `ema sync`
 - `update [--check]`
 - `uninstall`

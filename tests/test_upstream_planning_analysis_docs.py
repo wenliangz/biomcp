@@ -211,8 +211,14 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
         "Semantic Scholar article helpers are explicitly limited to 1 request/sec per process and are not part of article search fan-out"
         not in technical
     )
-    assert "Article search fans out to PubTator3 and Europe PMC in parallel by default." in article_guide_ws
-    assert "BioMCP also adds a Semantic Scholar search leg" in article_guide_ws
+    assert (
+        "Article search fans out to PubTator3, Europe PMC, and PubMed by default when the filter set is compatible."
+        in article_guide_ws
+    )
+    assert (
+        "When the filter set is also Semantic Scholar-compatible, BioMCP adds that search leg for the same typed query"
+        in article_guide_ws
+    )
     assert "PubTator3 + Europe PMC + optional Semantic Scholar" in data_sources_ws
     assert (
         "PubTator3 + Europe PMC for federated search, with an optional Semantic Scholar leg "
@@ -222,10 +228,8 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "fn has_strict_europepmc_filters(filters: &ArticleSearchFilters) -> bool {" in article_impl
     assert "fn plan_backends(" in article_impl
     assert "pub fn semantic_scholar_search_enabled(" in article_impl
-    assert (
-        "--source pubtator does not support strict filters --open-access or --type."
-        in article_impl
-    )
+    assert "--source pubtator does not support --type." in article_impl
+    assert "--source pubtator does not support --open-access." in article_impl
     assert "Unsupported identifier format for Semantic Scholar article helpers:" in article_impl
     assert (
         "Unsupported identifier format. BioMCP resolves PMID (digits only"
@@ -317,6 +321,7 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
     assert "biomcp skill                  → show the embedded BioMCP agent guide" in ux
     assert "biomcp skill list             → list embedded worked examples" in ux
     assert "biomcp cache path             → print the managed HTTP cache path (plain text; ignores `--json`)" in ux
+    assert "biomcp cache stats            → show HTTP cache statistics (JSON supported)" in ux
     assert "Overview: `biomcp skill`" in ux
     assert "List: `biomcp skill list`" in ux
     assert "Open: `biomcp skill 01` or `biomcp skill article-follow-up`" in ux
@@ -329,8 +334,12 @@ def test_technical_and_ux_docs_match_current_cli_and_workflow_contracts() -> Non
         in ux
     )
     assert (
-        "JSON is the default script contract for query commands, with a documented plain-text exception for `biomcp cache path`."
-        in ux
+        "JSON is the default script contract for query commands, with a documented "
+        "plain-text exception for `biomcp cache path`. `biomcp cache stats` "
+        "supports `--json` normally. The cache family remains CLI-only because "
+        "revealing workstation-local filesystem paths over MCP would cross the "
+        "runtime security boundary."
+        in ux_ws
     )
 
 
