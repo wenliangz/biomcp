@@ -222,6 +222,37 @@ pub(crate) fn plan_size_lru(
     }
 }
 
+pub(crate) fn plan_composite_cleanup(
+    snapshot: &CacheSnapshot,
+    now_ms: u128,
+    max_age: Option<Duration>,
+    max_size: Option<u64>,
+) -> CacheCleanupPlan {
+    let orphan_plan = plan_orphan_gc(snapshot);
+    let age_plan = max_age.map_or_else(CacheCleanupPlan::empty, |limit| {
+        plan_age_cleanup(snapshot, now_ms, limit)
+    });
+    let projected_after_age =
+        projected_snapshot_after_entry_removals(snapshot, &age_plan.entry_removals);
+    let size_plan = max_size.map_or_else(CacheCleanupPlan::empty, |limit| {
+        plan_size_lru(&projected_after_age, limit)
+    });
+
+    let mut entry_removals = age_plan.entry_removals;
+    entry_removals.extend(size_plan.entry_removals);
+
+    let mut blob_removals = orphan_plan.blob_removals;
+    blob_removals.extend(age_plan.blob_removals);
+    blob_removals.extend(size_plan.blob_removals);
+    blob_removals = dedup_blob_removals(blob_removals);
+
+    CacheCleanupPlan {
+        reclaimed_blob_bytes: sum_blob_bytes(&blob_removals),
+        entry_removals,
+        blob_removals,
+    }
+}
+
 fn walk_content_tree(
     cache_path: &Path,
     content_root: &Path,
@@ -337,6 +368,51 @@ fn entry_refcounts(entries: &[CacheEntry]) -> HashMap<Integrity, usize> {
     refcounts
 }
 
+impl CacheCleanupPlan {
+    fn empty() -> Self {
+        Self {
+            entry_removals: Vec::new(),
+            blob_removals: Vec::new(),
+            reclaimed_blob_bytes: 0,
+        }
+    }
+}
+
+fn projected_snapshot_after_entry_removals(
+    snapshot: &CacheSnapshot,
+    entry_removals: &[CacheEntry],
+) -> CacheSnapshot {
+    let removed_keys = entry_removals
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect::<HashSet<_>>();
+    let entries = snapshot
+        .entries
+        .iter()
+        .filter(|entry| !removed_keys.contains(entry.key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let projected_refcounts = entry_refcounts(&entries);
+    let mut blobs = snapshot
+        .blobs
+        .iter()
+        .map(|blob| CacheBlob {
+            refcount: projected_refcounts
+                .get(&blob.integrity)
+                .copied()
+                .unwrap_or_default(),
+            ..blob.clone()
+        })
+        .collect::<Vec<_>>();
+    blobs.sort_by(blob_sort_key);
+
+    CacheSnapshot {
+        cache_path: snapshot.cache_path.clone(),
+        entries,
+        blobs,
+    }
+}
+
 fn projected_blob_removals(
     snapshot: &CacheSnapshot,
     entry_removals: &[CacheEntry],
@@ -379,6 +455,16 @@ fn blob_sort_key(left: &CacheBlob, right: &CacheBlob) -> std::cmp::Ordering {
         .then_with(|| left_hex.cmp(&right_hex))
 }
 
+fn dedup_blob_removals(blobs: Vec<CacheBlob>) -> Vec<CacheBlob> {
+    let mut by_integrity = HashMap::new();
+    for blob in blobs {
+        by_integrity.entry(blob.integrity.clone()).or_insert(blob);
+    }
+    let mut deduped = by_integrity.into_values().collect::<Vec<_>>();
+    deduped.sort_by(blob_sort_key);
+    deduped
+}
+
 fn sum_blob_bytes(blobs: &[CacheBlob]) -> u64 {
     blobs.iter().map(|blob| blob.size_bytes).sum()
 }
@@ -386,12 +472,13 @@ fn sum_blob_bytes(blobs: &[CacheBlob]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheBlob, CacheEntry, CachePlannerError, blob_path_for_integrity, plan_age_cleanup,
-        plan_orphan_gc, plan_size_lru, snapshot_cache,
+        CacheBlob, CacheEntry, CachePlannerError, CacheSnapshot, blob_path_for_integrity,
+        plan_age_cleanup, plan_composite_cleanup, plan_orphan_gc, plan_size_lru, snapshot_cache,
     };
     use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use ssri::Integrity;
@@ -600,6 +687,62 @@ mod tests {
         let snapshot = snapshot_cache(&cache_root).expect("snapshot should succeed");
         assert_eq!(snapshot.blobs.len(), 1);
         assert_eq!(snapshot.blobs[0].integrity, live);
+    }
+
+    #[test]
+    fn composite_cleanup_plans_age_then_size_on_one_snapshot() {
+        let old = Integrity::from(b"old");
+        let new = Integrity::from(b"new");
+        let snapshot = CacheSnapshot {
+            cache_path: PathBuf::from("/tmp/cache/http"),
+            entries: vec![
+                CacheEntry {
+                    key: "old".into(),
+                    integrity: old.clone(),
+                    time_ms: 100,
+                    size_bytes: 3,
+                },
+                CacheEntry {
+                    key: "new".into(),
+                    integrity: new.clone(),
+                    time_ms: 900,
+                    size_bytes: 3,
+                },
+            ],
+            blobs: vec![
+                CacheBlob {
+                    integrity: old.clone(),
+                    path: PathBuf::from("content-v2/sha512/aa/bb/old"),
+                    size_bytes: 3,
+                    refcount: 1,
+                },
+                CacheBlob {
+                    integrity: new.clone(),
+                    path: PathBuf::from("content-v2/sha512/cc/dd/new"),
+                    size_bytes: 3,
+                    refcount: 1,
+                },
+            ],
+        };
+
+        let plan =
+            plan_composite_cleanup(&snapshot, 1_000, Some(Duration::from_millis(500)), Some(3));
+
+        assert_eq!(
+            plan.entry_removals
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old"]
+        );
+        assert_eq!(
+            plan.blob_removals
+                .iter()
+                .map(|blob| blob.integrity.clone())
+                .collect::<Vec<_>>(),
+            vec![old]
+        );
+        assert_eq!(plan.reclaimed_blob_bytes, 3);
     }
 
     #[cfg(unix)]

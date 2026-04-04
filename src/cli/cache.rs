@@ -1,3 +1,5 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use clap::Subcommand;
 
 use crate::error::BioMcpError;
@@ -20,6 +22,41 @@ Print an on-demand snapshot of blob counts, bytes, age range, and configured cac
 Use the global `--json` flag for machine-readable output.
 This command is CLI-only because cache commands reveal workstation-local filesystem paths.")]
     Stats,
+    /// Remove orphan blobs and optionally evict cache entries by age or size
+    #[command(long_about = "\
+Remove orphan blobs and optionally evict cache entries by age or size.
+
+This command always garbage-collects orphaned blobs. Use --max-age to remove entries
+older than a duration like 30d or 12h, and --max-size to LRU-evict until referenced
+blob bytes are under a target like 5G or 500M. Use --dry-run to preview the same
+cleanup plan without deleting anything. The global `--json` flag returns the
+structured cleanup report.
+This command is CLI-only because cache commands reveal workstation-local filesystem paths.")]
+    Clean {
+        /// Remove entries older than this duration (e.g. 30d, 12h)
+        #[arg(long, value_parser = parse_cache_max_age)]
+        max_age: Option<Duration>,
+
+        /// LRU-evict until referenced blob bytes are under this size (e.g. 5G, 500M)
+        #[arg(long, value_parser = parse_cache_max_size)]
+        max_size: Option<u64>,
+
+        /// Show the cleanup plan without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+fn parse_cache_max_age(value: &str) -> Result<Duration, String> {
+    humantime::parse_duration(value)
+        .map_err(|err| format!("--max-age must be a duration like 30d or 12h: {err}"))
+}
+
+fn parse_cache_max_size(value: &str) -> Result<u64, String> {
+    value
+        .parse::<bytesize::ByteSize>()
+        .map(|size| size.as_u64())
+        .map_err(|err| format!("--max-size must be a size like 5G or 500M: {err}"))
 }
 
 /// Render the managed HTTP cache path without creating or migrating cache directories.
@@ -30,6 +67,42 @@ This command is CLI-only because cache commands reveal workstation-local filesys
 pub fn render_path() -> Result<String, BioMcpError> {
     let config = crate::cache::resolve_cache_config()?;
     Ok(config.cache_root.join("http").display().to_string())
+}
+
+pub(crate) fn execute_clean(
+    max_age: Option<Duration>,
+    max_size: Option<u64>,
+    dry_run: bool,
+) -> Result<crate::cache::CleanReport, BioMcpError> {
+    let config = crate::cache::resolve_cache_config()?;
+    let cache_path = config.cache_root.join("http");
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| {
+            BioMcpError::InvalidArgument(format!("system clock is before the Unix epoch: {err}"))
+        })?
+        .as_millis();
+    crate::cache::execute_cache_clean(
+        &cache_path,
+        crate::cache::CleanOptions {
+            max_age,
+            max_size,
+            dry_run,
+        },
+        &config,
+        now_ms,
+    )
+}
+
+pub(crate) fn render_clean_text(report: &crate::cache::CleanReport) -> String {
+    format!(
+        "Cache clean: dry_run={} orphans_removed={} entries_removed={} bytes_freed={} errors={}",
+        report.dry_run,
+        report.orphans_removed,
+        report.entries_removed,
+        report.bytes_freed,
+        report.errors.len()
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

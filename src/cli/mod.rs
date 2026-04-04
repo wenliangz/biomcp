@@ -6643,6 +6643,18 @@ pub async fn run(cli: Cli) -> anyhow::Result<String> {
                         Ok(report.to_markdown())
                     }
                 }
+                cache::CacheCommand::Clean {
+                    max_age,
+                    max_size,
+                    dry_run,
+                } => {
+                    let report = crate::cli::cache::execute_clean(max_age, max_size, dry_run)?;
+                    if cli.json {
+                        Ok(crate::render::json::to_pretty(&report)?)
+                    } else {
+                        Ok(crate::cli::cache::render_clean_text(&report))
+                    }
+                }
             },
             Commands::Ema { cmd } => match cmd {
                 EmaCommand::Sync => {
@@ -7522,6 +7534,44 @@ mod tests {
     }
 
     #[test]
+    fn cache_clean_command_parses_with_flags() {
+        let cli = Cli::try_parse_from([
+            "biomcp",
+            "cache",
+            "clean",
+            "--max-age",
+            "30d",
+            "--max-size",
+            "500M",
+            "--dry-run",
+        ])
+        .expect("cache clean should parse");
+
+        let Cli {
+            command:
+                Commands::Cache {
+                    cmd:
+                        crate::cli::cache::CacheCommand::Clean {
+                            max_age,
+                            max_size,
+                            dry_run,
+                        },
+                },
+            ..
+        } = cli
+        else {
+            panic!("expected cache clean command");
+        };
+
+        assert_eq!(
+            max_age,
+            Some(std::time::Duration::from_secs(30 * 24 * 60 * 60))
+        );
+        assert_eq!(max_size, Some(500_000_000));
+        assert!(dry_run);
+    }
+
+    #[test]
     fn top_level_help_lists_cache_command() {
         let mut command = super::build_cli();
         let mut help = Vec::new();
@@ -7567,6 +7617,17 @@ mod tests {
         assert!(help.contains("--json"));
         assert!(help.contains("CLI-only"));
         assert!(help.contains("local filesystem paths"));
+    }
+
+    #[test]
+    fn cache_clean_help_mentions_dry_run_json_and_limits() {
+        let help = render_cache_clean_long_help();
+
+        assert!(help.contains("--max-age"));
+        assert!(help.contains("--max-size"));
+        assert!(help.contains("--dry-run"));
+        assert!(help.contains("--json"));
+        assert!(help.contains("orphan"));
     }
 
     #[test]
@@ -7675,6 +7736,21 @@ mod tests {
         stats
             .write_long_help(&mut help)
             .expect("cache stats help should render");
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
+    fn render_cache_clean_long_help() -> String {
+        let mut command = Cli::command();
+        let cache = command
+            .find_subcommand_mut("cache")
+            .expect("cache subcommand should exist");
+        let clean = cache
+            .find_subcommand_mut("clean")
+            .expect("cache clean subcommand should exist");
+        let mut help = Vec::new();
+        clean
+            .write_long_help(&mut help)
+            .expect("cache clean help should render");
         String::from_utf8(help).expect("help should be utf-8")
     }
 
@@ -11048,6 +11124,67 @@ mod tests {
         }
         assert!(!output.contains("| Path |"));
         assert!(!output.contains("| Blob bytes |"));
+    }
+
+    #[tokio::test]
+    async fn cache_clean_execute_returns_single_line_summary() {
+        let _guard = lock_env().await;
+        let root = TempDirGuard::new("cache-clean-text");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+
+        let output = execute(vec![
+            "biomcp".to_string(),
+            "cache".to_string(),
+            "clean".to_string(),
+        ])
+        .await
+        .expect("cache clean should execute");
+
+        assert!(output.starts_with("Cache clean:"));
+        assert!(output.contains("dry_run=false"));
+        assert_eq!(output.lines().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn cache_clean_execute_json_returns_structured_report() {
+        let _guard = lock_env().await;
+        let root = TempDirGuard::new("cache-clean-json");
+        let cache_home = root.path().join("cache-home");
+        let config_home = root.path().join("config-home");
+        std::fs::create_dir_all(&cache_home).expect("create cache home");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        let _cache_home = set_env_var("XDG_CACHE_HOME", Some(&cache_home.to_string_lossy()));
+        let _config_home = set_env_var("XDG_CONFIG_HOME", Some(&config_home.to_string_lossy()));
+        let _cache_dir = set_env_var("BIOMCP_CACHE_DIR", None);
+        let _cache_size = set_env_var("BIOMCP_CACHE_MAX_SIZE", None);
+
+        let output = execute(vec![
+            "biomcp".to_string(),
+            "--json".to_string(),
+            "cache".to_string(),
+            "clean".to_string(),
+        ])
+        .await
+        .expect("cache clean json should execute");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&output).expect("cache clean json should be valid");
+        for key in [
+            "dry_run",
+            "orphans_removed",
+            "entries_removed",
+            "bytes_freed",
+            "errors",
+        ] {
+            assert!(value.get(key).is_some(), "missing key {key}: {value}");
+        }
     }
 }
 

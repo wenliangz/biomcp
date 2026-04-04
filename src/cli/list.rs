@@ -729,6 +729,9 @@ mod tests {
         assert!(out.contains("`discover <query>`"));
         assert!(out.contains("`cache path`"));
         assert!(out.contains("`cache stats`"));
+        assert!(
+            out.contains("`cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]`")
+        );
     }
 
     #[test]

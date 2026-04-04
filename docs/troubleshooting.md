@@ -32,15 +32,20 @@ biomcp --no-cache search gene -q BRAF --limit 3
 biomcp --no-cache get variant rs113488022
 ```
 
-If `--no-cache` works while cached mode fails repeatedly, clear the HTTP cache and retry.
-The command below is the default Linux/XDG example; if you override the cache root
-with `BIOMCP_CACHE_DIR` or `cache.toml`, run `biomcp cache path` first to print the
-managed HTTP cache path under the resolved cache root, then delete only its `http/`
-subdirectory manually:
+If `--no-cache` works while cached mode fails repeatedly, `biomcp cache clean`
+is the safe first step before any manual wipe. If you override the cache root
+with `BIOMCP_CACHE_DIR` or `cache.toml`, run `biomcp cache path` first to print
+the managed HTTP cache path under the resolved cache root.
 
 ```bash
-rm -rf ~/.cache/biomcp/http
+biomcp cache clean
+biomcp cache clean --dry-run
+biomcp cache clean --max-age 7d
 ```
+
+If cleanup still does not recover the cache, treat a full `http/` removal as a
+manual operator step tied to the resolved cache path you printed with
+`biomcp cache path`, rather than a hard-coded platform example.
 
 ## 3) ClinicalTrials.gov API v2 quirks
 
