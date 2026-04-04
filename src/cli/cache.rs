@@ -189,11 +189,14 @@ impl From<crate::cache::ConfigOrigin> for CacheStatsOrigin {
 pub(crate) struct CacheStatsReport {
     pub(crate) path: String,
     pub(crate) blob_bytes: u64,
+    pub(crate) referenced_blob_bytes: u64,
     pub(crate) blob_count: usize,
     pub(crate) orphan_count: usize,
     pub(crate) age_range: Option<CacheStatsAgeRange>,
     pub(crate) max_size_bytes: u64,
     pub(crate) max_size_origin: CacheStatsOrigin,
+    pub(crate) min_disk_free: String,
+    pub(crate) min_disk_free_origin: CacheStatsOrigin,
     pub(crate) max_age_secs: u64,
     pub(crate) max_age_origin: CacheStatsOrigin,
 }
@@ -207,6 +210,7 @@ impl CacheStatsReport {
         [
             format!("| Path | {} |", self.path),
             format!("| Blob bytes | {} |", self.blob_bytes),
+            format!("| Referenced blob bytes | {} |", self.referenced_blob_bytes),
             format!("| Blob files | {} |", self.blob_count),
             format!("| Orphan blobs | {} |", self.orphan_count),
             format!("| Age range | {age_display} |"),
@@ -214,6 +218,11 @@ impl CacheStatsReport {
                 "| Max size | {} bytes ({}) |",
                 self.max_size_bytes,
                 self.max_size_origin.as_str()
+            ),
+            format!(
+                "| Min disk free | {} ({}) |",
+                self.min_disk_free,
+                self.min_disk_free_origin.as_str()
             ),
             format!(
                 "| Max age | {} s ({}) |",
@@ -249,10 +258,12 @@ pub(crate) fn build_cache_stats_report(
         (None, None) => None,
         _ => unreachable!("min/max over the same iterator source must agree"),
     };
+    let usage = crate::cache::summarize_cache_usage(snapshot);
 
     Ok(CacheStatsReport {
         path: snapshot.cache_path.display().to_string(),
-        blob_bytes: snapshot.blobs.iter().map(|blob| blob.size_bytes).sum(),
+        blob_bytes: usage.total_blob_bytes,
+        referenced_blob_bytes: usage.referenced_blob_bytes,
         blob_count: snapshot.blobs.len(),
         orphan_count: snapshot
             .blobs
@@ -262,6 +273,8 @@ pub(crate) fn build_cache_stats_report(
         age_range,
         max_size_bytes: config.max_size,
         max_size_origin: CacheStatsOrigin::from(config.origins.max_size),
+        min_disk_free: config.min_disk_free.display(),
+        min_disk_free_origin: CacheStatsOrigin::from(config.origins.min_disk_free),
         max_age_secs: config.max_age.as_secs(),
         max_age_origin: CacheStatsOrigin::from(config.origins.max_age),
     })
@@ -306,7 +319,8 @@ mod tests {
         collect_cache_stats_report_with, render_path,
     };
     use crate::cache::{
-        CacheBlob, CacheConfigOrigins, CacheEntry, CacheSnapshot, ConfigOrigin, ResolvedCacheConfig,
+        CacheBlob, CacheConfigOrigins, CacheEntry, CacheSnapshot, ConfigOrigin, DiskFreeThreshold,
+        ResolvedCacheConfig,
     };
     use crate::error::BioMcpError;
 
@@ -573,6 +587,7 @@ mod tests {
         ResolvedCacheConfig {
             cache_root: cache_root.into(),
             max_size,
+            min_disk_free: DiskFreeThreshold::Percent(10),
             max_age: Duration::from_secs(max_age_secs),
             origins,
         }
@@ -588,6 +603,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Default,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::Default,
             },
         );
@@ -599,11 +615,14 @@ mod tests {
             CacheStatsReport {
                 path: "/tmp/cache/http".into(),
                 blob_bytes: 0,
+                referenced_blob_bytes: 0,
                 blob_count: 0,
                 orphan_count: 0,
                 age_range: None,
                 max_size_bytes: 10_000_000_000,
                 max_size_origin: CacheStatsOrigin::Default,
+                min_disk_free: "10%".into(),
+                min_disk_free_origin: CacheStatsOrigin::Default,
                 max_age_secs: 86_400,
                 max_age_origin: CacheStatsOrigin::Default,
             }
@@ -612,8 +631,16 @@ mod tests {
         let json = crate::render::json::to_pretty(&report).expect("json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert!(value["age_range"].is_null());
+        assert_eq!(value["referenced_blob_bytes"], 0);
         assert_eq!(value["max_size_origin"], "default");
+        assert_eq!(value["min_disk_free"], "10%");
+        assert_eq!(value["min_disk_free_origin"], "default");
         assert_eq!(value["max_age_origin"], "default");
+        assert!(
+            report
+                .to_markdown()
+                .contains("| Referenced blob bytes | 0 |")
+        );
         assert!(report.to_markdown().contains("| Age range | none |"));
     }
 
@@ -634,6 +661,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Default,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::Default,
             },
         );
@@ -643,6 +671,7 @@ mod tests {
             report.blob_bytes,
             b"live-bytes".len() as u64 + b"orphan-bytes".len() as u64
         );
+        assert_eq!(report.referenced_blob_bytes, b"live-bytes".len() as u64);
         assert_eq!(report.blob_count, 2);
         assert_eq!(report.orphan_count, 1);
     }
@@ -668,6 +697,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Default,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::Default,
             },
         );
@@ -698,6 +728,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Env,
+                min_disk_free: ConfigOrigin::File,
                 max_age: ConfigOrigin::File,
             },
         );
@@ -706,6 +737,7 @@ mod tests {
         let json = crate::render::json::to_pretty(&report).expect("json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert_eq!(value["max_size_origin"], "env");
+        assert_eq!(value["min_disk_free_origin"], "file");
         assert_eq!(value["max_age_origin"], "file");
     }
 
@@ -714,6 +746,7 @@ mod tests {
         let report = CacheStatsReport {
             path: "/tmp/cache/http".into(),
             blob_bytes: 42,
+            referenced_blob_bytes: 24,
             blob_count: 3,
             orphan_count: 1,
             age_range: Some(CacheStatsAgeRange {
@@ -722,6 +755,8 @@ mod tests {
             }),
             max_size_bytes: 5_000,
             max_size_origin: CacheStatsOrigin::Env,
+            min_disk_free: "10%".into(),
+            min_disk_free_origin: CacheStatsOrigin::Default,
             max_age_secs: 7_200,
             max_age_origin: CacheStatsOrigin::File,
         };
@@ -731,10 +766,12 @@ mod tests {
             "\
 | Path | /tmp/cache/http |
 | Blob bytes | 42 |
+| Referenced blob bytes | 24 |
 | Blob files | 3 |
 | Orphan blobs | 1 |
 | Age range | 100 .. 500 |
 | Max size | 5000 bytes (env) |
+| Min disk free | 10% (default) |
 | Max age | 7200 s (file) |
 "
         );
@@ -749,6 +786,7 @@ mod tests {
             CacheConfigOrigins {
                 cache_root: ConfigOrigin::Default,
                 max_size: ConfigOrigin::Env,
+                min_disk_free: ConfigOrigin::Default,
                 max_age: ConfigOrigin::File,
             },
         );

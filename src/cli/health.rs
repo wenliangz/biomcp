@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use bytesize::ByteSize;
 use futures::future::join_all;
 
 use crate::error::BioMcpError;
@@ -20,6 +21,7 @@ pub struct HealthRow {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HealthReport {
     pub healthy: usize,
+    pub warning: usize,
     pub excluded: usize,
     pub total: usize,
     pub rows: Vec<HealthRow>,
@@ -27,13 +29,15 @@ pub struct HealthReport {
 
 impl HealthReport {
     pub fn all_healthy(&self) -> bool {
-        self.healthy + self.excluded == self.total
+        self.healthy + self.warning + self.excluded == self.total
     }
 
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
         let show_affects = self.rows.iter().any(|row| row.affects.is_some());
-        let errors = self.total.saturating_sub(self.healthy + self.excluded);
+        let errors = self
+            .total
+            .saturating_sub(self.healthy + self.warning + self.excluded);
 
         out.push_str("# BioMCP Health Check\n\n");
         if show_affects {
@@ -57,9 +61,13 @@ impl HealthReport {
         }
 
         out.push_str(&format!(
-            "\nStatus: {} ok, {} error, {} excluded\n",
+            "\nStatus: {} ok, {} error, {} excluded",
             self.healthy, errors, self.excluded
         ));
+        if self.warning > 0 {
+            out.push_str(&format!(", {} warning", self.warning));
+        }
+        out.push('\n');
         out
     }
 }
@@ -83,6 +91,7 @@ struct SourceDescriptor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProbeClass {
     Healthy,
+    Warning,
     Error,
     Excluded,
 }
@@ -983,6 +992,28 @@ async fn check_cache_dir() -> ProbeOutcome {
     probe_cache_dir(&dir).await
 }
 
+async fn check_cache_limits() -> ProbeOutcome {
+    let config = match crate::cache::resolve_cache_config() {
+        Ok(config) => config,
+        Err(err) => {
+            return cache_limits_error_outcome(err.to_string());
+        }
+    };
+
+    match tokio::task::spawn_blocking(move || {
+        check_cache_limits_with(
+            || Ok(config),
+            crate::cache::snapshot_cache,
+            crate::cache::inspect_filesystem_space,
+        )
+    })
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => cache_limits_error_outcome(err.to_string()),
+    }
+}
+
 async fn probe_cache_dir(dir: &Path) -> ProbeOutcome {
     let start = Instant::now();
     let suffix = std::time::SystemTime::now()
@@ -1031,6 +1062,10 @@ fn report_from_outcomes(outcomes: Vec<ProbeOutcome>) -> HealthReport {
         .iter()
         .filter(|outcome| outcome.class == ProbeClass::Healthy)
         .count();
+    let warning = outcomes
+        .iter()
+        .filter(|outcome| outcome.class == ProbeClass::Warning)
+        .count();
     let excluded = outcomes
         .iter()
         .filter(|outcome| outcome.class == ProbeClass::Excluded)
@@ -1042,6 +1077,7 @@ fn report_from_outcomes(outcomes: Vec<ProbeOutcome>) -> HealthReport {
 
     HealthReport {
         healthy,
+        warning,
         excluded,
         total: rows.len(),
         rows,
@@ -1065,23 +1101,118 @@ pub async fn check(apis_only: bool) -> Result<HealthReport, BioMcpError> {
     if !apis_only {
         outcomes.push(check_ema_local_data());
         outcomes.push(check_cache_dir().await);
+        outcomes.push(check_cache_limits().await);
     }
 
     Ok(report_from_outcomes(outcomes))
 }
 
+fn check_cache_limits_with<R, S, I>(
+    resolve_config: R,
+    snapshotter: S,
+    inspect_space: I,
+) -> ProbeOutcome
+where
+    R: FnOnce() -> Result<crate::cache::ResolvedCacheConfig, BioMcpError>,
+    S: FnOnce(&Path) -> Result<crate::cache::CacheSnapshot, crate::cache::CachePlannerError>,
+    I: FnOnce(&Path) -> Result<crate::cache::FilesystemSpace, BioMcpError>,
+{
+    let config = match resolve_config() {
+        Ok(config) => config,
+        Err(err) => return cache_limits_error_outcome(err.to_string()),
+    };
+    let cache_path = config.cache_root.join("http");
+    let snapshot = match snapshotter(&cache_path) {
+        Ok(snapshot) => snapshot,
+        Err(err) => return cache_limits_error_outcome(err.to_string()),
+    };
+    let space = match inspect_space(&config.cache_root) {
+        Ok(space) => space,
+        Err(err) => return cache_limits_error_outcome(err.to_string()),
+    };
+    let evaluation = crate::cache::evaluate_cache_limits(&snapshot, &config, space);
+
+    if evaluation.over_max_size || evaluation.below_min_disk_free {
+        return outcome(
+            HealthRow {
+                api: "Cache limits".into(),
+                status: "warning".into(),
+                latency: cache_limits_warning_message(&config, space, &evaluation),
+                affects: None,
+                key_configured: None,
+            },
+            ProbeClass::Warning,
+        );
+    }
+
+    outcome(
+        HealthRow {
+            api: "Cache limits".into(),
+            status: "ok".into(),
+            latency: "within limits".into(),
+            affects: None,
+            key_configured: None,
+        },
+        ProbeClass::Healthy,
+    )
+}
+
+fn cache_limits_warning_message(
+    config: &crate::cache::ResolvedCacheConfig,
+    space: crate::cache::FilesystemSpace,
+    evaluation: &crate::cache::CacheLimitEvaluation,
+) -> String {
+    let mut clauses = Vec::new();
+    if evaluation.over_max_size {
+        clauses.push(format!(
+            "referenced bytes {} exceed max_size {}",
+            evaluation.usage.referenced_blob_bytes, config.max_size
+        ));
+    }
+    if evaluation.below_min_disk_free {
+        clauses.push(format!(
+            "available disk {} is below min_disk_free {}",
+            ByteSize(space.available_bytes),
+            config.min_disk_free.display()
+        ));
+    }
+    format!("{}; run biomcp cache clean", clauses.join("; "))
+}
+
+fn cache_limits_error_outcome(message: String) -> ProbeOutcome {
+    outcome(
+        HealthRow {
+            api: "Cache limits".into(),
+            status: "error".into(),
+            latency: message,
+            affects: None,
+            key_configured: None,
+        },
+        ProbeClass::Error,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::Future;
+    use std::io;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use ssri::Integrity;
     use tokio::sync::MutexGuard;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::{
         EMA_LOCAL_DATA_AFFECTS, HealthReport, HealthRow, ProbeClass, ProbeKind, ProbeOutcome,
-        SourceDescriptor, affects_for_api, check_cache_dir, ema_local_data_outcome, health_sources,
-        probe_cache_dir, probe_source, report_from_outcomes,
+        SourceDescriptor, affects_for_api, check_cache_dir, check_cache_limits_with,
+        ema_local_data_outcome, health_sources, probe_cache_dir, probe_source,
+        report_from_outcomes,
+    };
+    use crate::cache::{
+        CacheBlob, CacheConfigOrigins, CacheEntry, CachePlannerError, CacheSnapshot, ConfigOrigin,
+        DiskFreeThreshold, FilesystemSpace, ResolvedCacheConfig,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -1214,10 +1345,64 @@ mod tests {
         }
     }
 
+    fn test_integrity(bytes: &[u8]) -> Integrity {
+        Integrity::from(bytes)
+    }
+
+    fn test_entry(key: &str, bytes: &[u8], time_ms: u128) -> CacheEntry {
+        CacheEntry {
+            key: key.to_string(),
+            integrity: test_integrity(bytes),
+            time_ms,
+            size_bytes: bytes.len() as u64,
+        }
+    }
+
+    fn test_blob(label: &str, bytes: &[u8], refcount: usize) -> CacheBlob {
+        CacheBlob {
+            integrity: test_integrity(bytes),
+            path: PathBuf::from(format!("content-v2/mock/{label}.blob")),
+            size_bytes: bytes.len() as u64,
+            refcount,
+        }
+    }
+
+    fn test_snapshot(
+        cache_path: impl Into<PathBuf>,
+        entries: Vec<CacheEntry>,
+        blobs: Vec<CacheBlob>,
+    ) -> CacheSnapshot {
+        CacheSnapshot {
+            cache_path: cache_path.into(),
+            entries,
+            blobs,
+        }
+    }
+
+    fn test_config(
+        cache_root: impl Into<PathBuf>,
+        max_size: u64,
+        min_disk_free: DiskFreeThreshold,
+    ) -> ResolvedCacheConfig {
+        ResolvedCacheConfig {
+            cache_root: cache_root.into(),
+            max_size,
+            min_disk_free,
+            max_age: Duration::from_secs(86_400),
+            origins: CacheConfigOrigins {
+                cache_root: ConfigOrigin::Default,
+                max_size: ConfigOrigin::Default,
+                min_disk_free: ConfigOrigin::Default,
+                max_age: ConfigOrigin::Default,
+            },
+        }
+    }
+
     #[test]
     fn markdown_shows_affects_column_when_present() {
         let report = HealthReport {
             healthy: 1,
+            warning: 0,
             excluded: 0,
             total: 2,
             rows: vec![
@@ -1246,6 +1431,7 @@ mod tests {
     fn markdown_omits_affects_column_when_all_healthy() {
         let report = HealthReport {
             healthy: 2,
+            warning: 0,
             excluded: 0,
             total: 2,
             rows: vec![
@@ -1274,6 +1460,7 @@ mod tests {
     fn markdown_decorates_keyed_success_rows_without_changing_status() {
         let report = HealthReport {
             healthy: 1,
+            warning: 0,
             excluded: 0,
             total: 1,
             rows: vec![HealthRow {
@@ -1294,6 +1481,7 @@ mod tests {
     fn markdown_decorates_keyed_error_rows_without_changing_status() {
         let report = HealthReport {
             healthy: 0,
+            warning: 0,
             excluded: 0,
             total: 1,
             rows: vec![HealthRow {
@@ -1589,11 +1777,12 @@ mod tests {
     }
 
     #[test]
-    fn all_healthy_ignores_excluded_rows() {
+    fn all_healthy_includes_warning_and_excluded_rows() {
         let report = HealthReport {
             healthy: 1,
+            warning: 1,
             excluded: 1,
-            total: 2,
+            total: 3,
             rows: vec![
                 HealthRow {
                     api: "MyGene".into(),
@@ -1609,6 +1798,13 @@ mod tests {
                     affects: Some("variant oncokb command and variant evidence section".into()),
                     key_configured: Some(false),
                 },
+                HealthRow {
+                    api: "Cache limits".into(),
+                    status: "warning".into(),
+                    latency: "referenced bytes 12 exceed max_size 8; run biomcp cache clean".into(),
+                    affects: None,
+                    key_configured: None,
+                },
             ],
         };
 
@@ -1616,11 +1812,12 @@ mod tests {
     }
 
     #[test]
-    fn markdown_summary_reports_ok_error_excluded_counts() {
+    fn markdown_summary_reports_ok_error_excluded_and_warning_counts() {
         let report = HealthReport {
             healthy: 1,
+            warning: 1,
             excluded: 1,
-            total: 3,
+            total: 4,
             rows: vec![
                 HealthRow {
                     api: "MyGene".into(),
@@ -1643,11 +1840,20 @@ mod tests {
                     affects: Some("variant oncokb command and variant evidence section".into()),
                     key_configured: Some(false),
                 },
+                HealthRow {
+                    api: "Cache limits".into(),
+                    status: "warning".into(),
+                    latency:
+                        "available disk 10 B is below min_disk_free 20 B; run biomcp cache clean"
+                            .into(),
+                    affects: None,
+                    key_configured: None,
+                },
             ],
         };
 
         let md = report.to_markdown();
-        assert!(md.contains("Status: 1 ok, 1 error, 1 excluded"));
+        assert!(md.contains("Status: 1 ok, 1 error, 1 excluded, 1 warning"));
     }
 
     #[test]
@@ -1673,11 +1879,129 @@ mod tests {
                 },
                 class: ProbeClass::Excluded,
             },
+            ProbeOutcome {
+                row: HealthRow {
+                    api: "Cache limits".into(),
+                    status: "warning".into(),
+                    latency: "referenced bytes 12 exceed max_size 8; run biomcp cache clean".into(),
+                    affects: None,
+                    key_configured: None,
+                },
+                class: ProbeClass::Warning,
+            },
         ]);
 
         assert_eq!(report.healthy, 1);
+        assert_eq!(report.warning, 1);
         assert_eq!(report.excluded, 1);
-        assert_eq!(report.total, 2);
+        assert_eq!(report.total, 3);
+    }
+
+    #[test]
+    fn check_cache_limits_within_limits_returns_healthy_row() {
+        let config = test_config("/tmp/cache", 1_024, DiskFreeThreshold::Percent(10));
+        let snapshot = test_snapshot(
+            "/tmp/cache/http",
+            vec![test_entry("retained", b"live-bytes", 100)],
+            vec![test_blob("retained", b"live-bytes", 1)],
+        );
+
+        let outcome = check_cache_limits_with(
+            || Ok(config),
+            |_| Ok(snapshot.clone()),
+            |_| {
+                Ok(FilesystemSpace {
+                    available_bytes: 90,
+                    total_bytes: 100,
+                })
+            },
+        );
+
+        assert_eq!(outcome.class, ProbeClass::Healthy);
+        assert_eq!(outcome.row.api, "Cache limits");
+        assert_eq!(outcome.row.status, "ok");
+        assert_eq!(outcome.row.latency, "within limits");
+    }
+
+    #[test]
+    fn check_cache_limits_warns_when_referenced_bytes_exceed_max_size() {
+        let config = test_config("/tmp/cache", 5, DiskFreeThreshold::Percent(10));
+        let snapshot = test_snapshot(
+            "/tmp/cache/http",
+            vec![
+                test_entry("old", b"abcde", 100),
+                test_entry("new", b"fghij", 200),
+            ],
+            vec![test_blob("old", b"abcde", 1), test_blob("new", b"fghij", 1)],
+        );
+
+        let outcome = check_cache_limits_with(
+            || Ok(config),
+            |_| Ok(snapshot.clone()),
+            |_| {
+                Ok(FilesystemSpace {
+                    available_bytes: 90,
+                    total_bytes: 100,
+                })
+            },
+        );
+
+        assert_eq!(outcome.class, ProbeClass::Warning);
+        assert_eq!(outcome.row.status, "warning");
+        assert!(outcome.row.latency.contains("referenced bytes"));
+        assert!(outcome.row.latency.contains("biomcp cache clean"));
+    }
+
+    #[test]
+    fn check_cache_limits_warns_when_disk_floor_is_violated() {
+        let config = test_config("/tmp/cache", 1_024, DiskFreeThreshold::Percent(20));
+        let snapshot = test_snapshot(
+            "/tmp/cache/http",
+            vec![test_entry("retained", b"live-bytes", 100)],
+            vec![test_blob("retained", b"live-bytes", 1)],
+        );
+
+        let outcome = check_cache_limits_with(
+            || Ok(config),
+            |_| Ok(snapshot.clone()),
+            |_| {
+                Ok(FilesystemSpace {
+                    available_bytes: 10,
+                    total_bytes: 100,
+                })
+            },
+        );
+
+        assert_eq!(outcome.class, ProbeClass::Warning);
+        assert_eq!(outcome.row.status, "warning");
+        assert!(outcome.row.latency.contains("available disk"));
+        assert!(outcome.row.latency.contains("biomcp cache clean"));
+    }
+
+    #[test]
+    fn check_cache_limits_reports_snapshot_errors_as_error_rows() {
+        let config = test_config("/tmp/cache", 1_024, DiskFreeThreshold::Percent(10));
+
+        let outcome = check_cache_limits_with(
+            || Ok(config),
+            |_| {
+                Err(CachePlannerError::Io {
+                    path: PathBuf::from("/tmp/cache/http"),
+                    source: io::Error::other("boom"),
+                })
+            },
+            |_| {
+                Ok(FilesystemSpace {
+                    available_bytes: 90,
+                    total_bytes: 100,
+                })
+            },
+        );
+
+        assert_eq!(outcome.class, ProbeClass::Error);
+        assert_eq!(outcome.row.api, "Cache limits");
+        assert_eq!(outcome.row.status, "error");
+        assert!(outcome.row.latency.contains("boom"));
     }
 
     #[test]

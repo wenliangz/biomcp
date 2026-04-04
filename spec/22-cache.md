@@ -69,11 +69,14 @@ echo "$out" | jq -e --arg path "$tmp_root/cache-home/biomcp/http" '
   . == {
     path: $path,
     blob_bytes: 0,
+    referenced_blob_bytes: 0,
     blob_count: 0,
     orphan_count: 0,
     age_range: null,
     max_size_bytes: 10000000000,
     max_size_origin: "default",
+    min_disk_free: "10%",
+    min_disk_free_origin: "default",
     max_age_secs: 86400,
     max_age_origin: "default"
   }
@@ -94,11 +97,46 @@ mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home"
 out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" cache stats)"
 echo "$out" | mustmatch like "| Path | $tmp_root/cache-home/biomcp/http |"
 echo "$out" | mustmatch like "| Blob bytes | 0 |"
+echo "$out" | mustmatch like "| Referenced blob bytes | 0 |"
 echo "$out" | mustmatch like "| Blob files | 0 |"
 echo "$out" | mustmatch like "| Orphan blobs | 0 |"
 echo "$out" | mustmatch like "| Age range | none |"
 echo "$out" | mustmatch like "| Max size | 10000000000 bytes (default) |"
+echo "$out" | mustmatch like "| Min disk free | 10% (default) |"
 echo "$out" | mustmatch like "| Max age | 86400 s (default) |"
+```
+
+## Cache Health Warning
+
+Full `biomcp health` adds a local `Cache limits` row. When the managed HTTP
+cache is already above `max_size`, that row should warn operators to run
+`biomcp cache clean`, and the JSON summary should increment `.warning`.
+
+```bash
+bin="$(git rev-parse --show-toplevel)/target/release/biomcp"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+mkdir -p "$tmp_root/cache-home" "$tmp_root/config-home/biomcp"
+cat >"$tmp_root/config-home/biomcp/cache.toml" <<'EOF'
+[cache]
+max_size = 10000000000
+EOF
+
+env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" \
+  "$bin" search gene BRAF --limit 1 > /dev/null
+
+cat >"$tmp_root/config-home/biomcp/cache.toml" <<'EOF'
+[cache]
+max_size = 1
+EOF
+
+json_out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" --json health)"
+echo "$json_out" | jq -e '.warning >= 1' > /dev/null
+echo "$json_out" | jq -e 'any(.rows[]; .api == "Cache limits" and .status == "warning" and (.latency | contains("biomcp cache clean")))' > /dev/null
+
+md_out="$(env XDG_CACHE_HOME="$tmp_root/cache-home" XDG_CONFIG_HOME="$tmp_root/config-home" "$bin" health)"
+echo "$md_out" | mustmatch like "Cache limits"
+echo "$md_out" | mustmatch like "warning"
 ```
 
 ## Cache Clean JSON

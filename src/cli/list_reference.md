@@ -111,13 +111,13 @@ Results depend on source document wording and may vary across sources.
 - Set `S2_API_KEY` for authenticated Semantic Scholar requests at 1 req/sec; without it, BioMCP uses the shared pool at 1 req/2sec.
 - EU drug commands auto-download the EMA human-medicines JSON feeds on first use into the default data dir or `BIOMCP_EMA_DIR`, then refresh stale files after 72 hours.
 - Run `ema sync` to force-refresh the EMA local data feeds.
-- Use `biomcp health --apis-only` for upstream/API checks and full `biomcp health` for local EMA/cache readiness.
+- Use `biomcp health --apis-only` for upstream/API checks and full `biomcp health` for local EMA/cache readiness plus cache-limit warnings.
 - In multi-worker environments, run one shared `biomcp serve-http` process so workers share one Streamable HTTP `/mcp` endpoint and one limiter budget.
 
 ## Ops
 
 - `cache path` - print the managed HTTP cache directory `<resolved cache_root>/http`; output stays plain text and ignores `--json`
-- `cache stats` - show HTTP cache statistics (blob counts, bytes, age range, configured limits); supports `--json` for machine-readable output
+- `cache stats` - show HTTP cache statistics (total blob inventory, referenced blob bytes, age range, resolved limits including min disk free); supports `--json` for machine-readable output
 - `cache clean [--max-age <duration>] [--max-size <size>] [--dry-run]` - remove orphan blobs and optionally age- or size-evict the HTTP cache; supports `--json` for machine-readable output
 - `cache clear [--yes]` - destructively wipe `<resolved cache_root>/http`; never touches `downloads/`; supports `--json` on success and requires a TTY unless `--yes` is passed
 - `ema sync`
